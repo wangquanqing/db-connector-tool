@@ -1,0 +1,66 @@
+[build-system]
+requires = ["setuptools>=45.0", "wheel", "setuptools-scm"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "db-connector"
+version = "1.0.0"
+description = "跨平台数据库连接管理模块"
+authors = [
+    {name = "Your Name", email = "your.email@example.com"}
+]
+license = {text = "MIT"}
+readme = "README.md"
+requires-python = ">=3.8"
+keywords = ["database", "connection", "manager", "orm", "sqlalchemy"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+]
+
+dependencies = [
+    "cryptography>=41.0.0",
+    "tomli-w>=1.0.0",
+    "sqlalchemy>=2.0.0",
+    "oracledb>=2.0.0",
+    "psycopg2>=2.9.0",  # 或者 psycopg3
+    "pymysql>=1.1.0",
+    "pymssql>=2.2.0",   # 注意：pymssql可能不维护了，可以考虑pyodbc
+    "python-dotenv>=1.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+    "black>=23.0.0",
+    "flake8>=6.0.0",
+    "mypy>=1.0.0",
+]
+docs = [
+    "sphinx>=7.0.0",
+    "sphinx-rtd-theme>=1.0.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/yourusername/db-connector"
+Repository = "https://github.com/yourusername/db-connector"
+Documentation = "https://db-connector.readthedocs.io"
+"Issue Tracker" = "https://github.com/yourusername/db-connector/issues"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["db_connector*"]
+
+[tool.black]
+line-length = 88
+target-version = ['py313']
