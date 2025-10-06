@@ -16,7 +16,7 @@ from .exceptions import ConfigError
 logger = get_logger(__name__)
 
 # 常量定义
-DEFAULT_TIMESTAMP = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+DEFAULT_TIMESTAMP = datetime.now().astimezone().isoformat()
 
 
 class ConfigManager:
@@ -104,7 +104,7 @@ class ConfigManager:
         """保存配置文件"""
         try:
             # 更新最后修改时间
-            current_time = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+            current_time = datetime.now().astimezone().isoformat()
             config["metadata"]["last_modified"] = current_time
 
             with open(self.config_path, "wb") as f:

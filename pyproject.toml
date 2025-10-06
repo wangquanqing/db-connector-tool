@@ -12,7 +12,7 @@ authors = [
 license = {text = "MIT"}
 readme = "README.md"
 requires-python = ">=3.8"
-keywords = ["database", "connection", "manager", "orm", "sqlalchemy"]
+keywords = ["database", "connection", "manager", "orm", "sqlalchemy", "cli"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
@@ -32,9 +32,9 @@ dependencies = [
     "tomli-w>=1.0.0",
     "sqlalchemy>=2.0.0",
     "oracledb>=2.0.0",
-    "psycopg2>=2.9.0",  # 或者 psycopg3
+    "psycopg2>=2.9.0",
     "pymysql>=1.1.0",
-    "pymssql>=2.2.0",   # 注意：pymssql可能不维护了，可以考虑pyodbc
+    "pymssql>=2.2.0",
     "python-dotenv>=1.0.0",
 ]
 
@@ -50,6 +50,14 @@ docs = [
     "sphinx>=7.0.0",
     "sphinx-rtd-theme>=1.0.0",
 ]
+cli = [
+    "click>=8.0.0",  # 更高级的CLI框架，可选
+    "rich>=13.0.0",  # 美化输出，可选
+]
+
+# 添加CLI入口点
+[project.scripts]
+db-connector = "db_connector.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/yourusername/db-connector"

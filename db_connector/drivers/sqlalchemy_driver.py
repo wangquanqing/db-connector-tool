@@ -4,6 +4,7 @@ SQLAlchemy 数据库驱动
 """
 
 from typing import Optional
+from urllib.parse import quote_plus
 
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import SQLAlchemyError
@@ -78,6 +79,15 @@ class SQLAlchemyDriver:
         # 设置默认端口
         if "port" not in config:
             config["port"] = self._get_default_port(db_type)
+
+        # 对用户名和密码中的特殊字符进行URL编码
+        # 处理特殊字符如 @, :, /, ?, #, [, ], !, $, &, ', (, ), *, +, ,, ;, = 等
+        config["username"] = quote_plus(config["username"])
+        config["password"] = quote_plus(config["password"])
+
+        # 对主机名中的特殊字符进行编码（如果包含特殊字符）
+        if "@" in config["host"] or ":" in config["host"]:
+            config["host"] = quote_plus(config["host"])
 
         return template.format(**config)
 

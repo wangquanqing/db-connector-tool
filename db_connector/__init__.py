@@ -17,6 +17,14 @@ from .core.exceptions import (
     DBConnectorError,
 )
 
+# 导入CLI模块
+try:
+    from .cli import DBConnectorCLI
+    from .cli import main as cli_main
+except ImportError:
+    # 在安装过程中可能还没有CLI依赖
+    pass
+
 __all__ = [
     "ConfigManager",
     "DatabaseManager",
@@ -25,4 +33,6 @@ __all__ = [
     "CryptoError",
     "DatabaseError",
     "ConnectionError",
+    "DBConnectorCLI",
+    "cli_main",
 ]
