@@ -4,7 +4,7 @@
 """
 
 import tomllib
-from datetime import datetime, timezone
+from datetime import datetime
 
 import tomli_w
 
@@ -15,8 +15,8 @@ from .exceptions import ConfigError
 
 logger = get_logger(__name__)
 
-# 常量定义
-DEFAULT_TIMESTAMP = datetime.now().astimezone().isoformat()
+# 配置文件创建时的初始时间戳（固定值）
+CONFIG_CREATION_TIMESTAMP = datetime.now().astimezone().isoformat()
 
 
 class ConfigManager:
@@ -56,8 +56,8 @@ class ConfigManager:
             "app_name": self.app_name,
             "connections": {},
             "metadata": {
-                "created": DEFAULT_TIMESTAMP,
-                "last_modified": DEFAULT_TIMESTAMP,
+                "created": CONFIG_CREATION_TIMESTAMP,
+                "last_modified": CONFIG_CREATION_TIMESTAMP,
             },
         }
         self._save_config(default_config)

@@ -189,7 +189,7 @@ class DatabaseManager:
             logger.error(f"关闭所有连接失败: {str(e)}")
             raise DatabaseError(f"关闭所有连接失败: {str(e)}")
 
-    def list_connections(self) -> list:
+    def list_connections(self, args) -> list:
         """
         获取所有连接名称
 

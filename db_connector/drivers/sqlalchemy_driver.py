@@ -22,7 +22,7 @@ class SQLAlchemyDriver:
     # 数据库驱动映射
     DRIVER_MAP = {
         "oracle": "oracledb",
-        "postgresql": "psycopg2",
+        "postgresql": "psycopg",
         "mysql": "pymysql",
         "mssql": "pymssql",
         "sqlite": "sqlite3",
@@ -31,7 +31,7 @@ class SQLAlchemyDriver:
     # 连接URL模板
     URL_TEMPLATES = {
         "oracle": "oracle+oracledb://{username}:{password}@{host}:{port}/{database}",
-        "postgresql": "postgresql+psycopg2://{username}:{password}@{host}:{port}/{database}",
+        "postgresql": "postgresql+psycopg://{username}:{password}@{host}:{port}/{database}",
         "mysql": "mysql+pymysql://{username}:{password}@{host}:{port}/{database}",
         "mssql": "mssql+pymssql://{username}:{password}@{host}:{port}/{database}",
         "sqlite": "sqlite:///{database}",

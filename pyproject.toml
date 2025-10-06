@@ -57,7 +57,8 @@ cli = [
 
 # 添加CLI入口点
 [project.scripts]
-db-connector = "db_connector.cli:main"
+db-connector = "db_connector.cli:main"           # 标准CLI
+db-connector-rich = "db_connector.cli_enhanced:main_enhanced"  # 增强版CLI
 
 [project.urls]
 Homepage = "https://github.com/yourusername/db-connector"
