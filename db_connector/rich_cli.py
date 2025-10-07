@@ -14,7 +14,7 @@
     pip install rich
 
 版本: 1.0.0
-作者: DB Connector Team
+作者: wangquanqing <wangquanqing1636@sina.com>
 """
 
 import getpass

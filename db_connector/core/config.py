@@ -6,6 +6,7 @@
 """
 
 import json
+import shutil
 import tomllib
 from datetime import datetime
 from pathlib import Path
@@ -13,9 +14,9 @@ from typing import Any, Dict, List, Optional
 
 import tomli_w
 
-from ..utils.logger import get_logger
-from ..utils.path_helper import PathHelper
-from .crypto_manager import CryptoManager
+from ..utils.logging_utils import get_logger
+from ..utils.path_utils import PathHelper
+from .crypto import CryptoManager
 from .exceptions import ConfigError
 
 logger = get_logger(__name__)
@@ -495,8 +496,6 @@ class ConfigManager:
             if backup_path is None:
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                 backup_path = self.config_dir / f"{self.config_file}.backup.{timestamp}"
-
-            import shutil
 
             shutil.copy2(self.config_path, backup_path)
             logger.info(f"配置文件已备份: {backup_path}")

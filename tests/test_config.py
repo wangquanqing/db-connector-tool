@@ -6,7 +6,7 @@ import tempfile
 
 import pytest
 
-from db_connector.core.config_manager import ConfigManager
+from db_connector.core.config import ConfigManager
 from db_connector.core.exceptions import ConfigError
 
 

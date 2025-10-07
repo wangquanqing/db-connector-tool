@@ -4,7 +4,7 @@
 
 import pytest
 
-from db_connector.core.crypto_manager import CryptoManager
+from db_connector.core.crypto import CryptoManager
 from db_connector.core.exceptions import CryptoError
 
 

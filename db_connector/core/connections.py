@@ -14,8 +14,8 @@
 from typing import Any, Dict, List, Optional
 
 from ..drivers.sqlalchemy_driver import SQLAlchemyDriver
-from ..utils.logger import get_logger
-from .config_manager import ConfigManager
+from ..utils.logging_utils import get_logger
+from .config import ConfigManager
 from .exceptions import ConfigError, ConnectionError, DatabaseError
 
 logger = get_logger(__name__)
@@ -403,7 +403,7 @@ class DatabaseManager:
             else:
                 config = self.config_manager.get_connection(name)
                 # 过滤敏感信息
-                info = {
+                info: Dict[str, Any] = {
                     "type": config.get("type"),
                     "host": config.get("host"),
                     "port": config.get("port"),

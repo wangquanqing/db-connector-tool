@@ -12,17 +12,17 @@ DB Connector - 跨平台数据库连接管理模块
 - 跨平台兼容
 
 版本: 1.0.0
-作者: DB Connector Team
+作者: wangquanqing <wangquanqing1636@sina.com>
 许可证: MIT
 """
 
 __version__ = "1.0.0"
-__author__ = "DB Connector Team"
+__author__ = "wangquanqing <wangquanqing1636@sina.com>"
 __license__ = "MIT"
 
 # 核心模块导入
-from .core.config_manager import ConfigManager
-from .core.database import DatabaseManager
+from .core.config import ConfigManager
+from .core.connections import DatabaseManager
 from .core.exceptions import (
     ConfigError,
     ConnectionError,
@@ -38,7 +38,7 @@ try:
 except ImportError as e:
     # 在安装过程中或缺少依赖时，CLI模块可能不可用。这不会影响核心功能的使用
     DBConnectorCLI = None
-    cli_main = None
+    cli = None
 
 # 公共API导出列表
 __all__ = [
@@ -53,7 +53,7 @@ __all__ = [
     "ConnectionError",
     # CLI相关（可选）
     "DBConnectorCLI",
-    "cli_main",
+    "cli",
 ]
 
 

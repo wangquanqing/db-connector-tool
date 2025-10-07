@@ -19,7 +19,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import scoped_session, sessionmaker
 
 from ..core.exceptions import ConnectionError, DriverError, QueryError
-from ..utils.logger import get_logger
+from ..utils.logging_utils import get_logger
 
 logger = get_logger(__name__)
 

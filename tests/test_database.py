@@ -4,7 +4,7 @@
 
 import pytest
 
-from db_connector.core.database import DatabaseManager
+from db_connector.core.connections import DatabaseManager
 from db_connector.core.exceptions import ConfigError
 
 

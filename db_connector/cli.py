@@ -19,7 +19,7 @@ DB Connector CLI 工具
     db-connector shell mysql-dev
 
 版本: 1.0.0
-作者: DB Connector Team
+作者: wangquanqing <wangquanqing1636@sina.com>
 """
 
 import argparse
@@ -30,8 +30,8 @@ import re
 import sys
 from typing import Any, Dict, List, Optional, Tuple, Union
 
-from .core.database import DatabaseManager
-from .utils.logger import get_logger, setup_logging
+from .core.connections import DatabaseManager
+from .utils.logging_utils import get_logger, setup_logging
 
 logger = get_logger(__name__)
 
@@ -911,30 +911,12 @@ SQL Shell 命令:
             sys.exit(1)
 
 
-def main():
-    """
-    DB Connector CLI 主入口函数
-
-    解析命令行参数并执行相应的操作。
-    """
-    cli = DBConnectorCLI()
-    parser = create_argument_parser()
-
-    if len(sys.argv) == 1:
-        parser.print_help()
-        sys.exit(0)
-
-    args = parser.parse_args()
-
-    if hasattr(args, "func"):
-        args.func(args)
-    else:
-        parser.print_help()
-
-
-def create_argument_parser() -> argparse.ArgumentParser:
+def create_argument_parser(cli_instance: DBConnectorCLI) -> argparse.ArgumentParser:
     """
     创建命令行参数解析器
+
+    Args:
+        cli_instance: 已初始化的CLI实例
 
     Returns:
         argparse.ArgumentParser: 配置好的参数解析器
@@ -955,40 +937,37 @@ def create_argument_parser() -> argparse.ArgumentParser:
 
     subparsers = parser.add_subparsers(title="可用命令", dest="command")
 
+    # 使用传入的CLI实例，而不是创建新的实例
     # add 命令
     add_parser = subparsers.add_parser("add", help="添加新的数据库连接")
     add_parser.add_argument("name", help="连接名称")
-    add_parser.add_argument(
-        "--type",
-        required=True,
-        help="数据库类型 (mysql, postgresql, oracle, sqlserver, sqlite)",
-    )
+    add_parser.add_argument("--type", required=True, help="数据库类型")
     add_parser.add_argument("--host", required=True, help="数据库主机")
     add_parser.add_argument("--port", type=int, help="数据库端口")
     add_parser.add_argument("--username", required=True, help="用户名")
     add_parser.add_argument("--password", help="密码")
     add_parser.add_argument("--database", help="数据库名")
     add_parser.add_argument("--custom-params", nargs="+", help="自定义参数 (key=value)")
-    add_parser.set_defaults(func=DBConnectorCLI().add_connection)
+    add_parser.set_defaults(func=cli_instance.add_connection)
 
     # list 命令
     list_parser = subparsers.add_parser("list", help="列出所有连接")
-    list_parser.set_defaults(func=DBConnectorCLI().list_connections)
+    list_parser.set_defaults(func=cli_instance.list_connections)
 
     # remove 命令
     remove_parser = subparsers.add_parser("remove", help="删除连接")
     remove_parser.add_argument("name", help="连接名称")
-    remove_parser.set_defaults(func=DBConnectorCLI().remove_connection)
+    remove_parser.set_defaults(func=cli_instance.remove_connection)
 
     # show 命令
     show_parser = subparsers.add_parser("show", help="显示连接详情")
     show_parser.add_argument("name", help="连接名称")
-    show_parser.set_defaults(func=DBConnectorCLI().show_connection)
+    show_parser.set_defaults(func=cli_instance.show_connection)
 
     # test 命令
     test_parser = subparsers.add_parser("test", help="测试连接")
     test_parser.add_argument("name", help="连接名称")
-    test_parser.set_defaults(func=DBConnectorCLI().test_connection)
+    test_parser.set_defaults(func=cli_instance.test_connection)
 
     # update 命令
     update_parser = subparsers.add_parser("update", help="更新连接配置")
@@ -1002,7 +981,7 @@ def create_argument_parser() -> argparse.ArgumentParser:
     update_parser.add_argument(
         "--custom-params", nargs="+", help="自定义参数 (key=value)"
     )
-    update_parser.set_defaults(func=DBConnectorCLI().update_connection)
+    update_parser.set_defaults(func=cli_instance.update_connection)
 
     # query 命令
     query_parser = subparsers.add_parser("query", help="执行SQL查询")
@@ -1012,7 +991,7 @@ def create_argument_parser() -> argparse.ArgumentParser:
         "--format", choices=["table", "json", "csv"], default="table", help="输出格式"
     )
     query_parser.add_argument("--output", help="输出文件路径")
-    query_parser.set_defaults(func=DBConnectorCLI().execute_query)
+    query_parser.set_defaults(func=cli_instance.execute_query)
 
     # execute 命令
     execute_parser = subparsers.add_parser("execute", help="执行SQL文件")
@@ -1025,24 +1004,41 @@ def create_argument_parser() -> argparse.ArgumentParser:
     execute_parser.add_argument(
         "--continue-on-error", action="store_true", help="遇到错误时继续执行"
     )
-    execute_parser.set_defaults(func=DBConnectorCLI().execute_file)
+    execute_parser.set_defaults(func=cli_instance.execute_file)
 
     # shell 命令
     shell_parser = subparsers.add_parser("shell", help="启动交互式SQL Shell")
     shell_parser.add_argument("connection", help="连接名称")
-    shell_parser.set_defaults(func=DBConnectorCLI().interactive_shell)
+    shell_parser.set_defaults(func=cli_instance.interactive_shell)
 
     # export 命令
     export_parser = subparsers.add_parser("export", help="导出连接配置")
     export_parser.add_argument("file", help="导出文件路径")
-    export_parser.set_defaults(func=DBConnectorCLI().export_config)
+    export_parser.set_defaults(func=cli_instance.export_config)
 
     # import 命令
     import_parser = subparsers.add_parser("import", help="导入连接配置")
     import_parser.add_argument("file", help="导入文件路径")
-    import_parser.set_defaults(func=DBConnectorCLI().import_config)
+    import_parser.set_defaults(func=cli_instance.import_config)
 
     return parser
+
+
+def main():
+    """DB Connector CLI 主入口函数"""
+    cli = DBConnectorCLI()
+    parser = create_argument_parser(cli)  # 传入已初始化的CLI实例
+
+    if len(sys.argv) == 1:
+        parser.print_help()
+        sys.exit(0)
+
+    args = parser.parse_args()
+
+    if hasattr(args, "func"):
+        args.func(args)
+    else:
+        parser.print_help()
 
 
 if __name__ == "__main__":

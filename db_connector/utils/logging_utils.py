@@ -8,9 +8,17 @@
 import logging
 import logging.handlers
 import sys
-from typing import Optional
+import threading
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
-from .path_helper import PathHelper
+from .path_utils import PathHelper
+
+# 默认日志格式
+DEFAULT_LOG_FORMAT = (
+    "%(asctime)s - %(name)s - %(levelname)s - %(message)s "
+    + "[%(filename)s:%(lineno)d]"
+)
 
 
 def setup_logging(
@@ -21,6 +29,7 @@ def setup_logging(
     max_file_size: int = 10 * 1024 * 1024,  # 10MB
     backup_count: int = 5,
     log_format: Optional[str] = None,
+    log_dir: Optional[str] = None,
 ) -> logging.Logger:
     """
     配置日志系统
@@ -35,6 +44,7 @@ def setup_logging(
         max_file_size: 单个日志文件最大大小（字节）
         backup_count: 保留的备份日志文件数量
         log_format: 自定义日志格式字符串，如果为None则使用默认格式
+        log_dir: 自定义日志目录，如果为None则使用默认配置目录
 
     Returns:
         logging.Logger: 配置好的logger实例
@@ -56,28 +66,34 @@ def setup_logging(
     log_level = getattr(logging, level_upper)
 
     # 获取日志目录
-    log_dir = PathHelper.get_user_config_dir(app_name) / "logs"
-    if not PathHelper.ensure_dir_exists(log_dir):
-        raise OSError(f"无法创建日志目录: {log_dir}")
+    if log_dir is None:
+        base_dir = PathHelper.get_user_config_dir(app_name)
+        log_dir_path = base_dir / "logs"
+    else:
+        log_dir_path = Path(log_dir)
 
-    log_file = log_dir / f"{app_name}.log"
+    # 确保日志目录存在
+    try:
+        log_dir_path.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        raise OSError(f"无法创建日志目录 {log_dir_path}: {str(e)}")
+
+    log_file = log_dir_path / f"{app_name}.log"
 
     # 设置日志格式
     if log_format is None:
-        log_format = (
-            "%(asctime)s - %(name)s - %(levelname)s - %(message)s "
-            "[%(filename)s:%(lineno)d]"
-        )
+        log_format = DEFAULT_LOG_FORMAT
 
     formatter = logging.Formatter(log_format)
 
-    # 配置root logger
-    root_logger = logging.getLogger()
-    root_logger.setLevel(log_level)
+    # 获取应用专用logger而非root logger
+    logger = logging.getLogger(app_name)
+    logger.setLevel(log_level)
 
     # 清除已有的handler，避免重复配置
-    for handler in root_logger.handlers[:]:
-        root_logger.removeHandler(handler)
+    for handler in logger.handlers[:]:
+        logger.removeHandler(handler)
+        handler.close()
 
     handlers_added = 0
 
@@ -85,14 +101,14 @@ def setup_logging(
     if log_to_file:
         try:
             file_handler = logging.handlers.RotatingFileHandler(
-                log_file,
+                str(log_file),
                 maxBytes=max_file_size,
                 backupCount=backup_count,
                 encoding="utf-8",
             )
             file_handler.setFormatter(formatter)
             file_handler.setLevel(log_level)
-            root_logger.addHandler(file_handler)
+            logger.addHandler(file_handler)
             handlers_added += 1
         except OSError as e:
             raise OSError(f"无法创建日志文件 {log_file}: {str(e)}")
@@ -102,13 +118,12 @@ def setup_logging(
         console_handler = logging.StreamHandler(sys.stdout)
         console_handler.setFormatter(formatter)
         console_handler.setLevel(log_level)
-        root_logger.addHandler(console_handler)
+        logger.addHandler(console_handler)
         handlers_added += 1
 
     if handlers_added == 0:
         raise ValueError("至少需要启用一种日志输出方式（控制台或文件）")
 
-    logger = logging.getLogger(__name__)
     logger.info(f"日志系统初始化完成 - 级别: {level_upper}, 日志文件: {log_file}")
 
     return logger
@@ -155,9 +170,7 @@ def set_log_level(logger_name: str, level: str) -> None:
     logger = logging.getLogger(logger_name)
     logger.setLevel(getattr(logging, level_upper))
 
-    # 同时更新所有handler的级别
-    for handler in logger.handlers:
-        handler.setLevel(getattr(logging, level_upper))
+    # 注意：不修改handler级别，因为handler级别通常应该独立于logger级别
 
 
 class LogManager:
@@ -176,6 +189,8 @@ class LogManager:
         """
         self.app_name = app_name
         self.logger = get_logger(f"{__name__}.LogManager")
+        self._handlers: List[logging.Handler] = []
+        self._lock = threading.Lock()
 
     def setup(self, **kwargs) -> logging.Logger:
         """
@@ -190,7 +205,12 @@ class LogManager:
         return setup_logging(self.app_name, **kwargs)
 
     def add_file_handler(
-        self, log_file: str, max_size: int = 10 * 1024 * 1024, backup_count: int = 5
+        self,
+        log_file: str,
+        max_size: int = 10 * 1024 * 1024,
+        backup_count: int = 5,
+        level: Optional[str] = None,
+        when: Optional[str] = None,
     ) -> None:
         """
         添加额外的文件handler
@@ -199,35 +219,81 @@ class LogManager:
             log_file: 日志文件路径
             max_size: 最大文件大小
             backup_count: 备份文件数量
+            level: 可选的日志级别，如果为None则使用root logger的级别
+            when: 时间轮转规则（如 'midnight', 'H', 'D' 等），如果指定则使用时间轮转
         """
-        formatter = logging.Formatter(
-            "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-        )
+        with self._lock:
+            formatter = logging.Formatter(DEFAULT_LOG_FORMAT)
 
-        file_handler = logging.handlers.RotatingFileHandler(
-            log_file, maxBytes=max_size, backupCount=backup_count, encoding="utf-8"
-        )
-        file_handler.setFormatter(formatter)
+            if when is not None:
+                # 使用时间轮转
+                file_handler = logging.handlers.TimedRotatingFileHandler(
+                    log_file, when=when, backupCount=backup_count, encoding="utf-8"
+                )
+            else:
+                # 使用大小轮转
+                file_handler = logging.handlers.RotatingFileHandler(
+                    log_file,
+                    maxBytes=max_size,
+                    backupCount=backup_count,
+                    encoding="utf-8",
+                )
 
-        root_logger = logging.getLogger()
-        root_logger.addHandler(file_handler)
+            file_handler.setFormatter(formatter)
 
-        self.logger.info(f"添加文件handler: {log_file}")
+            if level is not None:
+                valid_levels = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
+                level_upper = level.upper()
+                if level_upper not in valid_levels:
+                    raise ValueError(f"无效的日志级别: {level}")
+                file_handler.setLevel(getattr(logging, level_upper))
 
-    def get_loggers_info(self) -> dict:
+            logger = logging.getLogger(self.app_name)
+            logger.addHandler(file_handler)
+            self._handlers.append(file_handler)
+
+            self.logger.info(f"添加文件handler: {log_file}")
+
+    def remove_handler(self, handler: logging.Handler) -> None:
+        """
+        移除指定的handler
+
+        Args:
+            handler: 要移除的handler实例
+        """
+        with self._lock:
+            logger = logging.getLogger(self.app_name)
+            logger.removeHandler(handler)
+            handler.close()
+            if handler in self._handlers:
+                self._handlers.remove(handler)
+
+    def cleanup(self) -> None:
+        """
+        清理所有由LogManager创建的handler
+        """
+        with self._lock:
+            logger = logging.getLogger(self.app_name)
+            for handler in self._handlers[:]:
+                logger.removeHandler(handler)
+                handler.close()
+                self._handlers.remove(handler)
+
+    def get_loggers_info(self) -> Dict[str, Dict[str, Any]]:
         """
         获取所有logger的信息
 
         Returns:
             dict: logger信息字典
         """
-        loggers_info = {}
-        manager = logging.getLogger().manager
-        for name in manager.loggerDict:
-            logger = logging.getLogger(name)
-            loggers_info[name] = {
-                "level": logging.getLevelName(logger.level),
-                "handlers": len(logger.handlers),
-                "propagate": logger.propagate,
-            }
-        return loggers_info
+        with self._lock:
+            loggers_info: Dict[str, Dict[str, Any]] = {}
+            manager = logging.getLogger().manager
+            for name in manager.loggerDict:
+                logger = logging.getLogger(name)
+                loggers_info[name] = {
+                    "level": logging.getLevelName(logger.level),
+                    "handlers": len(logger.handlers),
+                    "propagate": logger.propagate,
+                }
+            return loggers_info
