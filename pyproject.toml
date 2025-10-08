@@ -4,10 +4,10 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "db-connector"
-version = "1.0.0"
+version = "0.0.1"
 description = "跨平台数据库连接管理模块"
 authors = [
-    {name = "Your Name", email = "your.email@example.com"}
+    {name = "wangquanqing", email = "wangquanqing1636@sina.com"}
 ]
 license = {text = "MIT"}
 readme = "README.md"
@@ -32,10 +32,9 @@ dependencies = [
     "tomli-w>=1.0.0",
     "sqlalchemy>=2.0.0",
     "oracledb>=2.0.0",
-    "psycopg2>=2.9.0",
+    "psycopg>=3.0.0",
     "pymysql>=1.1.0",
     "pymssql>=2.2.0",
-    "python-dotenv>=1.0.0",
 ]
 
 [project.optional-dependencies]
@@ -58,13 +57,13 @@ cli = [
 # 添加CLI入口点
 [project.scripts]
 db-connector = "db_connector.cli:main"           # 标准CLI
-db-connector-rich = "db_connector.cli_enhanced:main_enhanced"  # 增强版CLI
+db-connector-rich = "db_connector.rich_cli:main_enhanced"  # 增强版CLI
 
 [project.urls]
-Homepage = "https://github.com/yourusername/db-connector"
-Repository = "https://github.com/yourusername/db-connector"
+Homepage = "https://github.com/wangquanqing/db-connector-project"
+Repository = "https://github.com/wangquanqing/db-connector-project"
 Documentation = "https://db-connector.readthedocs.io"
-"Issue Tracker" = "https://github.com/yourusername/db-connector/issues"
+"Issue Tracker" = "https://github.com/wangquanqing/db-connector-project/issues"
 
 [tool.setuptools.packages.find]
 where = ["."]

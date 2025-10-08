@@ -3,6 +3,18 @@
 
 使用 TOML 格式进行配置管理，提供数据库连接配置的加密存储和管理功能。
 支持配置文件的创建、加载、保存，以及连接配置的增删改查操作。
+
+特性：
+- 基于 TOML 格式的配置文件，易于阅读和编辑
+- 全字段加密：所有连接配置字段自动加密存储
+- 数据类型保持：序列化/反序列化机制保留原始数据类型
+- 版本兼容性检查：支持多版本配置格式
+- 自动备份功能：支持配置文件备份和恢复
+
+安全特性：
+- 使用加密管理器保护敏感信息
+- 密钥文件独立存储，增强安全性
+- 配置文件完整性验证
 """
 
 import json
@@ -19,6 +31,7 @@ from ..utils.path_utils import PathHelper
 from .crypto import CryptoManager
 from .exceptions import ConfigError
 
+# 获取模块级别的日志记录器
 logger = get_logger(__name__)
 
 # 配置文件创建时的初始时间戳（固定值）
@@ -38,6 +51,13 @@ class ConfigManager:
 
     管理数据库连接配置的加密存储，使用TOML格式配置文件。
     提供连接配置的增删改查功能，所有敏感信息都会自动加密。
+
+    Attributes:
+        app_name (str): 应用名称，用于确定配置目录
+        config_file (str): 配置文件名
+        config_dir (Path): 配置目录路径
+        config_path (Path): 完整配置文件路径
+        crypto (Optional[CryptoManager]): 加密管理器实例
     """
 
     def __init__(
@@ -73,6 +93,10 @@ class ConfigManager:
         Returns:
             str: JSON格式的序列化字符串
 
+        Process:
+            1. 获取值的类型名称
+            2. 将值和类型信息序列化为JSON
+
         Example:
             >>> serialized = self._serialize_value("secret_password")
             >>> print(serialized)
@@ -94,6 +118,11 @@ class ConfigManager:
         Raises:
             ValueError: 当JSON字符串格式无效时
 
+        Process:
+            1. 解析JSON字符串
+            2. 提取原始值
+            3. 如果解析失败，返回原始字符串
+
         Example:
             >>> original = self._deserialize_value('{"type": "str", "value": "secret"}')
             >>> print(original)
@@ -108,7 +137,12 @@ class ConfigManager:
             return json_str
 
     def _ensure_config_exists(self) -> None:
-        """确保配置文件存在，如果不存在则创建默认配置"""
+        """
+        确保配置文件存在，如果不存在则创建默认配置
+
+        Raises:
+            ConfigError: 当配置文件创建或初始化失败时
+        """
         try:
             if not self.config_path.exists():
                 self._create_default_config()
@@ -116,10 +150,15 @@ class ConfigManager:
             logger.debug(f"配置文件就绪: {self.config_path}")
         except Exception as e:
             logger.error(f"初始化配置文件失败: {str(e)}")
-            raise ConfigError(f"配置文件初始化失败: {str(e)}")
+            raise ConfigError(f"配置文件初始化失败: {str(e)}") from e
 
     def _create_default_config(self) -> None:
-        """创建默认配置文件结构"""
+        """
+        创建默认配置文件结构
+
+        Raises:
+            ConfigError: 当默认配置创建失败时
+        """
         default_config = {
             "version": "1.0.0",
             "app_name": self.app_name,
@@ -134,7 +173,12 @@ class ConfigManager:
         logger.info(f"创建默认配置文件: {self.config_path}")
 
     def _load_or_create_crypto_key(self) -> None:
-        """加载或创建加密密钥"""
+        """
+        加载或创建加密密钥
+
+        Raises:
+            ConfigError: 当密钥加载或创建失败时
+        """
         key_file = self.config_dir / "encryption.key"
 
         if key_file.exists():
@@ -153,7 +197,7 @@ class ConfigManager:
 
             except Exception as e:
                 logger.error(f"加载加密密钥失败: {str(e)}")
-                raise ConfigError(f"加密密钥加载失败: {str(e)}")
+                raise ConfigError(f"加密密钥加载失败: {str(e)}") from e
         else:
             # 创建新密钥
             try:
@@ -167,7 +211,7 @@ class ConfigManager:
 
             except Exception as e:
                 logger.error(f"创建加密密钥失败: {str(e)}")
-                raise ConfigError(f"加密密钥创建失败: {str(e)}")
+                raise ConfigError(f"加密密钥创建失败: {str(e)}") from e
 
     def _load_config(self) -> Dict[str, Any]:
         """
@@ -178,6 +222,11 @@ class ConfigManager:
 
         Raises:
             ConfigError: 当配置文件格式无效或版本不支持时
+
+        Process:
+            1. 读取TOML文件
+            2. 验证配置文件结构
+            3. 返回配置字典
         """
         try:
             with open(self.config_path, "rb") as f:
@@ -190,10 +239,10 @@ class ConfigManager:
 
         except tomllib.TOMLDecodeError as e:
             logger.error(f"配置文件TOML格式错误: {str(e)}")
-            raise ConfigError(f"配置文件格式无效: {str(e)}")
+            raise ConfigError(f"配置文件格式无效: {str(e)}") from e
         except Exception as e:
             logger.error(f"加载配置文件失败: {str(e)}")
-            raise ConfigError(f"配置文件加载失败: {str(e)}")
+            raise ConfigError(f"配置文件加载失败: {str(e)}") from e
 
     def _validate_config(self, config: Dict[str, Any]) -> None:
         """
@@ -204,6 +253,10 @@ class ConfigManager:
 
         Raises:
             ConfigError: 当配置结构无效时
+
+        Validation Rules:
+            - 必须包含 version, app_name, connections, metadata 字段
+            - 版本必须在支持的版本列表中
         """
         required_fields = ["version", "app_name", "connections", "metadata"]
         for field in required_fields:
@@ -223,6 +276,11 @@ class ConfigManager:
 
         Raises:
             ConfigError: 当配置文件保存失败时
+
+        Process:
+            1. 更新最后修改时间
+            2. 验证配置结构
+            3. 保存为TOML格式
         """
         try:
             # 更新最后修改时间
@@ -239,7 +297,7 @@ class ConfigManager:
 
         except Exception as e:
             logger.error(f"保存配置文件失败: {str(e)}")
-            raise ConfigError(f"配置文件保存失败: {str(e)}")
+            raise ConfigError(f"配置文件保存失败: {str(e)}") from e
 
     def add_connection(self, name: str, connection_config: Dict[str, Any]) -> None:
         """
@@ -252,6 +310,10 @@ class ConfigManager:
         Raises:
             ConfigError: 当连接已存在或添加失败时
             ValueError: 当连接名称为空或配置无效时
+
+        Security Note:
+            - 所有配置字段都会自动加密存储
+            - 连接名称作为唯一标识符，不能重复
 
         Example:
             >>> config = {
@@ -295,7 +357,7 @@ class ConfigManager:
             logger.error(f"添加连接配置失败 {name}: {str(e)}")
             if isinstance(e, ConfigError):
                 raise
-            raise ConfigError(f"添加连接配置失败: {str(e)}")
+            raise ConfigError(f"添加连接配置失败: {str(e)}") from e
 
     def get_connection(self, name: str) -> Dict[str, Any]:
         """
@@ -309,6 +371,10 @@ class ConfigManager:
 
         Raises:
             ConfigError: 当连接不存在或获取失败时
+
+        Security Note:
+            - 返回的解密配置包含敏感信息，使用后应及时清理
+            - 配置数据在内存中为明文状态
 
         Example:
             >>> config = config_manager.get_connection("postgres_db")
@@ -345,7 +411,7 @@ class ConfigManager:
             logger.error(f"获取连接配置失败 {name}: {str(e)}")
             if isinstance(e, ConfigError):
                 raise
-            raise ConfigError(f"获取连接配置失败: {str(e)}")
+            raise ConfigError(f"获取连接配置失败: {str(e)}") from e
 
     def list_connections(self) -> List[str]:
         """
@@ -367,7 +433,7 @@ class ConfigManager:
             return list(config["connections"].keys())
         except Exception as e:
             logger.error(f"列出连接失败: {str(e)}")
-            raise ConfigError(f"列出连接失败: {str(e)}")
+            raise ConfigError(f"列出连接失败: {str(e)}") from e
 
     def connection_exists(self, name: str) -> bool:
         """
@@ -378,6 +444,9 @@ class ConfigManager:
 
         Returns:
             bool: 连接是否存在
+
+        Note:
+            此方法不会解密配置内容，仅检查是否存在
 
         Example:
             >>> exists = config_manager.connection_exists("postgres_db")
@@ -400,6 +469,10 @@ class ConfigManager:
         Raises:
             ConfigError: 当连接不存在或删除失败时
 
+        Security Note:
+            - 删除操作不可逆，建议先备份
+            - 删除后加密数据将无法恢复
+
         Example:
             >>> config_manager.remove_connection("postgres_db")
         """
@@ -420,7 +493,7 @@ class ConfigManager:
             logger.error(f"删除连接配置失败 {name}: {str(e)}")
             if isinstance(e, ConfigError):
                 raise
-            raise ConfigError(f"删除连接配置失败: {str(e)}")
+            raise ConfigError(f"删除连接配置失败: {str(e)}") from e
 
     def update_connection(self, name: str, connection_config: Dict[str, Any]) -> None:
         """
@@ -432,6 +505,10 @@ class ConfigManager:
 
         Raises:
             ConfigError: 当连接不存在或更新失败时
+
+        Process:
+            1. 删除旧配置
+            2. 添加新配置
 
         Example:
             >>> new_config = {"host": "new_host", "port": 5433}
@@ -451,7 +528,7 @@ class ConfigManager:
 
         except Exception as e:
             logger.error(f"更新连接配置失败 {name}: {str(e)}")
-            raise ConfigError(f"更新连接配置失败: {str(e)}")
+            raise ConfigError(f"更新连接配置失败: {str(e)}") from e
 
     def get_config_info(self) -> Dict[str, Any]:
         """
@@ -477,9 +554,9 @@ class ConfigManager:
             }
         except Exception as e:
             logger.error(f"获取配置信息失败: {str(e)}")
-            raise ConfigError(f"获取配置信息失败: {str(e)}")
+            raise ConfigError(f"获取配置信息失败: {str(e)}") from e
 
-    def backup_config(self, backup_path: Optional[Path] = None) -> Path:
+    def backup_config(self, backup_path: Path | None = None) -> Path:
         """
         备份配置文件
 
@@ -491,6 +568,15 @@ class ConfigManager:
 
         Raises:
             ConfigError: 当备份失败时
+
+        Security Note:
+            - 备份文件包含加密数据，应妥善保管
+            - 建议定期备份重要配置
+
+        Example:
+            >>> backup_path = config_manager.backup_config()
+            >>> print(backup_path)
+            "path/to/connections.toml.backup.20231201_120000"
         """
         try:
             if backup_path is None:
@@ -503,7 +589,7 @@ class ConfigManager:
 
         except Exception as e:
             logger.error(f"备份配置文件失败: {str(e)}")
-            raise ConfigError(f"配置文件备份失败: {str(e)}")
+            raise ConfigError(f"配置文件备份失败: {str(e)}") from e
 
     def __str__(self) -> str:
         """返回配置管理器的字符串表示"""

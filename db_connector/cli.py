@@ -69,6 +69,8 @@ class DBConnectorCLI:
         """
         try:
             setup_logging(level="INFO")
+            # 在方法内部获取logger，确保使用配置后的logger
+            logger = get_logger(__name__)
             logger.info("CLI日志系统初始化成功")
         except Exception as e:
             print(f"❌ 日志系统初始化失败: {e}")
@@ -386,7 +388,7 @@ class DBConnectorCLI:
                 return self._split_sql_statements(sql_content)
             except UnicodeDecodeError as e:
                 logger.error(f"无法解码SQL文件: {e}")
-                print(f"❌ 无法解码SQL文件，请检查文件编码")
+                print("❌ 无法解码SQL文件，请检查文件编码")
                 sys.exit(1)
 
     def _execute_sql_statements(
@@ -1016,7 +1018,7 @@ def create_argument_parser(cli_instance: DBConnectorCLI) -> argparse.ArgumentPar
     export_parser.add_argument("file", help="导出文件路径")
     export_parser.set_defaults(func=cli_instance.export_config)
 
-    # import 命令
+    # import命令
     import_parser = subparsers.add_parser("import", help="导入连接配置")
     import_parser.add_argument("file", help="导入文件路径")
     import_parser.set_defaults(func=cli_instance.import_config)

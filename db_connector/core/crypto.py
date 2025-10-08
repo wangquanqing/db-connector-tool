@@ -3,43 +3,56 @@
 
 使用 cryptography.fernet 进行对称加密，提供安全的密码管理和数据加密功能。
 支持密码派生、盐值生成、数据加密解密等操作。
+
+特性：
+- 基于 PBKDF2 的密钥派生，防止暴力破解
+- 使用 secrets 模块生成密码学安全的随机数
+- 支持字符串和字节数据的加密解密
+- 提供密钥持久化和恢复功能
+- 完整的错误处理和日志记录
 """
 
 import base64
-import logging
 import secrets
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 from cryptography.fernet import Fernet, InvalidToken
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
+from ..utils.logging_utils import get_logger
 from .exceptions import CryptoError
 
-logger = logging.getLogger(__name__)
+# 获取模块级别的日志记录器
+logger = get_logger(__name__)
 
 
 class CryptoManager:
     """
     加密管理器类
 
-    提供基于Fernet的对称加密功能，使用PBKDF2进行密钥派生。
+    提供基于 Fernet 的对称加密功能，使用 PBKDF2 进行密钥派生。
     支持密码管理、数据加密解密、密钥持久化等功能。
+
+    Attributes:
+        DEFAULT_SALT_LENGTH (int): 默认盐值长度（16字节）
+        DEFAULT_PASSWORD_LENGTH (int): 默认密码长度（32字节）
+        DEFAULT_ITERATIONS (int): PBKDF2 迭代次数（480000次，符合OWASP推荐）
     """
 
     # 默认加密参数
     DEFAULT_SALT_LENGTH = 16
     DEFAULT_PASSWORD_LENGTH = 32
-    DEFAULT_ITERATIONS = 480000  # OWASP推荐的迭代次数
+    DEFAULT_ITERATIONS = 480000  # OWASP 推荐的迭代次数
 
-    def __init__(self, password: Optional[str] = None, salt: Optional[bytes] = None):
+    def __init__(self, password: str | None = None, salt: bytes | None = None):
         """
         初始化加密管理器
 
         Args:
-            password: 加密密码，如果为None则自动生成安全的随机密码
-            salt: 盐值，如果为None则自动生成安全的随机盐值
+            password: 加密密码，如果为 None 则自动生成安全的随机密码
+            salt: 盐值，如果为 None 则自动生成安全的随机盐值
 
         Raises:
             CryptoError: 当加密系统初始化失败时
@@ -56,21 +69,23 @@ class CryptoManager:
             self.salt = salt or self._generate_secure_salt()
             self.fernet = self._create_fernet_instance()
 
-            logger.info("加密管理器初始化成功")
+            logger.info(
+                f"加密管理器初始化成功，盐值长度: {len(self.salt)}, 密码长度: {len(self.password)}"
+            )
 
         except Exception as e:
             logger.error(f"加密管理器初始化失败: {str(e)}")
-            raise CryptoError(f"加密系统初始化失败: {str(e)}")
+            raise CryptoError(f"加密系统初始化失败: {str(e)}") from e
 
     def _generate_secure_password(self) -> str:
         """
         生成安全的随机密码
 
         Returns:
-            str: base64编码的安全随机密码
+            str: base64 编码的安全随机密码
 
         Note:
-            使用secrets模块生成密码，比random模块更安全
+            使用 secrets 模块生成密码，比 random 模块更安全，适用于密码学场景
         """
         random_bytes = secrets.token_bytes(self.DEFAULT_PASSWORD_LENGTH)
         return base64.urlsafe_b64encode(random_bytes).decode("utf-8")
@@ -83,22 +98,27 @@ class CryptoManager:
             bytes: 安全的随机盐值
 
         Note:
-            使用secrets模块生成盐值，确保密码学安全性
+            使用 secrets 模块生成盐值，确保密码学安全性
         """
         return secrets.token_bytes(self.DEFAULT_SALT_LENGTH)
 
     def _create_fernet_instance(self) -> Fernet:
         """
-        创建Fernet加密实例
+        创建 Fernet 加密实例
 
         Returns:
-            Fernet: 配置好的Fernet实例
+            Fernet: 配置好的 Fernet 实例
 
         Raises:
-            CryptoError: 当密钥派生或Fernet实例创建失败时
+            CryptoError: 当密钥派生或 Fernet 实例创建失败时
+
+        Process:
+            1. 使用 PBKDF2 从密码和盐值派生密钥
+            2. 将派生的密钥编码为 base64 格式
+            3. 创建 Fernet 实例
         """
         try:
-            # 使用PBKDF2进行密钥派生
+            # 使用 PBKDF2 进行密钥派生
             kdf = PBKDF2HMAC(
                 algorithm=hashes.SHA256(),
                 length=32,
@@ -114,8 +134,8 @@ class CryptoManager:
             return Fernet(key)
 
         except Exception as e:
-            logger.error(f"Fernet实例创建失败: {str(e)}")
-            raise CryptoError(f"加密密钥派生失败: {str(e)}")
+            logger.error(f"Fernet 实例创建失败: {str(e)}")
+            raise CryptoError(f"加密密钥派生失败: {str(e)}") from e
 
     def encrypt(self, data: str) -> str:
         """
@@ -125,7 +145,7 @@ class CryptoManager:
             data: 要加密的明文字符串数据
 
         Returns:
-            str: base64编码的加密数据
+            str: base64 编码的加密数据
 
         Raises:
             CryptoError: 当加密过程失败时
@@ -143,19 +163,19 @@ class CryptoManager:
         try:
             # 转换为字节并加密
             encrypted_bytes = self.fernet.encrypt(data.encode("utf-8"))
-            # 返回base64编码的字符串
+            # 返回 base64 编码的字符串
             return base64.urlsafe_b64encode(encrypted_bytes).decode("utf-8")
 
         except Exception as e:
-            logger.error(f"数据加密失败: {str(e)}")
-            raise CryptoError(f"加密失败: {str(e)}")
+            logger.error(f"字符串数据加密失败: {str(e)}")
+            raise CryptoError(f"加密失败: {str(e)}") from e
 
     def decrypt(self, encrypted_data: str) -> str:
         """
         解密加密数据
 
         Args:
-            encrypted_data: base64编码的加密字符串数据
+            encrypted_data: base64 编码的加密字符串数据
 
         Returns:
             str: 解密后的原始明文字符串
@@ -175,17 +195,17 @@ class CryptoManager:
             raise ValueError("加密数据不能为空且必须是字符串")
 
         try:
-            # 解码base64并解密
+            # 解码 base64 并解密
             encrypted_bytes = base64.urlsafe_b64decode(encrypted_data.encode("utf-8"))
             decrypted_bytes = self.fernet.decrypt(encrypted_bytes)
             return decrypted_bytes.decode("utf-8")
 
         except InvalidToken as e:
             logger.error(f"解密令牌无效: {str(e)}")
-            raise CryptoError("解密失败: 加密数据可能被篡改或密钥不匹配")
+            raise CryptoError("解密失败: 加密数据可能被篡改或密钥不匹配") from e
         except Exception as e:
-            logger.error(f"数据解密失败: {str(e)}")
-            raise CryptoError(f"解密失败: {str(e)}")
+            logger.error(f"字符串数据解密失败: {str(e)}")
+            raise CryptoError(f"解密失败: {str(e)}") from e
 
     def encrypt_bytes(self, data: bytes) -> bytes:
         """
@@ -196,6 +216,15 @@ class CryptoManager:
 
         Returns:
             bytes: 加密后的字节数据
+
+        Raises:
+            CryptoError: 当加密过程失败时
+            ValueError: 当输入数据为空或无效时
+
+        Example:
+            >>> crypto = CryptoManager()
+            >>> data = b"binary_data"
+            >>> encrypted = crypto.encrypt_bytes(data)
         """
         if not data or not isinstance(data, bytes):
             raise ValueError("加密数据不能为空且必须是字节")
@@ -204,7 +233,7 @@ class CryptoManager:
             return self.fernet.encrypt(data)
         except Exception as e:
             logger.error(f"字节数据加密失败: {str(e)}")
-            raise CryptoError(f"字节数据加密失败: {str(e)}")
+            raise CryptoError(f"字节数据加密失败: {str(e)}") from e
 
     def decrypt_bytes(self, encrypted_data: bytes) -> bytes:
         """
@@ -215,6 +244,15 @@ class CryptoManager:
 
         Returns:
             bytes: 解密后的原始字节数据
+
+        Raises:
+            CryptoError: 当解密过程失败时
+            InvalidToken: 当加密数据被篡改或密钥不匹配时
+            ValueError: 当输入数据为空或无效时
+
+        Example:
+            >>> crypto = CryptoManager()
+            >>> decrypted = crypto.decrypt_bytes(encrypted_bytes)
         """
         if not encrypted_data or not isinstance(encrypted_data, bytes):
             raise ValueError("加密数据不能为空且必须是字节")
@@ -223,20 +261,24 @@ class CryptoManager:
             return self.fernet.decrypt(encrypted_data)
         except InvalidToken as e:
             logger.error(f"字节解密令牌无效: {str(e)}")
-            raise CryptoError("字节解密失败: 加密数据可能被篡改或密钥不匹配")
+            raise CryptoError("字节解密失败: 加密数据可能被篡改或密钥不匹配") from e
         except Exception as e:
             logger.error(f"字节数据解密失败: {str(e)}")
-            raise CryptoError(f"字节数据解密失败: {str(e)}")
+            raise CryptoError(f"字节数据解密失败: {str(e)}") from e
 
     def get_key_info(self) -> Dict[str, Any]:
         """
         获取密钥信息（用于持久化存储）
 
         Returns:
-            Dict[str, Any]: 包含密码和盐值的字典
+            Dict[str, Any]: 包含密码、盐值和迭代次数的字典
 
         Warning:
-            密钥信息应安全存储，避免泄露
+            密钥信息应安全存储，避免泄露。建议使用安全的存储机制。
+
+        Security Note:
+            - 盐值和密码都以 base64 编码形式存储
+            - 实际应用中应考虑额外的安全措施（如硬件安全模块）
 
         Example:
             >>> key_info = crypto.get_key_info()
@@ -260,12 +302,13 @@ class CryptoManager:
 
         Args:
             password: 之前保存的密码
-            salt: base64编码的盐值字符串
+            salt: base64 编码的盐值字符串
 
         Returns:
             CryptoManager: 新的加密管理器实例
 
         Raises:
+            CryptoError: 当密钥恢复失败时
             ValueError: 当密码或盐值格式无效时
 
         Example:
@@ -279,14 +322,14 @@ class CryptoManager:
             return cls(password, salt_bytes)
         except Exception as e:
             logger.error(f"从保存的密钥创建实例失败: {str(e)}")
-            raise CryptoError(f"密钥恢复失败: {str(e)}")
+            raise CryptoError(f"密钥恢复失败: {str(e)}") from e
 
     def verify_encryption(self, test_data: str = "test") -> bool:
         """
         验证加密解密功能是否正常工作
 
         Args:
-            test_data: 测试用的数据
+            test_data: 测试用的数据，默认为 "test"
 
         Returns:
             bool: 加密解密功能是否正常
@@ -309,5 +352,5 @@ class CryptoManager:
         return f"CryptoManager(salt_length={len(self.salt)}, password_length={len(self.password)})"
 
     def __repr__(self) -> str:
-        """返回加密管理器的详细表示"""
-        return "CryptoManager(password='***', salt=b'...')"
+        """返回加密管理器的详细表示（不包含敏感信息）"""
+        return f"CryptoManager(password='***', salt=b'...', iterations={self.DEFAULT_ITERATIONS})"
