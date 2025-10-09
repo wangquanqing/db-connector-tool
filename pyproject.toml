@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "db-connector"
-version = "0.0.1"
+version = "0.0.2"
 description = "跨平台数据库连接管理模块"
 authors = [
     {name = "wangquanqing", email = "wangquanqing1636@sina.com"}

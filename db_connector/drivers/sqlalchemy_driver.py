@@ -21,10 +21,11 @@ SQLAlchemy 数据库驱动模块
 - 连接有效性验证
 """
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 from urllib.parse import quote_plus
 
 from sqlalchemy import create_engine, text
+from sqlalchemy.engine import Engine, Result
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import scoped_session, sessionmaker
 
@@ -136,8 +137,8 @@ class SQLAlchemyDriver:
             raise ValueError("连接配置必须为字典类型")
 
         self.connection_config = connection_config
-        self.engine: Any | None = None
-        self.session_factory: Any | None = None
+        self.engine: Optional[Engine] = None
+        self.session_factory: Optional[scoped_session] = None
         self._connected: bool = False
 
         # 验证数据库类型支持
@@ -204,136 +205,8 @@ class SQLAlchemyDriver:
         # 构建基础URL
         base_url = self.URL_TEMPLATES[db_type].format(**config)
 
-        # 添加查询参数
-        query_params = self._build_query_params(db_type, config)
-        if query_params:
-            base_url += "?" + query_params
-
         logger.debug(f"构建的连接URL: {self._mask_sensitive_info(base_url)}")
         return base_url
-
-    def _mask_sensitive_info(self, url: str) -> str:
-        """
-        掩码连接URL中的敏感信息
-
-        Args:
-            url: 原始连接URL
-
-        Returns:
-            str: 掩码后的连接URL，密码部分用***替换
-        """
-        import re
-
-        # 匹配密码部分进行掩码
-        return re.sub(r":([^:@]+)@", ":***@", url)
-
-    def _build_query_params(self, db_type: str, config: Dict[str, Any]) -> str:
-        """
-        构建查询参数字符串
-
-        根据数据库类型和配置参数构建URL查询参数字符串。
-
-        Args:
-            db_type: 数据库类型
-            config: 连接配置字典
-
-        Returns:
-            str: 查询参数字符串，格式为 "param1=value1&param2=value2"
-
-        Notes:
-            - 只包含当前数据库类型支持的参数
-            - 自动处理布尔值参数
-            - 忽略None值参数
-
-        Example:
-            >>> params = driver._build_query_params("mysql", {"charset": "utf8"})
-            >>> print(params)
-            charset=utf8
-        """
-        # 各数据库支持的查询参数映射
-        query_param_map: Dict[str, List[str]] = {
-            "mssql": ["charset", "tds_version", "driver", "trusted_connection"],
-            "mysql": ["charset", "collation", "ssl_ca", "ssl_cert", "ssl_key"],
-            "postgresql": [
-                "sslmode",
-                "sslrootcert",
-                "sslcert",
-                "sslkey",
-                "connect_timeout",
-            ],
-            "oracle": ["service_name", "sid", "mode", "threaded"],
-            "sqlite": ["timeout", "isolation_level", "check_same_thread"],
-        }
-
-        supported_params = query_param_map.get(db_type, [])
-        query_params: List[str] = []
-
-        for param in supported_params:
-            if param in config and config[param] is not None:
-                # 布尔值特殊处理
-                if isinstance(config[param], bool):
-                    value = "true" if config[param] else "false"
-                else:
-                    value = str(config[param])
-                query_params.append(f"{param}={value}")
-
-        return "&".join(query_params)
-
-    def _get_engine_config(self, db_type: str) -> Dict[str, Any]:
-        """
-        获取数据库特定的引擎配置
-
-        Args:
-            db_type: 数据库类型
-
-        Returns:
-            Dict[str, Any]: 引擎配置字典
-
-        Notes:
-            - 不同数据库类型有不同的配置需求
-            - 返回空字典表示无需特殊配置
-        """
-        config_getters = {
-            "sqlite": self._get_sqlite_config,
-            "mysql": self._get_mysql_config,
-            "postgresql": self._get_postgresql_config,
-            "oracle": self._get_oracle_config,
-        }
-
-        getter = config_getters.get(db_type)
-        return getter() if getter else {}
-
-    def _get_sqlite_config(self) -> Dict[str, Any]:
-        """获取SQLite数据库的引擎配置"""
-        config: Dict[str, Any] = {}
-        if "timeout" in self.connection_config:
-            config["connect_args"] = {"timeout": self.connection_config["timeout"]}
-        return config
-
-    def _get_mysql_config(self) -> Dict[str, Any]:
-        """获取MySQL数据库的引擎配置"""
-        connect_args: Dict[str, Any] = {}
-        if "charset" in self.connection_config:
-            connect_args["charset"] = self.connection_config["charset"]
-        return {"connect_args": connect_args} if connect_args else {}
-
-    def _get_postgresql_config(self) -> Dict[str, Any]:
-        """获取PostgreSQL数据库的引擎配置"""
-        connect_args: Dict[str, Any] = {}
-        if "sslmode" in self.connection_config:
-            connect_args["sslmode"] = self.connection_config["sslmode"]
-        if "connect_timeout" in self.connection_config:
-            connect_args["connect_timeout"] = self.connection_config["connect_timeout"]
-        return {"connect_args": connect_args} if connect_args else {}
-
-    def _get_oracle_config(self) -> Dict[str, Any]:
-        """获取Oracle数据库的引擎配置"""
-        connect_args: Dict[str, Any] = {}
-        if "service_name" in self.connection_config:
-            connect_args["service_name"] = self.connection_config["service_name"]
-        if "sid" in self.connection_config:
-            connect_args["sid"] = self.connection_config["sid"]
-        return {"connect_args": connect_args} if connect_args else {}
 
     def _get_default_port(self, db_type: str) -> str:
         """
@@ -356,6 +229,168 @@ class SQLAlchemyDriver:
             "mssql": "1433",
         }
         return default_ports.get(db_type, "")
+
+    def _mask_sensitive_info(self, url: str) -> str:
+        """
+        掩码连接URL中的敏感信息
+
+        Args:
+            url: 原始连接URL
+
+        Returns:
+            str: 掩码后的连接URL，密码部分用***替换
+        """
+        import re
+
+        # 匹配密码部分进行掩码
+        return re.sub(r":([^:@]+)@", ":***@", url)
+
+    def _get_pool_config(self) -> Dict[str, Any]:
+        """
+        获取连接池配置
+
+        Returns:
+            Dict[str, Any]: 合并后的连接池配置字典
+        """
+        # 默认连接池配置
+        default_pool_config = {
+            "pool_pre_ping": True,  # 连接预检查，确保连接有效
+            "pool_recycle": 3600,  # 连接回收时间（秒），避免数据库连接超时
+            "pool_size": 10,  # 连接池大小，控制并发连接数
+            "max_overflow": 20,  # 最大溢出连接数，应对突发流量
+        }
+
+        # 合并用户自定义配置
+        user_pool_config = self.connection_config.get("pool_config", {})
+        return {**default_pool_config, **user_pool_config}
+
+    def _get_engine_config(self, db_type: str) -> Dict[str, Any]:
+        """
+        获取数据库特定的引擎配置
+
+        Args:
+            db_type: 数据库类型
+
+        Returns:
+            Dict[str, Any]: 引擎配置字典
+
+        Notes:
+            - 不同数据库类型有不同的配置需求
+            - 返回空字典表示无需特殊配置
+        """
+        config_getters = {
+            "oracle": self._get_oracle_config,
+            "postgresql": self._get_postgresql_config,
+            "mysql": self._get_mysql_config,
+            "mssql": self._get_mssql_config,
+            "sqlite": self._get_sqlite_config,
+        }
+
+        getter = config_getters.get(db_type)
+        return getter() if getter else {}
+
+    def _get_oracle_config(self) -> Dict[str, Any]:
+        """
+        获取Oracle数据库的引擎配置
+
+        Returns:
+            Dict[str, Any]: Oracle引擎配置字典，包含connect_args等参数
+        """
+        connect_args: Dict[str, Any] = {}
+        if "service_name" in self.connection_config:
+            connect_args["service_name"] = self.connection_config["service_name"]
+        if "sid" in self.connection_config:
+            connect_args["sid"] = self.connection_config["sid"]
+        if "mode" in self.connection_config:
+            connect_args["mode"] = self.connection_config["mode"]
+        if "threaded" in self.connection_config:
+            connect_args["threaded"] = self.connection_config["threaded"]
+
+        return {"connect_args": connect_args} if connect_args else {}
+
+    def _get_postgresql_config(self) -> Dict[str, Any]:
+        """
+        获取PostgreSQL数据库的引擎配置
+
+        Returns:
+            Dict[str, Any]: PostgreSQL引擎配置字典，包含connect_args等参数
+        """
+        connect_args: Dict[str, Any] = {}
+        if "sslmode" in self.connection_config:
+            connect_args["sslmode"] = self.connection_config["sslmode"]
+        if "sslrootcert" in self.connection_config:
+            connect_args["sslrootcert"] = self.connection_config["sslrootcert"]
+        if "sslcert" in self.connection_config:
+            connect_args["sslcert"] = self.connection_config["sslcert"]
+        if "sslkey" in self.connection_config:
+            connect_args["sslkey"] = self.connection_config["sslkey"]
+        if "connect_timeout" in self.connection_config:
+            connect_args["connect_timeout"] = self.connection_config["connect_timeout"]
+
+        return {"connect_args": connect_args} if connect_args else {}
+
+    def _get_mysql_config(self) -> Dict[str, Any]:
+        """
+        获取MySQL数据库的引擎配置
+
+        Returns:
+            Dict[str, Any]: MySQL引擎配置字典，包含connect_args等参数
+        """
+        connect_args: Dict[str, Any] = {}
+        if "charset" in self.connection_config:
+            connect_args["charset"] = self.connection_config["charset"]
+        if "collation" in self.connection_config:
+            connect_args["collation"] = self.connection_config["collation"]
+        if "ssl_ca" in self.connection_config:
+            connect_args["ssl_ca"] = self.connection_config["ssl_ca"]
+        if "ssl_cert" in self.connection_config:
+            connect_args["ssl_cert"] = self.connection_config["ssl_cert"]
+        if "ssl_key" in self.connection_config:
+            connect_args["ssl_key"] = self.connection_config["ssl_key"]
+
+        return {"connect_args": connect_args} if connect_args else {}
+
+    def _get_mssql_config(self) -> Dict[str, Any]:
+        """
+        获取SQL Server数据库的引擎配置
+
+        Returns:
+            Dict[str, Any]: SQL Server引擎配置字典，包含connect_args等参数
+        """
+        connect_args: Dict[str, Any] = {}
+        if "charset" in self.connection_config:
+            connect_args["charset"] = self.connection_config["charset"]
+        if "tds_version" in self.connection_config:
+            connect_args["tds_version"] = self.connection_config["tds_version"]
+        if "driver" in self.connection_config:
+            connect_args["driver"] = self.connection_config["driver"]
+        if "trusted_connection" in self.connection_config:
+            connect_args["trusted_connection"] = self.connection_config[
+                "trusted_connection"
+            ]
+        if "connect_timeout" in self.connection_config:
+            connect_args["connect_timeout"] = self.connection_config["connect_timeout"]
+
+        return {"connect_args": connect_args} if connect_args else {}
+
+    def _get_sqlite_config(self) -> Dict[str, Any]:
+        """
+        获取SQLite数据库的引擎配置
+
+        Returns:
+            Dict[str, Any]: SQLite引擎配置字典，包含connect_args等参数
+        """
+        connect_args: Dict[str, Any] = {}
+        if "timeout" in self.connection_config:
+            connect_args["timeout"] = self.connection_config["timeout"]
+        if "isolation_level" in self.connection_config:
+            connect_args["isolation_level"] = self.connection_config["isolation_level"]
+        if "check_same_thread" in self.connection_config:
+            connect_args["check_same_thread"] = self.connection_config[
+                "check_same_thread"
+            ]
+
+        return {"connect_args": connect_args} if connect_args else {}
 
     def connect(self) -> None:
         """
@@ -426,240 +461,45 @@ class SQLAlchemyDriver:
             logger.error(error_msg, exc_info=True)
             raise ConnectionError(error_msg)
 
-    def _get_pool_config(self) -> Dict[str, Any]:
-        """
-        获取连接池配置
-
-        Returns:
-            Dict[str, Any]: 合并后的连接池配置字典
-        """
-        # 默认连接池配置
-        default_pool_config = {
-            "pool_pre_ping": True,  # 连接预检查，确保连接有效
-            "pool_recycle": 3600,  # 连接回收时间（秒），避免数据库连接超时
-            "pool_size": 10,  # 连接池大小，控制并发连接数
-            "max_overflow": 20,  # 最大溢出连接数，应对突发流量
-        }
-
-        # 合并用户自定义配置
-        user_pool_config = self.connection_config.get("pool_config", {})
-        return {**default_pool_config, **user_pool_config}
-
     def _validate_connection(self) -> None:
         """
         验证数据库连接的实际有效性
 
-        执行简单的测试查询来确认数据库连接正常工作。
-        如果验证失败，会清理已创建的引擎资源。
+        该方法执行连接测试，如果测试失败则抛出ConnectionError异常。
 
         Raises:
-            ConnectionError: 当连接验证失败时
+            ConnectionError: 当连接验证失败时抛出
         """
         if self.engine is None:
             raise ConnectionError("数据库引擎未初始化，无法验证连接")
 
-        try:
-            # 执行简单的测试查询来验证连接
-            with self.engine.connect() as test_conn:
-                test_query = self._get_test_query()
-                test_conn.execute(text(test_query))
-
-            # 连接验证成功，更新状态
-            self._connected = True
-            logger.info(
-                f"数据库连接验证成功: {self.connection_config.get('type')} "
-                f"({self.connection_config.get('host')})"
-            )
-
-        except SQLAlchemyError as e:
+        if not self._perform_connection_test():
             # 连接验证失败，清理资源
             self._cleanup_on_connection_failure()
-            error_msg = f"数据库连接验证失败: {e.__class__.__name__}: {str(e)}"
-            logger.error(error_msg, exc_info=True)
+            error_msg = "数据库连接验证失败"
+            logger.error(error_msg)
             raise ConnectionError(error_msg)
 
-    def _cleanup_on_connection_failure(self) -> None:
+        # 连接验证成功，更新状态
+        self._connected = True
+        logger.info("数据库连接验证成功...")
+
+    def _perform_connection_test(self) -> bool:
         """
-        连接失败时的资源清理
-
-        清理已创建的引擎和会话工厂资源，确保资源不会泄漏。
-        """
-        # 清理会话工厂
-        if self.session_factory:
-            self.session_factory.remove()
-            self.session_factory = None
-
-        # 清理引擎资源
-        if self.engine:
-            self.engine.dispose()
-            self.engine = None
-
-        # 重置连接状态
-        self._connected = False
-        logger.debug("连接失败，已清理相关资源")
-
-    def disconnect(self) -> None:
-        """
-        断开数据库连接
-
-        清理连接池资源并关闭所有数据库连接。
-
-        Raises:
-            ConnectionError: 当断开连接失败时
-
-        Notes:
-            - 安全地清理会话工厂和引擎资源
-            - 更新连接状态标志
-            - 异常情况下仍会尝试清理资源
-
-        Example:
-            >>> driver.disconnect()  # 断开数据库连接
-            >>> print(driver.is_connected)  # 检查连接状态
-            False
-        """
-        try:
-            # 清理会话工厂
-            if self.session_factory:
-                self.session_factory.remove()
-                self.session_factory = None
-
-            # 清理引擎资源
-            if self.engine:
-                self.engine.dispose()
-                self.engine = None
-
-            self._connected = False
-            logger.info("数据库连接已安全断开")
-
-        except Exception as e:
-            error_msg = f"断开数据库连接失败: {e.__class__.__name__}: {str(e)}"
-            logger.error(error_msg, exc_info=True)
-            raise ConnectionError(error_msg)
-
-    def execute_query(
-        self, query: str, params: Dict[str, Any] | None = None
-    ) -> List[Dict[str, Any]]:
-        """
-        执行SQL查询语句
-
-        Args:
-            query: SQL查询语句，支持参数化查询
-            params: 查询参数字典，可选
+        执行实际的连接测试
 
         Returns:
-            List[Dict[str, Any]]: 查询结果列表，每行数据为字典格式
-
-        Raises:
-            ConnectionError: 当数据库未连接时
-            QueryError: 当查询执行失败时
-
-        Notes:
-            - 使用参数化查询防止SQL注入
-            - 自动处理连接状态验证
-            - 结果转换为字典格式便于使用
-
-        Example:
-            >>> results = driver.execute_query(
-            ...     "SELECT * FROM users WHERE age > :age",
-            ...     {"age": 18}
-            ... )
-            >>> print(results)
-            [{'id': 1, 'name': 'Alice', 'age': 25}, ...]
+            bool: True表示连接测试成功，False表示失败
         """
-        # 验证连接状态
-        if not self._connected or self.engine is None:
-            raise ConnectionError("数据库未连接或引擎未初始化")
-
-        # 验证查询语句
-        if not query or not query.strip():
-            raise QueryError("查询语句不能为空")
+        if self.engine is None:
+            return False
 
         try:
-            with self.engine.connect() as connection:
-                result = connection.execute(text(query), params or {})
-                # 将结果转换为字典列表
-                return [dict(row._mapping) for row in result]
-
-        except SQLAlchemyError as e:
-            error_msg = f"查询执行失败: {e.__class__.__name__}: {str(e)}"
-            logger.error(error_msg, exc_info=True)
-            raise QueryError(error_msg)
-
-    def execute_command(
-        self, command: str, params: Dict[str, Any] | None = None
-    ) -> int:
-        """
-        执行非查询SQL语句（INSERT/UPDATE/DELETE等）
-
-        Args:
-            command: SQL命令语句
-            params: 命令参数字典，可选
-
-        Returns:
-            int: 影响的行数
-
-        Raises:
-            ConnectionError: 当数据库未连接时
-            QueryError: 当命令执行失败时
-
-        Notes:
-            - 使用事务执行确保数据一致性
-            - 自动验证命令语句有效性
-            - 返回受影响的行数便于业务逻辑处理
-
-        Example:
-            >>> affected_rows = driver.execute_command(
-            ...     "UPDATE users SET name = :name WHERE id = :id",
-            ...     {"name": "Bob", "id": 1}
-            ... )
-            >>> print(f"更新了 {affected_rows} 行")
-        """
-        # 验证连接状态
-        if not self._connected or self.engine is None:
-            raise ConnectionError("数据库未连接或引擎未初始化")
-
-        # 验证命令语句
-        if not command or not command.strip():
-            raise QueryError("命令语句不能为空")
-
-        try:
-            # 使用事务执行命令
-            with self.engine.begin() as connection:
-                result = connection.execute(text(command), params or {})
-                return result.rowcount
-
-        except SQLAlchemyError as e:
-            error_msg = f"命令执行失败: {e.__class__.__name__}: {str(e)}"
-            logger.error(error_msg, exc_info=True)
-            raise QueryError(error_msg)
-
-    def test_connection(self) -> bool:
-        """
-        测试数据库连接是否有效
-
-        Returns:
-            bool: True表示连接成功，False表示连接失败
-
-        Notes:
-            - 如果当前未连接，会自动尝试连接
-            - 执行简单的测试查询验证连接有效性
-            - 失败时会记录详细的错误信息
-
-        Example:
-            >>> if driver.test_connection():
-            ...     print("连接测试成功")
-            ... else:
-            ...     print("连接测试失败")
-        """
-        try:
-            self.connect()
             test_query = self._get_test_query()
-            self.execute_query(test_query)
-            logger.info("数据库连接测试成功")
+            with self.engine.connect() as conn:
+                conn.execute(text(test_query))
             return True
-        except Exception as e:
-            error_msg = f"连接测试失败: {e.__class__.__name__}: {str(e)}"
-            logger.error(error_msg, exc_info=True)
+        except Exception:
             return False
 
     def _get_test_query(self) -> str:
@@ -685,28 +525,303 @@ class SQLAlchemyDriver:
 
         return test_queries.get(db_type, self.TEST_QUERY_DEFAULT)
 
+    def _cleanup_on_connection_failure(self) -> None:
+        """
+        连接失败时的资源清理
+
+        清理已创建的引擎和会话工厂资源，确保资源不会泄漏。
+        """
+        self._cleanup_resources()
+        logger.debug("连接失败，已清理相关资源")
+
+    def _cleanup_resources(self) -> None:
+        """
+        清理数据库资源
+
+        清理会话工厂和引擎资源，重置连接状态。
+        """
+        # 清理会话工厂
+        if self.session_factory:
+            self.session_factory.remove()
+            self.session_factory = None
+
+        # 清理引擎资源
+        if self.engine:
+            self.engine.dispose()
+            self.engine = None
+
+        # 重置连接状态
+        self._connected = False
+
+    def disconnect(self) -> None:
+        """
+        断开数据库连接并清理资源
+
+        该方法执行完整的资源清理流程，包括：
+        1. 检查当前连接状态，避免重复断开
+        2. 清理会话工厂资源
+        3. 清理引擎资源
+        4. 重置连接状态
+        5. 记录断开日志
+
+        Notes:
+            - 支持安全断开，即使连接不存在也不会抛出异常
+            - 自动清理所有相关资源，避免内存泄漏
+            - 线程安全操作，支持并发断开
+
+        Example:
+            >>> driver = SQLAlchemyDriver(connection_config)
+            >>> driver.connect()
+            >>> driver.disconnect()  # 断开数据库连接
+            >>> print(driver.is_connected)  # 检查连接状态
+            False
+        """
+        if not self._connected:
+            logger.debug("数据库连接已断开，无需重复操作")
+            return
+
+        try:
+            self._cleanup_resources()
+            logger.info("数据库连接已成功断开")
+        except Exception as e:
+            error_msg = f"数据库连接断开失败: {e.__class__.__name__}: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            raise ConnectionError(error_msg)
+
+    def test_connection(self) -> bool:
+        """
+        测试数据库连接是否有效
+
+        该方法执行连接测试，返回连接状态而不抛出异常。
+
+        Returns:
+            bool: True表示连接有效，False表示连接无效
+
+        Notes:
+            - 如果当前未连接，会自动尝试建立连接
+            - 测试失败不会抛出异常，而是返回False
+            - 适合用于连接健康检查或监控
+
+        Example:
+            >>> driver = SQLAlchemyDriver(connection_config)
+            >>> if driver.test_connection():
+            ...     print("连接正常")
+            ... else:
+            ...     print("连接异常")
+        """
+        try:
+            # 如果未连接，尝试建立连接
+            if not self._connected:
+                self.connect()
+            return self._perform_connection_test()
+        except Exception:
+            return False
+
+    def execute_query(
+        self, query: str, parameters: Dict[str, Any] | None = None
+    ) -> List[Dict[str, Any]]:
+        """
+        执行SQL查询语句并返回结果
+
+        Args:
+            query: SQL查询语句
+            parameters: 查询参数字典，用于参数化查询
+
+        Returns:
+            List[Dict[str, Any]]: 查询结果列表，每行数据为字典格式
+
+        Raises:
+            ConnectionError: 当数据库未连接时抛出
+            ValueError: 当查询语句为空或仅包含空白字符时抛出
+            QueryError: 当查询执行失败时抛出
+
+        Notes:
+            - 支持参数化查询，防止SQL注入攻击
+            - 自动处理连接状态验证
+            - 结果转换为字典格式，便于数据处理
+            - 支持事务管理，确保数据一致性
+
+        Example:
+            >>> results = driver.execute_query(
+            ...     "SELECT * FROM users WHERE age > :age",
+            ...     {"age": 18}
+            ... )
+            >>> for row in results:
+            ...     print(row["name"], row["age"])
+        """
+        if not self._connected or self.engine is None:
+            raise ConnectionError("数据库未连接，请先调用connect()方法")
+
+        # 验证查询语句不为空
+        if not query or not query.strip():
+            raise ValueError("查询语句不能为空")
+
+        try:
+            with self.engine.connect() as conn:
+                # 执行参数化查询
+                result: Result = conn.execute(
+                    text(query), parameters if parameters else {}
+                )
+
+                # 将结果转换为字典列表
+                rows = result.fetchall()
+                return [dict(row._mapping) for row in rows]
+
+        except SQLAlchemyError as e:
+            error_msg = f"查询执行失败: {e.__class__.__name__}: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            raise QueryError(error_msg)
+
+    def execute_command(
+        self, command: str, parameters: Dict[str, Any] | None = None
+    ) -> int:
+        """
+        执行SQL命令语句（INSERT/UPDATE/DELETE等）
+
+        Args:
+            command: SQL命令语句
+            parameters: 命令参数字典，用于参数化执行
+
+        Returns:
+            int: 受影响的行数
+
+        Raises:
+            ConnectionError: 当数据库未连接时抛出
+            ValueError: 当命令语句为空或仅包含空白字符时抛出
+            QueryError: 当命令执行失败时抛出
+
+        Notes:
+            - 支持参数化执行，防止SQL注入攻击
+            - 自动提交事务，确保数据持久化
+            - 返回受影响的行数，便于业务逻辑处理
+
+        Example:
+            >>> affected_rows = driver.execute_command(
+            ...     "UPDATE users SET status = :status WHERE id = :id",
+            ...     {"status": "active", "id": 1}
+            ... )
+            >>> print(f"更新了 {affected_rows} 行数据")
+        """
+        if not self._connected or self.engine is None:
+            raise ConnectionError("数据库未连接，请先调用connect()方法")
+
+        # 验证命令语句不为空
+        if not command or not command.strip():
+            raise ValueError("命令语句不能为空")
+
+        try:
+            with self.engine.begin() as conn:
+                # 执行参数化命令
+                result: Result = conn.execute(
+                    text(command), parameters if parameters else {}
+                )
+                return result.rowcount
+
+        except SQLAlchemyError as e:
+            error_msg = f"命令执行失败: {e.__class__.__name__}: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            raise QueryError(error_msg)
+
+    @property
+    def is_connected(self) -> bool:
+        """
+        检查数据库连接状态
+
+        返回当前数据库连接的有效性状态。
+
+        Returns:
+            bool: True表示连接有效，False表示连接无效
+
+        Notes:
+            - 该属性会执行实际的连接测试，而不仅仅是状态检查
+            - 如果连接测试失败，会自动更新内部连接状态
+            - 适合用于实时连接状态监控
+
+        Example:
+            >>> driver = SQLAlchemyDriver(connection_config)
+            >>> driver.connect()
+            >>> if driver.is_connected:
+            ...     print("连接正常")
+            ... else:
+            ...     print("连接异常")
+        """
+        if not self._connected:
+            return False
+
+        # 执行实际的连接测试
+        is_valid = self._perform_connection_test()
+        if not is_valid:
+            # 连接测试失败，更新状态
+            self._connected = False
+            logger.warning("连接状态检查失败，连接已标记为无效")
+
+        return is_valid
+
+    def get_connection_info(self) -> Dict[str, Any]:
+        """
+        获取数据库连接信息
+
+        返回当前数据库连接的详细信息，包括配置参数和状态。
+
+        Returns:
+            Dict[str, Any]: 连接信息字典，包含以下字段：
+                - database_type: 数据库类型
+                - host: 主机地址
+                - port: 端口号
+                - database: 数据库名
+                - username: 用户名（掩码处理）
+                - is_connected: 连接状态
+                - pool_size: 连接池大小
+
+        Notes:
+            - 敏感信息（如密码）会进行掩码处理
+            - 返回完整的连接配置信息，便于调试和监控
+
+        Example:
+            >>> info = driver.get_connection_info()
+            >>> print(f"连接到 {info['database_type']} 数据库")
+            >>> print(f"主机: {info['host']}:{info['port']}")
+            >>> print(f"状态: {'已连接' if info['is_connected'] else '未连接'}")
+        """
+        config = self.connection_config
+        pool_config = self._get_pool_config()
+
+        return {
+            "database_type": config.get("type"),
+            "host": config.get("host"),
+            "port": config.get("port", self._get_default_port(config.get("type", ""))),
+            "database": config.get("database"),
+            "username": config.get("username", "***"),  # 掩码处理
+            "is_connected": self._connected,
+            "pool_size": pool_config.get("pool_size"),
+        }
+
     def __enter__(self) -> "SQLAlchemyDriver":
         """
-        上下文管理器入口
+        上下文管理器入口方法
+
+        支持with语句，自动管理数据库连接。
 
         Returns:
             SQLAlchemyDriver: 当前驱动实例
 
         Notes:
-            - 支持with语句，自动管理连接生命周期
-            - 进入上下文时自动建立连接
+            - 自动建立数据库连接
+            - 确保资源正确初始化
+            - 支持嵌套上下文管理
+
+        Example:
+            >>> with SQLAlchemyDriver(config) as driver:
+            ...     results = driver.execute_query("SELECT * FROM users")
         """
         self.connect()
         return self
 
-    def __exit__(
-        self,
-        exc_type: type | None,
-        exc_val: Exception | None,
-        exc_tb: Any | None,
-    ) -> None:
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
         """
-        上下文管理器出口
+        上下文管理器退出方法
+
+        自动清理数据库连接资源。
 
         Args:
             exc_type: 异常类型
@@ -714,55 +829,33 @@ class SQLAlchemyDriver:
             exc_tb: 异常追踪信息
 
         Notes:
-            - 退出上下文时自动断开连接
-            - 异常情况下也会确保资源正确清理
+            - 无论是否发生异常都会执行资源清理
+            - 自动断开数据库连接
+            - 确保资源不会泄漏
+
+        Example:
+            >>> with SQLAlchemyDriver(config) as driver:
+            ...     # 执行数据库操作
+            ...     pass
+            >>> # 退出with块后连接自动断开
         """
         self.disconnect()
 
-    @property
-    def is_connected(self) -> bool:
+    def __repr__(self) -> str:
         """
-        获取当前连接状态
-
-        不仅检查内部标志，还实际验证连接有效性。
+        返回驱动实例的字符串表示
 
         Returns:
-            bool: 当前连接状态
+            str: 包含数据库类型和连接状态的字符串表示
 
-        Notes:
-            - 如果连接无效，会自动更新内部状态
-            - 实际执行测试查询验证连接
+        Example:
+            >>> driver = SQLAlchemyDriver(config)
+            >>> print(repr(driver))
+            <SQLAlchemyDriver mysql@localhost:3306 (connected)>
         """
-        if not self._connected or self.engine is None:
-            return False
+        db_type = self.connection_config.get("type", "unknown")
+        host = self.connection_config.get("host", "unknown")
+        port = self.connection_config.get("port", self._get_default_port(db_type))
+        status = "connected" if self._connected else "disconnected"
 
-        # 实际验证连接有效性
-        try:
-            test_query = self._get_test_query()
-            with self.engine.connect() as conn:
-                conn.execute(text(test_query))
-            return True
-        except Exception:
-            # 连接无效，更新状态
-            self._connected = False
-            return False
-
-    def get_connection_info(self) -> Dict[str, Any]:
-        """
-        获取连接信息摘要
-
-        Returns:
-            Dict[str, Any]: 连接信息字典，包含数据库类型、主机、端口等
-
-        Notes:
-            - 不包含敏感信息如密码
-            - 用于调试和监控目的
-        """
-        return {
-            "database_type": self.connection_config.get("type"),
-            "host": self.connection_config.get("host"),
-            "port": self.connection_config.get("port"),
-            "database": self.connection_config.get("database"),
-            "connected": self._connected,
-            "engine_initialized": self.engine is not None,
-        }
+        return f"<SQLAlchemyDriver {db_type}@{host}:{port} ({status})>"

@@ -2,7 +2,7 @@ from db_connector.core.config import ConfigManager
 from db_connector.drivers.sqlalchemy_driver import SQLAlchemyDriver
 from db_connector.utils.logging_utils import setup_logging
 
-logger = setup_logging()
+logger = setup_logging(level="DEBUG")
 
 # 添加数据库连接
 mysql_config = {
