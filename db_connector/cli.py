@@ -49,7 +49,7 @@ class DBConnectorCLI:
     """
 
     DB_MANAGER_NOT_INIT_MSG = "❌ 数据库管理器未初始化"
-    SUPPORTED_DATABASE_TYPES = ["mysql", "postgresql", "oracle", "sqlserver", "sqlite"]
+    SUPPORTED_DATABASE_TYPES = ["mysql", "postgresql", "oracle", "mssql", "sqlite"]
 
     def __init__(self):
         """

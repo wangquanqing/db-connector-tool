@@ -84,10 +84,10 @@ class SQLAlchemyDriver:
 
     # 连接URL模板配置
     URL_TEMPLATES: Dict[str, str] = {
-        "oracle": "oracle+oracledb://{username}:{password}@{host}:{port}/{database}",
-        "postgresql": "postgresql+psycopg://{username}:{password}@{host}:{port}/{database}",
+        "oracle": "oracle+oracledb://{username}:{password}@{host}:{port}/?service_name={service_name}",
+        "postgresql": "postgresql+psycopg://{username}:{password}@{host}:{port}/{database}?gssencmode={gssencmode}",
         "mysql": "mysql+pymysql://{username}:{password}@{host}:{port}/{database}",
-        "mssql": "mssql+pymssql://{username}:{password}@{host}:{port}/{database}",
+        "mssql": "mssql+pymssql://{username}:{password}@{host}:{port}/{database}?charset={charset}&tds_version={tds_version}",
         "sqlite": "sqlite:///{database}",
     }
 
@@ -168,6 +168,7 @@ class SQLAlchemyDriver:
             - 自动设置默认端口
             - 支持数据库特定的查询参数
             - SQLite数据库特殊处理，支持内存数据库
+            - Oracle数据库强制使用Easy Connect格式，避免TNS别名查找
 
         Example:
             >>> url = driver._build_connection_url()
@@ -184,7 +185,14 @@ class SQLAlchemyDriver:
             return self.URL_TEMPLATES[db_type].format(**config)
 
         # 验证必需参数
-        required_fields = ["username", "password", "host", "database"]
+        required_fields = ["username", "password", "host"]
+        if db_type == "oracle":
+            required_fields.append("service_name")
+        elif db_type == "mssql":
+            required_fields.append("charset")
+            required_fields.append("tds_version")
+        else:
+            required_fields.append("database")
         missing_fields = [field for field in required_fields if field not in config]
 
         if missing_fields:
@@ -297,10 +305,6 @@ class SQLAlchemyDriver:
             Dict[str, Any]: Oracle引擎配置字典，包含connect_args等参数
         """
         connect_args: Dict[str, Any] = {}
-        if "service_name" in self.connection_config:
-            connect_args["service_name"] = self.connection_config["service_name"]
-        if "sid" in self.connection_config:
-            connect_args["sid"] = self.connection_config["sid"]
         if "mode" in self.connection_config:
             connect_args["mode"] = self.connection_config["mode"]
         if "threaded" in self.connection_config:
@@ -358,10 +362,6 @@ class SQLAlchemyDriver:
             Dict[str, Any]: SQL Server引擎配置字典，包含connect_args等参数
         """
         connect_args: Dict[str, Any] = {}
-        if "charset" in self.connection_config:
-            connect_args["charset"] = self.connection_config["charset"]
-        if "tds_version" in self.connection_config:
-            connect_args["tds_version"] = self.connection_config["tds_version"]
         if "driver" in self.connection_config:
             connect_args["driver"] = self.connection_config["driver"]
         if "trusted_connection" in self.connection_config:
@@ -448,7 +448,7 @@ class SQLAlchemyDriver:
 
             logger.info(
                 f"数据库引擎创建成功: {self.connection_config.get('type')} "
-                f"({self.connection_config.get('host')})"
+                f"({self.connection_config.get('host') or self.connection_config.get('database')})"
             )
 
             # 执行实际连接测试验证连接有效性

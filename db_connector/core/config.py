@@ -37,12 +37,13 @@ logger = get_logger(__name__)
 # 配置文件创建时的初始时间戳（固定值）
 CONFIG_CREATION_TIMESTAMP = datetime.now().astimezone().isoformat()
 
-# 支持的配置版本
-SUPPORTED_VERSIONS = ["1.0.0", "1.1.0"]
+# 版本号递增规则
+VERSION_INCREMENT_ON_CHANGE = True  # 每次配置变更时自动递增版本号
 
 # 错误消息常量
 ERROR_EMPTY_CONNECTION_NAME = "连接名称不能为空且必须是字符串"
 ERROR_INVALID_CONFIG_DICT = "连接配置不能为空且必须是字典"
+ERROR_VERSION_MAJOR_CHANGE = "版本号递增导致第一位发生变化，变更过于频繁，请手动检查"
 
 
 class ConfigManager:
@@ -62,7 +63,7 @@ class ConfigManager:
 
     def __init__(
         self, app_name: str = "db_connector", config_file: str = "connections.toml"
-    ):
+    ) -> None:
         """
         初始化配置管理器
 
@@ -82,59 +83,6 @@ class ConfigManager:
         self.config_path = self.config_dir / config_file
         self.crypto: Optional[CryptoManager] = None
         self._ensure_config_exists()
-
-    def _serialize_value(self, value: Any) -> str:
-        """
-        序列化值以便加密，保留数据类型信息
-
-        Args:
-            value: 要序列化的任意类型值
-
-        Returns:
-            str: JSON格式的序列化字符串
-
-        Process:
-            1. 获取值的类型名称
-            2. 将值和类型信息序列化为JSON
-
-        Example:
-            >>> serialized = self._serialize_value("secret_password")
-            >>> print(serialized)
-            '{"type": "str", "value": "secret_password"}'
-        """
-        value_info = {"type": type(value).__name__, "value": value}
-        return json.dumps(value_info, ensure_ascii=False)
-
-    def _deserialize_value(self, json_str: str) -> Any:
-        """
-        反序列化值，恢复原始数据类型
-
-        Args:
-            json_str: JSON格式的序列化字符串
-
-        Returns:
-            Any: 反序列化后的原始值
-
-        Raises:
-            ValueError: 当JSON字符串格式无效时
-
-        Process:
-            1. 解析JSON字符串
-            2. 提取原始值
-            3. 如果解析失败，返回原始字符串
-
-        Example:
-            >>> original = self._deserialize_value('{"type": "str", "value": "secret"}')
-            >>> print(original)
-            "secret"
-        """
-        try:
-            value_info = json.loads(json_str)
-            return value_info["value"]
-        except (json.JSONDecodeError, KeyError, TypeError) as e:
-            logger.warning(f"反序列化失败，返回原始字符串: {str(e)}")
-            # 如果JSON解析失败，尝试直接返回字符串值
-            return json_str
 
     def _ensure_config_exists(self) -> None:
         """
@@ -171,6 +119,57 @@ class ConfigManager:
         }
         self._save_config(default_config)
         logger.info(f"创建默认配置文件: {self.config_path}")
+
+    def _save_config(self, config: Dict[str, Any]) -> None:
+        """
+        保存配置文件
+
+        Args:
+            config: 要保存的配置字典
+
+        Raises:
+            ConfigError: 当配置文件保存失败时
+
+        Process:
+            1. 更新最后修改时间
+            2. 验证配置结构
+            3. 保存为TOML格式
+        """
+        try:
+            # 更新最后修改时间
+            current_time = datetime.now().astimezone().isoformat()
+            config["metadata"]["last_modified"] = current_time
+
+            # 验证配置结构
+            self._validate_config(config)
+
+            with open(self.config_path, "wb") as f:
+                f.write(tomli_w.dumps(config).encode("utf-8"))
+
+            logger.debug(f"配置文件已保存: {self.config_path}")
+
+        except Exception as e:
+            logger.error(f"保存配置文件失败: {str(e)}")
+            raise ConfigError(f"配置文件保存失败: {str(e)}") from e
+
+    def _validate_config(self, config: Dict[str, Any]) -> None:
+        """
+        验证配置文件结构
+
+        Args:
+            config: 要验证的配置字典
+
+        Raises:
+            ConfigError: 当配置结构无效时
+
+        Validation Rules:
+            - 必须包含 version, app_name, connections, metadata 字段
+            - 版本必须在支持的版本列表中
+        """
+        required_fields = ["version", "app_name", "connections", "metadata"]
+        for field in required_fields:
+            if field not in config:
+                raise ConfigError(f"配置文件缺少必需字段: {field}")
 
     def _load_or_create_crypto_key(self) -> None:
         """
@@ -212,92 +211,6 @@ class ConfigManager:
             except Exception as e:
                 logger.error(f"创建加密密钥失败: {str(e)}")
                 raise ConfigError(f"加密密钥创建失败: {str(e)}") from e
-
-    def _load_config(self) -> Dict[str, Any]:
-        """
-        加载并验证配置文件
-
-        Returns:
-            Dict[str, Any]: 配置字典
-
-        Raises:
-            ConfigError: 当配置文件格式无效或版本不支持时
-
-        Process:
-            1. 读取TOML文件
-            2. 验证配置文件结构
-            3. 返回配置字典
-        """
-        try:
-            with open(self.config_path, "rb") as f:
-                config = tomllib.load(f)
-
-            # 验证配置文件结构
-            self._validate_config(config)
-
-            return config
-
-        except tomllib.TOMLDecodeError as e:
-            logger.error(f"配置文件TOML格式错误: {str(e)}")
-            raise ConfigError(f"配置文件格式无效: {str(e)}") from e
-        except Exception as e:
-            logger.error(f"加载配置文件失败: {str(e)}")
-            raise ConfigError(f"配置文件加载失败: {str(e)}") from e
-
-    def _validate_config(self, config: Dict[str, Any]) -> None:
-        """
-        验证配置文件结构
-
-        Args:
-            config: 要验证的配置字典
-
-        Raises:
-            ConfigError: 当配置结构无效时
-
-        Validation Rules:
-            - 必须包含 version, app_name, connections, metadata 字段
-            - 版本必须在支持的版本列表中
-        """
-        required_fields = ["version", "app_name", "connections", "metadata"]
-        for field in required_fields:
-            if field not in config:
-                raise ConfigError(f"配置文件缺少必需字段: {field}")
-
-        # 验证版本兼容性
-        if config["version"] not in SUPPORTED_VERSIONS:
-            raise ConfigError(f"不支持的配置版本: {config['version']}")
-
-    def _save_config(self, config: Dict[str, Any]) -> None:
-        """
-        保存配置文件
-
-        Args:
-            config: 要保存的配置字典
-
-        Raises:
-            ConfigError: 当配置文件保存失败时
-
-        Process:
-            1. 更新最后修改时间
-            2. 验证配置结构
-            3. 保存为TOML格式
-        """
-        try:
-            # 更新最后修改时间
-            current_time = datetime.now().astimezone().isoformat()
-            config["metadata"]["last_modified"] = current_time
-
-            # 验证配置结构
-            self._validate_config(config)
-
-            with open(self.config_path, "wb") as f:
-                f.write(tomli_w.dumps(config).encode("utf-8"))
-
-            logger.debug(f"配置文件已保存: {self.config_path}")
-
-        except Exception as e:
-            logger.error(f"保存配置文件失败: {str(e)}")
-            raise ConfigError(f"配置文件保存失败: {str(e)}") from e
 
     def add_connection(self, name: str, connection_config: Dict[str, Any]) -> None:
         """
@@ -350,6 +263,10 @@ class ConfigManager:
                 encrypted_config[key] = self.crypto.encrypt(serialized_value)
 
             config["connections"][name] = encrypted_config
+
+            # 更新配置文件版本号（每次调用增加修订号）
+            self._increment_config_version(config)
+
             self._save_config(config)
             logger.info(f"连接配置已添加: {name}")
 
@@ -358,6 +275,150 @@ class ConfigManager:
             if isinstance(e, ConfigError):
                 raise
             raise ConfigError(f"添加连接配置失败: {str(e)}") from e
+
+    def _load_config(self) -> Dict[str, Any]:
+        """
+        加载并验证配置文件
+
+        Returns:
+            Dict[str, Any]: 配置字典
+
+        Raises:
+            ConfigError: 当配置文件格式无效或版本不支持时
+
+        Process:
+            1. 读取TOML文件
+            2. 验证配置文件结构
+            3. 返回配置字典
+        """
+        try:
+            with open(self.config_path, "rb") as f:
+                config = tomllib.load(f)
+
+            # 验证配置文件结构
+            self._validate_config(config)
+
+            return config
+
+        except tomllib.TOMLDecodeError as e:
+            logger.error(f"配置文件TOML格式错误: {str(e)}")
+            raise ConfigError(f"配置文件格式无效: {str(e)}") from e
+        except Exception as e:
+            logger.error(f"加载配置文件失败: {str(e)}")
+            raise ConfigError(f"配置文件加载失败: {str(e)}") from e
+
+    def _serialize_value(self, value: Any) -> str:
+        """
+        序列化值以便加密，保留数据类型信息
+
+        Args:
+            value: 要序列化的任意类型值
+
+        Returns:
+            str: JSON格式的序列化字符串
+
+        Process:
+            1. 获取值的类型名称
+            2. 将值和类型信息序列化为JSON
+
+        Example:
+            >>> serialized = self._serialize_value("secret_password")
+            >>> print(serialized)
+            '{"type": "str", "value": "secret_password"}'
+        """
+        value_info = {"type": type(value).__name__, "value": value}
+        return json.dumps(value_info, ensure_ascii=False)
+
+    def _increment_config_version(self, config: Dict[str, Any]) -> None:
+        """
+        递增配置文件版本号
+
+        Args:
+            config: 配置字典
+
+        Raises:
+            ConfigError: 当版本号递增导致第一位发生变化时
+
+        Process:
+            1. 解析当前版本号（格式：x.y.z）
+            2. 第一位保持不变，第二、三位按照10进制每次加1，满10进1
+            3. 如果第一位发生变化，抛出异常
+            4. 更新配置中的版本号
+        """
+        try:
+            current_version = config["version"]
+            version_parts = current_version.split(".")
+
+            if len(version_parts) == 3:
+                # 标准语义化版本号格式：x.y.z
+                major, minor, patch = version_parts
+                original_major = int(major)
+
+                # 第一位保持不变，第二、三位按照10进制每次加1，满10进1
+                patch_num = int(patch) + 1
+                minor_num = int(minor)
+
+                # 处理进位逻辑
+                if patch_num >= 10:
+                    patch_num = 0
+                    minor_num += 1
+                    if minor_num >= 10:
+                        minor_num = 0
+                        # 检查第一位是否发生变化
+                        if original_major + 1 != original_major:
+                            raise ConfigError(
+                                ERROR_VERSION_MAJOR_CHANGE,
+                                details={
+                                    "current_version": current_version,
+                                    "would_become": f"{original_major + 1}.{minor_num}.{patch_num}",
+                                },
+                            )
+
+                new_version = f"{original_major}.{minor_num}.{patch_num}"
+            else:
+                # 非标准版本号格式，使用默认递增逻辑
+                new_version = f"{current_version}.1"
+
+            config["version"] = new_version
+            logger.debug(f"配置文件版本号已更新: {current_version} -> {new_version}")
+
+        except ConfigError:
+            # 重新抛出ConfigError异常
+            raise
+        except Exception as e:
+            logger.warning(f"版本号递增失败，保持原版本号: {str(e)}")
+            # 如果版本号递增失败，不影响主要功能，继续使用原版本号
+
+    def _deserialize_value(self, json_str: str) -> Any:
+        """
+        反序列化值，恢复原始数据类型
+
+        Args:
+            json_str: JSON格式的序列化字符串
+
+        Returns:
+            Any: 反序列化后的原始值
+
+        Raises:
+            ValueError: 当JSON字符串格式无效时
+
+        Process:
+            1. 解析JSON字符串
+            2. 提取原始值
+            3. 如果解析失败，返回原始字符串
+
+        Example:
+            >>> original = self._deserialize_value('{"type": "str", "value": "secret"}')
+            >>> print(original)
+            "secret"
+        """
+        try:
+            value_info = json.loads(json_str)
+            return value_info["value"]
+        except (json.JSONDecodeError, KeyError, TypeError) as e:
+            logger.warning(f"反序列化失败，返回原始字符串: {str(e)}")
+            # 如果JSON解析失败，尝试直接返回字符串值
+            return json_str
 
     def get_connection(self, name: str) -> Dict[str, Any]:
         """

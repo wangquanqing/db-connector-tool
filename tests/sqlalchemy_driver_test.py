@@ -13,16 +13,22 @@ mysql_config = {
     "password": "Cvicsejszx@2022",
     "database": "db_station",
 }
-
+pg_config = {
+    "type": "postgresql",
+    "host": "localhost",
+    "port": "5432",
+    "username": "cvicse",
+    "password": "Cvicsejszx@2022",
+    "database": "db_station",
+    "gssencmode": "disable",
+}
+sqlite_config = { "type": "sqlite", "database": r"D:\wangq\Documents\work\707-巴万清江\707_SqliteAllPathTable\db_station.db" }
 config_manager = ConfigManager()
 
-config = config_manager.get_connection("pg")
-print(config)
-
-with SQLAlchemyDriver(config) as driver:
+with SQLAlchemyDriver(mysql_config) as driver:
     # 执行查询
     result = driver.execute_query(
-        "SELECT * FROM public.sample_users where name=:name", {"name": "张三"}
+        "SELECT 1"
     )
     print(result)
     result = driver.get_connection_info()

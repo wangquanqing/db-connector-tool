@@ -11,10 +11,10 @@
 - 提供数据库特定的参数验证和优化
 
 支持的数据库类型：
-- Oracle (cx_Oracle/pyoracle)
-- PostgreSQL (psycopg2)
-- MySQL (mysqlclient/PyMySQL)
-- SQL Server (pyodbc/pymssql)
+- Oracle (oracledb)
+- PostgreSQL (psycopg)
+- MySQL (PyMySQL)
+- SQL Server (pymssql)
 - SQLite (内置支持)
 
 驱动架构：
