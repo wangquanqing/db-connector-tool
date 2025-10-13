@@ -30,7 +30,7 @@ import re
 import sys
 from typing import Any, Dict, List, Optional, Tuple, Union
 
-from .core.connections import DatabaseManager
+from .core.connections import SUPPORTED_DATABASE_TYPES, DatabaseManager
 from .utils.logging_utils import get_logger, setup_logging
 
 logger = get_logger(__name__)
@@ -45,11 +45,22 @@ class DBConnectorCLI:
     Attributes:
         db_manager (Optional[DatabaseManager]): 数据库管理器实例
         DB_MANAGER_NOT_INIT_MSG (str): 数据库管理器未初始化的错误消息
-        SUPPORTED_DATABASE_TYPES (List[str]): 支持的数据库类型列表
+        BASIC_PARAMS (List[str]): 基本连接参数列表
     """
 
     DB_MANAGER_NOT_INIT_MSG = "❌ 数据库管理器未初始化"
-    SUPPORTED_DATABASE_TYPES = ["mysql", "postgresql", "oracle", "mssql", "sqlite"]
+    BASIC_PARAMS = [
+        "type",
+        "host",
+        "port",
+        "username",
+        "password",
+        "database",
+        "service_name",
+        "gssencmode",
+        "charset",
+        "tds_version",
+    ]
 
     def __init__(self):
         """
@@ -69,8 +80,6 @@ class DBConnectorCLI:
         """
         try:
             setup_logging(level="INFO")
-            # 在方法内部获取logger，确保使用配置后的logger
-            logger = get_logger(__name__)
             logger.info("CLI日志系统初始化成功")
         except Exception as e:
             print(f"❌ 日志系统初始化失败: {e}")
@@ -98,70 +107,60 @@ class DBConnectorCLI:
                 sys.exit(1)
         return self.db_manager
 
-    def add_connection(self, args: argparse.Namespace) -> None:
+    def _convert_value_type(self, value: str) -> Union[str, int, float, bool]:
         """
-        添加新的数据库连接配置
+        智能转换参数值的数据类型
+
+        支持转换: 布尔值(true/false)、整数、浮点数、字符串
 
         Args:
-            args: 命令行参数，包含连接配置信息
+            value (str): 原始字符串值
 
-        Raises:
-            SystemExit: 如果添加连接失败则退出程序
+        Returns:
+            Union[str, int, float, bool]: 转换后的值
+
+        Example:
+            >>> cli = DBConnectorCLI()
+            >>> cli._convert_value_type("true")
+            True
+            >>> cli._convert_value_type("123")
+            123
+            >>> cli._convert_value_type("3.14")
+            3.14
+            >>> cli._convert_value_type("hello")
+            'hello'
         """
-        db_manager = self._ensure_db_manager_initialized()
+        value_lower = value.lower().strip()
 
-        # 验证数据库类型
-        if args.type.lower() not in self.SUPPORTED_DATABASE_TYPES:
-            print(f"❌ 不支持的数据库类型: {args.type}")
-            print(f"✅ 支持的数据库类型: {', '.join(self.SUPPORTED_DATABASE_TYPES)}")
-            sys.exit(1)
+        # 布尔值转换
+        if value_lower in ("true", "false"):
+            return value_lower == "true"
 
-        # 构建基础连接配置字典
-        config = {
-            "type": args.type,
-            "host": args.host,
-            "port": args.port,
-            "username": args.username,
-            "password": args.password,
-            "database": args.database,
-        }
+        # 整数转换
+        if value.isdigit():
+            return int(value)
 
-        # 移除空值配置项
-        config = {k: v for k, v in config.items() if v is not None}
-
-        # 解析并合并自定义参数
-        if hasattr(args, "custom_params") and args.custom_params:
-            custom_params = self._parse_custom_params(args.custom_params)
-            config.update(custom_params)
-
+        # 浮点数转换
         try:
-            db_manager.add_connection(args.name, config)
-            logger.info(f"连接 '{args.name}' 添加成功")
-            print(f"✅ 连接 '{args.name}' 添加成功")
+            return float(value)
+        except ValueError:
+            pass
 
-            # 显示添加的自定义参数
-            custom_keys = [
-                k
-                for k in config.keys()
-                if k not in ["type", "host", "port", "username", "password", "database"]
-            ]
-            if custom_keys:
-                print(f"📋 自定义参数: {', '.join(custom_keys)}")
-
-        except Exception as e:
-            logger.error(f"添加连接失败: {e}")
-            print(f"❌ 添加连接失败: {e}")
-            sys.exit(1)
+        # 保持原字符串
+        return value
 
     def _parse_custom_params(self, params: List[str]) -> Dict[str, Any]:
         """
         解析自定义参数列表，支持类型自动转换
 
         Args:
-            params: 参数字符串列表，格式为 key=value
+            params (List[str]): 参数字符串列表，格式为 key=value
 
         Returns:
             Dict[str, Any]: 转换后的键值对字典
+
+        Raises:
+            ValueError: 如果参数格式无效
 
         Example:
             >>> cli = DBConnectorCLI()
@@ -170,26 +169,225 @@ class DBConnectorCLI:
         """
         result = {}
         for param in params:
-            if "=" in param:
-                key, value = param.split("=", 1)
-                # 类型推断
-                if value.lower() in ["true", "false"]:
-                    value = value.lower() == "true"
-                elif value.isdigit():
-                    value = int(value)
-                elif value.replace(".", "", 1).isdigit():
-                    value = float(value)
-                result[key] = value
-            else:
+            if "=" not in param:
                 logger.warning(f"忽略无效的自定义参数格式: {param}")
+                continue
+
+            key, value = param.split("=", 1)
+            key = key.strip()
+            value = value.strip()
+
+            if not key:
+                logger.warning(f"忽略空键名的参数: {param}")
+                continue
+
+            result[key] = self._convert_value_type(value)
+
         return result
+
+    def _print_custom_params(self, config: Dict[str, Any]) -> None:
+        """
+        打印自定义参数信息
+
+        Args:
+            config (Dict[str, Any]): 连接配置字典
+        """
+        custom_params = [k for k in config.keys() if k not in self.BASIC_PARAMS]
+        if custom_params:
+            print(f"📋 自定义参数: {', '.join(custom_params)}")
+
+    def add_connection(self, args: argparse.Namespace) -> None:
+        """
+        添加新的数据库连接配置
+
+        Args:
+            args (argparse.Namespace): 命令行参数，包含连接配置信息
+
+        Raises:
+            SystemExit: 如果添加连接失败则退出程序
+        """
+        db_manager = self._ensure_db_manager_initialized()
+        config = self._build_connection_config(args)
+
+        try:
+            db_manager.add_connection(args.name, config)
+            logger.info(f"连接 '{args.name}' 添加成功")
+            print(f"✅ 连接 '{args.name}' 添加成功")
+            self._print_custom_params(config)
+        except Exception as e:
+            logger.error(f"添加连接失败: {e}")
+            print(f"❌ 添加连接失败: {e}")
+            sys.exit(1)
+
+    def _build_connection_config(self, args: argparse.Namespace) -> Dict[str, Any]:
+        """
+        构建连接配置字典
+
+        Args:
+            args (argparse.Namespace): 命令行参数
+
+        Returns:
+            Dict[str, Any]: 完整的连接配置字典
+        """
+        config = {}
+
+        # 添加基本参数
+        for param in self.BASIC_PARAMS:
+            value = getattr(args, param, None)
+            if value is not None:
+                config[param] = value
+
+        # 添加自定义参数
+        if hasattr(args, "custom_params") and args.custom_params:
+            custom_config = self._parse_custom_params(args.custom_params)
+            config.update(custom_config)
+
+        return config
+
+    def remove_connection(self, args: argparse.Namespace) -> None:
+        """
+        删除指定的数据库连接配置
+
+        Args:
+            args (argparse.Namespace): 命令行参数，包含要删除的连接名称
+
+        Raises:
+            SystemExit: 如果删除连接失败则退出程序
+        """
+        db_manager = self._ensure_db_manager_initialized()
+
+        try:
+            db_manager.remove_connection(args.name)
+            logger.info(f"连接 '{args.name}' 已删除")
+            print(f"✅ 连接 '{args.name}' 已删除")
+        except Exception as e:
+            logger.error(f"删除连接失败: {e}")
+            print(f"❌ 删除连接失败: {e}")
+            sys.exit(1)
+
+    def update_connection(self, args: argparse.Namespace) -> None:
+        """
+        更新数据库连接配置
+
+        Args:
+            args (argparse.Namespace): 命令行参数，包含连接名称和更新配置
+
+        Raises:
+            SystemExit: 如果更新连接失败则退出程序
+        """
+        db_manager = self._ensure_db_manager_initialized()
+
+        try:
+            existing_config = db_manager.config_manager.get_connection(args.name)
+            update_config = self._build_update_config(existing_config, args)
+
+            db_manager.update_connection(args.name, update_config)
+            logger.info(f"连接 '{args.name}' 更新成功")
+            print(f"✅ 连接 '{args.name}' 更新成功")
+            self._print_custom_params(update_config)
+        except Exception as e:
+            logger.error(f"更新连接失败: {e}")
+            print(f"❌ 更新连接失败: {e}")
+            sys.exit(1)
+
+    def _build_update_config(
+        self, existing_config: Dict[str, Any], args: argparse.Namespace
+    ) -> Dict[str, Any]:
+        """
+        根据命令行参数构建更新后的配置
+
+        Args:
+            existing_config (Dict[str, Any]): 现有配置
+            args (argparse.Namespace): 命令行参数
+
+        Returns:
+            Dict[str, Any]: 更新后的配置
+        """
+        update_config = existing_config.copy()
+
+        # 更新基本参数
+        for param in self.BASIC_PARAMS:
+            value = getattr(args, param, None)
+            if value is not None:
+                update_config[param] = value
+
+        # 更新自定义参数
+        if hasattr(args, "custom_params") and args.custom_params:
+            custom_config = self._parse_custom_params(args.custom_params)
+            update_config.update(custom_config)
+
+        return update_config
+
+    def show_connection(self, args: argparse.Namespace) -> None:
+        """
+        显示指定连接的详细配置信息
+
+        注意：敏感信息（如密码）会被隐藏显示。
+
+        Args:
+            args (argparse.Namespace): 命令行参数，包含要显示详情的连接名称
+
+        Raises:
+            SystemExit: 如果获取连接详情失败则退出程序
+        """
+        db_manager = self._ensure_db_manager_initialized()
+
+        try:
+            config = db_manager.config_manager.get_connection(args.name)
+            safe_config = self._sanitize_sensitive_info(config)
+
+            print(f"🔍 连接 '{args.name}' 的配置:")
+            self._display_connection_details(safe_config)
+
+        except Exception as e:
+            logger.error(f"获取连接详情失败: {e}")
+            print(f"❌ 获取连接详情失败: {e}")
+            sys.exit(1)
+
+    def _sanitize_sensitive_info(self, config: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        隐藏敏感信息（如密码）
+
+        Args:
+            config (Dict[str, Any]): 原始配置
+
+        Returns:
+            Dict[str, Any]: 安全配置（敏感信息已隐藏）
+        """
+        safe_config = config.copy()
+        password_fields = ["password", "passwd", "pwd"]
+
+        for field in password_fields:
+            if field in safe_config:
+                safe_config[field] = "***"
+
+        return safe_config
+
+    def _display_connection_details(self, config: Dict[str, Any]) -> None:
+        """
+        显示连接配置详情
+
+        Args:
+            config (Dict[str, Any]): 连接配置
+        """
+        # 显示基本参数
+        for key in self.BASIC_PARAMS:
+            if key in config:
+                print(f"  {key}: {config[key]}")
+
+        # 显示自定义参数
+        custom_params = [k for k in config.keys() if k not in self.BASIC_PARAMS]
+        if custom_params:
+            print("\n  📋 自定义参数:")
+            for key in custom_params:
+                print(f"    {key}: {config[key]}")
 
     def list_connections(self, _args: argparse.Namespace) -> None:
         """
         列出所有已配置的数据库连接
 
         Args:
-            args: 命令行参数
+            _args (argparse.Namespace): 命令行参数（未使用）
 
         Raises:
             SystemExit: 如果列出连接失败则退出程序
@@ -209,76 +407,12 @@ class DBConnectorCLI:
             print(f"❌ 列出连接失败: {e}")
             sys.exit(1)
 
-    def remove_connection(self, args: argparse.Namespace) -> None:
-        """
-        删除指定的数据库连接配置
-
-        Args:
-            args: 命令行参数，包含要删除的连接名称
-
-        Raises:
-            SystemExit: 如果删除连接失败则退出程序
-        """
-        db_manager = self._ensure_db_manager_initialized()
-
-        try:
-            db_manager.remove_connection(args.name)
-            logger.info(f"连接 '{args.name}' 已删除")
-            print(f"✅ 连接 '{args.name}' 已删除")
-        except Exception as e:
-            logger.error(f"删除连接失败: {e}")
-            print(f"❌ 删除连接失败: {e}")
-            sys.exit(1)
-
-    def show_connection(self, args: argparse.Namespace) -> None:
-        """
-        显示指定连接的详细配置信息
-
-        注意：敏感信息（如密码）会被隐藏显示。
-
-        Args:
-            args: 命令行参数，包含要显示详情的连接名称
-
-        Raises:
-            SystemExit: 如果获取连接详情失败则退出程序
-        """
-        db_manager = self._ensure_db_manager_initialized()
-
-        try:
-            config = db_manager.config_manager.get_connection(args.name)
-            # 隐藏敏感信息（密码等）
-            safe_config = config.copy()
-            password_fields = ["password", "passwd", "pwd"]
-            for field in password_fields:
-                if field in safe_config:
-                    safe_config[field] = "***"
-
-            print(f"🔍 连接 '{args.name}' 的配置:")
-
-            # 先显示基本参数
-            basic_params = ["type", "host", "port", "username", "password", "database"]
-            for key in basic_params:
-                if key in safe_config:
-                    print(f"  {key}: {safe_config[key]}")
-
-            # 显示自定义参数
-            custom_params = [k for k in safe_config.keys() if k not in basic_params]
-            if custom_params:
-                print("\n  📋 自定义参数:")
-                for key in custom_params:
-                    print(f"    {key}: {safe_config[key]}")
-
-        except Exception as e:
-            logger.error(f"获取连接详情失败: {e}")
-            print(f"❌ 获取连接详情失败: {e}")
-            sys.exit(1)
-
     def test_connection(self, args: argparse.Namespace) -> None:
         """
         测试指定连接的连通性
 
         Args:
-            args: 命令行参数，包含要测试的连接名称
+            args (argparse.Namespace): 命令行参数，包含要测试的连接名称
 
         Raises:
             SystemExit: 如果连接测试失败则退出程序
@@ -472,123 +606,6 @@ class DBConnectorCLI:
             statements.append(current_statement.strip())
 
         return [stmt for stmt in statements if stmt and not stmt.isspace()]
-
-    def update_connection(self, args: argparse.Namespace) -> None:
-        """
-        更新数据库连接配置
-
-        Args:
-            args: 命令行参数，包含连接名称和更新配置
-
-        Raises:
-            SystemExit: 如果更新连接失败则退出程序
-        """
-        db_manager = self._ensure_db_manager_initialized()
-
-        # 获取现有配置
-        existing_config = self._get_existing_config(db_manager, args.name)
-
-        # 构建更新配置
-        update_config = self._build_update_config(existing_config, args)
-
-        try:
-            db_manager.update_connection(args.name, update_config)
-            logger.info(f"连接 '{args.name}' 更新成功")
-            print(f"✅ 连接 '{args.name}' 更新成功")
-
-            # 显示更新的自定义参数
-            self._print_custom_params(update_config)
-
-        except Exception as e:
-            logger.error(f"更新连接失败: {e}")
-            print(f"❌ 更新连接失败: {e}")
-            sys.exit(1)
-
-    def _get_existing_config(self, db_manager: DatabaseManager, name: str) -> dict:
-        """
-        获取现有连接配置
-
-        Args:
-            db_manager: 数据库管理器实例
-            name: 连接名称
-
-        Returns:
-            dict: 现有连接配置
-
-        Raises:
-            SystemExit: 如果获取配置失败
-        """
-        try:
-            return db_manager.config_manager.get_connection(name)
-        except Exception as e:
-            logger.error(f"获取现有配置失败: {e}")
-            print(f"❌ 获取现有配置失败: {e}")
-            sys.exit(1)
-
-    def _build_update_config(
-        self, existing_config: dict, args: argparse.Namespace
-    ) -> dict:
-        """
-        根据命令行参数构建更新后的配置
-
-        Args:
-            existing_config: 现有配置
-            args: 命令行参数
-
-        Returns:
-            dict: 更新后的配置
-        """
-        update_config = existing_config.copy()
-
-        # 更新基本参数
-        basic_params = ["type", "host", "port", "username", "password", "database"]
-        for param in basic_params:
-            if getattr(args, param, None):
-                update_config[param] = getattr(args, param)
-
-        # 处理自定义参数
-        if hasattr(args, "custom_params") and args.custom_params:
-            for param in args.custom_params:
-                if "=" in param:
-                    key, value = param.split("=", 1)
-                    update_config[key] = self._convert_value_type(value)
-                else:
-                    logger.warning(f"忽略无效的自定义参数格式: {param}")
-
-        return update_config
-
-    def _convert_value_type(self, value: str) -> Union[str, int, float, bool]:
-        """
-        尝试转换参数值的数据类型
-
-        Args:
-            value: 原始字符串值
-
-        Returns:
-            Union[str, int, float, bool]: 转换后的值
-        """
-        if value.lower() in ["true", "false"]:
-            return value.lower() == "true"
-        elif value.isdigit():
-            return int(value)
-        elif value.replace(".", "", 1).isdigit():
-            return float(value)
-        return value
-
-    def _print_custom_params(self, config: dict) -> None:
-        """
-        打印自定义参数信息
-
-        Args:
-            config: 连接配置字典
-        """
-        custom_params = [
-            k
-            for k in config.keys()
-            if k not in ["type", "host", "port", "username", "password", "database"]
-        ]
-        if custom_params:
-            print(f"📋 自定义参数: {', '.join(custom_params)}")
 
     def _truncate_sql(self, sql: str, max_length: int = 50) -> str:
         """
@@ -840,77 +857,21 @@ SQL Shell 命令:
         """
         print(help_text)
 
-    def export_config(self, args: argparse.Namespace) -> None:
-        """
-        导出所有连接配置到文件
 
-        Args:
-            args: 命令行参数，包含导出文件路径
+class ChineseHelpFormatter(argparse.RawDescriptionHelpFormatter):
+    """中文帮助格式化器，优化帮助信息显示"""
 
-        Raises:
-            SystemExit: 如果导出失败
-        """
-        db_manager = self._ensure_db_manager_initialized()
+    def _format_usage(self, usage, actions, groups, prefix):
+        """格式化使用说明"""
+        if prefix is None:
+            prefix = "\n使用情况: "
+        return super()._format_usage(usage, actions, groups, prefix)
 
-        try:
-            connections = db_manager.list_connections()
-            config_data = {}
-
-            for conn_name in connections:
-                config = db_manager.config_manager.get_connection(conn_name)
-                # 隐藏敏感信息
-                safe_config = config.copy()
-                password_fields = ["password", "passwd", "pwd"]
-                for field in password_fields:
-                    if field in safe_config:
-                        safe_config[field] = "***"
-                config_data[conn_name] = safe_config
-
-            with open(args.file, "w", encoding="utf-8") as f:
-                json.dump(config_data, f, indent=2, ensure_ascii=False)
-
-            print(f"✅ 配置已导出到: {args.file}")
-        except Exception as e:
-            logger.error(f"导出配置失败: {e}")
-            print(f"❌ 导出配置失败: {e}")
-            sys.exit(1)
-
-    def import_config(self, args: argparse.Namespace) -> None:
-        """
-        从文件导入连接配置
-
-        Args:
-            args: 命令行参数，包含导入文件路径
-
-        Raises:
-            SystemExit: 如果导入失败
-        """
-        db_manager = self._ensure_db_manager_initialized()
-
-        if not os.path.exists(args.file):
-            logger.error(f"配置文件不存在: {args.file}")
-            print(f"❌ 配置文件不存在: {args.file}")
-            sys.exit(1)
-
-        try:
-            with open(args.file, "r", encoding="utf-8") as f:
-                config_data = json.load(f)
-
-            imported_count = 0
-            for conn_name, config in config_data.items():
-                try:
-                    db_manager.add_connection(conn_name, config)
-                    imported_count += 1
-                    print(f"✅ 导入连接: {conn_name}")
-                except Exception as e:
-                    logger.warning(f"导入连接 {conn_name} 失败: {e}")
-                    print(f"⚠️  导入连接 {conn_name} 失败: {e}")
-
-            print(f"✅ 导入完成: 成功 {imported_count} 个连接")
-        except Exception as e:
-            logger.error(f"导入配置失败: {e}")
-            print(f"❌ 导入配置失败: {e}")
-            sys.exit(1)
+    def start_section(self, heading):
+        """开始新的帮助章节"""
+        if heading == "options":
+            heading = "下列选项可用"
+        super().start_section(heading)
 
 
 def create_argument_parser(cli_instance: DBConnectorCLI) -> argparse.ArgumentParser:
@@ -918,14 +879,15 @@ def create_argument_parser(cli_instance: DBConnectorCLI) -> argparse.ArgumentPar
     创建命令行参数解析器
 
     Args:
-        cli_instance: 已初始化的CLI实例
+        cli_instance (DBConnectorCLI): 已初始化的CLI实例
 
     Returns:
         argparse.ArgumentParser: 配置好的参数解析器
     """
     parser = argparse.ArgumentParser(
+        usage="db-connector [<命令>] [<选项>]",
         description="DB Connector - 数据库连接管理工具",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
+        formatter_class=ChineseHelpFormatter,
         epilog="""
 使用示例:
   db-connector add mysql-dev --type mysql --host localhost --username root
@@ -933,64 +895,60 @@ def create_argument_parser(cli_instance: DBConnectorCLI) -> argparse.ArgumentPar
   db-connector query mysql-dev "SELECT * FROM users"
   db-connector shell mysql-dev
 
-更多帮助请参考: https://github.com/your-repo/db-connector
+更多帮助请参考项目文档。
         """,
+        add_help=False,
     )
 
-    subparsers = parser.add_subparsers(title="可用命令", dest="command")
+    # 添加自定义的帮助选项
+    parser.add_argument(
+        "-h",
+        "--help",
+        action="help",
+        default=argparse.SUPPRESS,
+        help="显示选定命令的帮助信息",
+    )
 
-    # 使用传入的CLI实例，而不是创建新的实例
+    subparsers = parser.add_subparsers(title="下列命令有效", dest="command")
+
     # add 命令
     add_parser = subparsers.add_parser("add", help="添加新的数据库连接")
-    add_parser.add_argument("name", help="连接名称")
-    add_parser.add_argument("--type", required=True, help="数据库类型")
-    add_parser.add_argument("--host", required=True, help="数据库主机")
-    add_parser.add_argument("--port", type=int, help="数据库端口")
-    add_parser.add_argument("--username", required=True, help="用户名")
-    add_parser.add_argument("--password", help="密码")
-    add_parser.add_argument("--database", help="数据库名")
-    add_parser.add_argument("--custom-params", nargs="+", help="自定义参数 (key=value)")
+    _setup_connection_arguments(add_parser)
     add_parser.set_defaults(func=cli_instance.add_connection)
-
-    # list 命令
-    list_parser = subparsers.add_parser("list", help="列出所有连接")
-    list_parser.set_defaults(func=cli_instance.list_connections)
 
     # remove 命令
     remove_parser = subparsers.add_parser("remove", help="删除连接")
     remove_parser.add_argument("name", help="连接名称")
     remove_parser.set_defaults(func=cli_instance.remove_connection)
 
+    # update 命令
+    update_parser = subparsers.add_parser("update", help="更新连接配置")
+    _setup_connection_arguments(update_parser)
+    update_parser.set_defaults(func=cli_instance.update_connection)
+
     # show 命令
     show_parser = subparsers.add_parser("show", help="显示连接详情")
     show_parser.add_argument("name", help="连接名称")
     show_parser.set_defaults(func=cli_instance.show_connection)
+
+    # list 命令
+    list_parser = subparsers.add_parser("list", help="列出所有连接")
+    list_parser.set_defaults(func=cli_instance.list_connections)
 
     # test 命令
     test_parser = subparsers.add_parser("test", help="测试连接")
     test_parser.add_argument("name", help="连接名称")
     test_parser.set_defaults(func=cli_instance.test_connection)
 
-    # update 命令
-    update_parser = subparsers.add_parser("update", help="更新连接配置")
-    update_parser.add_argument("name", help="连接名称")
-    update_parser.add_argument("--type", help="数据库类型")
-    update_parser.add_argument("--host", help="数据库主机")
-    update_parser.add_argument("--port", type=int, help="数据库端口")
-    update_parser.add_argument("--username", help="用户名")
-    update_parser.add_argument("--password", help="密码")
-    update_parser.add_argument("--database", help="数据库名")
-    update_parser.add_argument(
-        "--custom-params", nargs="+", help="自定义参数 (key=value)"
-    )
-    update_parser.set_defaults(func=cli_instance.update_connection)
-
     # query 命令
     query_parser = subparsers.add_parser("query", help="执行SQL查询")
     query_parser.add_argument("connection", help="连接名称")
     query_parser.add_argument("query", help="SQL查询语句")
     query_parser.add_argument(
-        "--format", choices=["table", "json", "csv"], default="table", help="输出格式"
+        "--format",
+        choices=["table", "json", "csv"],
+        default="table",
+        help="输出格式 (默认: table)",
     )
     query_parser.add_argument("--output", help="输出文件路径")
     query_parser.set_defaults(func=cli_instance.execute_query)
@@ -1000,7 +958,10 @@ def create_argument_parser(cli_instance: DBConnectorCLI) -> argparse.ArgumentPar
     execute_parser.add_argument("connection", help="连接名称")
     execute_parser.add_argument("file", help="SQL文件路径")
     execute_parser.add_argument(
-        "--format", choices=["table", "json", "csv"], default="table", help="输出格式"
+        "--format",
+        choices=["table", "json", "csv"],
+        default="table",
+        help="输出格式 (默认: table)",
     )
     execute_parser.add_argument("--output", help="输出文件路径")
     execute_parser.add_argument(
@@ -1013,23 +974,57 @@ def create_argument_parser(cli_instance: DBConnectorCLI) -> argparse.ArgumentPar
     shell_parser.add_argument("connection", help="连接名称")
     shell_parser.set_defaults(func=cli_instance.interactive_shell)
 
-    # export 命令
-    export_parser = subparsers.add_parser("export", help="导出连接配置")
-    export_parser.add_argument("file", help="导出文件路径")
-    export_parser.set_defaults(func=cli_instance.export_config)
-
-    # import命令
-    import_parser = subparsers.add_parser("import", help="导入连接配置")
-    import_parser.add_argument("file", help="导入文件路径")
-    import_parser.set_defaults(func=cli_instance.import_config)
-
     return parser
+
+
+def _setup_connection_arguments(parser: argparse.ArgumentParser) -> None:
+    """
+    设置连接相关的命令行参数
+
+    Args:
+        parser (argparse.ArgumentParser): 参数解析器实例
+    """
+    parser.add_argument("name", help="连接名称")
+    parser.add_argument(
+        "-T",
+        "--type",
+        required=True,
+        choices=SUPPORTED_DATABASE_TYPES,
+        help="数据库类型",
+    )
+    parser.add_argument("-H", "--host", help="数据库主机")
+    parser.add_argument("-P", "--port", type=int, help="数据库端口")
+    parser.add_argument("-u", "--username", help="用户名")
+    parser.add_argument("-p", "--password", help="密码")
+    parser.add_argument("-d", "--database", help="数据库名")
+    parser.add_argument("-s", "--service-name", help="Oracle服务名称")
+    parser.add_argument(
+        "-g",
+        "--gssencmode",
+        choices=["disable", "allow", "prefer", "require"],
+        help="PostgreSQL GSSENCMODE 参数",
+    )
+    parser.add_argument(
+        "-k",
+        "--charset",
+        choices=["cp936", "utf8", "utf8mb4"],
+        help="MySQL/MSSQL字符集",
+    )
+    parser.add_argument(
+        "-t",
+        "--tds-version",
+        choices=["7.0", "7.1", "7.2", "7.3", "7.4", "8.0"],
+        help="MSSQL TDS 版本",
+    )
+    parser.add_argument(
+        "-c", "--custom-params", nargs="+", help="自定义参数 (格式: key=value)"
+    )
 
 
 def main():
     """DB Connector CLI 主入口函数"""
     cli = DBConnectorCLI()
-    parser = create_argument_parser(cli)  # 传入已初始化的CLI实例
+    parser = create_argument_parser(cli)
 
     if len(sys.argv) == 1:
         parser.print_help()
