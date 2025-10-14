@@ -192,7 +192,7 @@ class ConfigManager:
                 self.crypto = CryptoManager.from_saved_key(
                     key_data["password"], key_data["salt"]
                 )
-                logger.info("加密密钥加载成功")
+                logger.debug("加密密钥加载成功")
 
             except Exception as e:
                 logger.error(f"加载加密密钥失败: {str(e)}")
@@ -274,7 +274,7 @@ class ConfigManager:
             logger.error(f"添加连接配置失败 {name}: {str(e)}")
             if isinstance(e, ConfigError):
                 raise
-            raise ConfigError(f"添加连接配置失败: {str(e)}") from e
+            raise ConfigError(f"连接配置添加失败: {str(e)}") from e
 
     def _load_config(self) -> Dict[str, Any]:
         """
@@ -389,36 +389,76 @@ class ConfigManager:
             logger.warning(f"版本号递增失败，保持原版本号: {str(e)}")
             # 如果版本号递增失败，不影响主要功能，继续使用原版本号
 
-    def _deserialize_value(self, json_str: str) -> Any:
+    def remove_connection(self, name: str) -> None:
         """
-        反序列化值，恢复原始数据类型
+        删除连接配置
 
         Args:
-            json_str: JSON格式的序列化字符串
-
-        Returns:
-            Any: 反序列化后的原始值
+            name: 连接名称
 
         Raises:
-            ValueError: 当JSON字符串格式无效时
+            ConfigError: 当连接不存在或删除失败时
 
-        Process:
-            1. 解析JSON字符串
-            2. 提取原始值
-            3. 如果解析失败，返回原始字符串
+        Security Note:
+            - 删除操作不可逆，建议先备份
+            - 删除后加密数据将无法恢复
 
         Example:
-            >>> original = self._deserialize_value('{"type": "str", "value": "secret"}')
-            >>> print(original)
-            "secret"
+            >>> config_manager.remove_connection("postgres_db")
         """
+        if not name or not isinstance(name, str):
+            raise ValueError(ERROR_EMPTY_CONNECTION_NAME)
+
         try:
-            value_info = json.loads(json_str)
-            return value_info["value"]
-        except (json.JSONDecodeError, KeyError, TypeError) as e:
-            logger.warning(f"反序列化失败，返回原始字符串: {str(e)}")
-            # 如果JSON解析失败，尝试直接返回字符串值
-            return json_str
+            config = self._load_config()
+
+            if name not in config["connections"]:
+                raise ConfigError(f"连接配置不存在: {name}")
+
+            del config["connections"][name]
+            self._save_config(config)
+            logger.info(f"连接配置已删除: {name}")
+
+        except Exception as e:
+            logger.error(f"删除连接配置失败 {name}: {str(e)}")
+            if isinstance(e, ConfigError):
+                raise
+            raise ConfigError(f"连接配置删除失败: {str(e)}") from e
+
+    def update_connection(self, name: str, connection_config: Dict[str, Any]) -> None:
+        """
+        更新连接配置
+
+        Args:
+            name: 连接名称
+            connection_config: 新的连接配置字典
+
+        Raises:
+            ConfigError: 当连接不存在或更新失败时
+
+        Process:
+            1. 删除旧配置
+            2. 添加新配置
+
+        Example:
+            >>> new_config = {"host": "new_host", "port": 5433}
+            >>> config_manager.update_connection("postgres_db", new_config)
+        """
+        if not name or not isinstance(name, str):
+            raise ValueError(ERROR_EMPTY_CONNECTION_NAME)
+
+        if not connection_config or not isinstance(connection_config, dict):
+            raise ValueError(ERROR_INVALID_CONFIG_DICT)
+
+        try:
+            # 先删除旧配置，再添加新配置
+            self.remove_connection(name)
+            self.add_connection(name, connection_config)
+            logger.info(f"连接配置已更新: {name}")
+
+        except Exception as e:
+            logger.error(f"更新连接配置失败 {name}: {str(e)}")
+            raise ConfigError(f"连接配置更新失败: {str(e)}") from e
 
     def get_connection(self, name: str) -> Dict[str, Any]:
         """
@@ -472,7 +512,38 @@ class ConfigManager:
             logger.error(f"获取连接配置失败 {name}: {str(e)}")
             if isinstance(e, ConfigError):
                 raise
-            raise ConfigError(f"获取连接配置失败: {str(e)}") from e
+            raise ConfigError(f"连接配置获取失败: {str(e)}") from e
+
+    def _deserialize_value(self, json_str: str) -> Any:
+        """
+        反序列化值，恢复原始数据类型
+
+        Args:
+            json_str: JSON格式的序列化字符串
+
+        Returns:
+            Any: 反序列化后的原始值
+
+        Raises:
+            ValueError: 当JSON字符串格式无效时
+
+        Process:
+            1. 解析JSON字符串
+            2. 提取原始值
+            3. 如果解析失败，返回原始字符串
+
+        Example:
+            >>> original = self._deserialize_value('{"type": "str", "value": "secret"}')
+            >>> print(original)
+            "secret"
+        """
+        try:
+            value_info = json.loads(json_str)
+            return value_info["value"]
+        except (json.JSONDecodeError, KeyError, TypeError) as e:
+            logger.warning(f"反序列化失败，返回原始字符串: {str(e)}")
+            # 如果JSON解析失败，尝试直接返回字符串值
+            return json_str
 
     def list_connections(self) -> List[str]:
         """
@@ -494,102 +565,7 @@ class ConfigManager:
             return list(config["connections"].keys())
         except Exception as e:
             logger.error(f"列出连接失败: {str(e)}")
-            raise ConfigError(f"列出连接失败: {str(e)}") from e
-
-    def connection_exists(self, name: str) -> bool:
-        """
-        检查连接配置是否存在
-
-        Args:
-            name: 连接名称
-
-        Returns:
-            bool: 连接是否存在
-
-        Note:
-            此方法不会解密配置内容，仅检查是否存在
-
-        Example:
-            >>> exists = config_manager.connection_exists("postgres_db")
-            >>> print(exists)
-            True
-        """
-        try:
-            config = self._load_config()
-            return name in config["connections"]
-        except Exception:
-            return False
-
-    def remove_connection(self, name: str) -> None:
-        """
-        删除连接配置
-
-        Args:
-            name: 连接名称
-
-        Raises:
-            ConfigError: 当连接不存在或删除失败时
-
-        Security Note:
-            - 删除操作不可逆，建议先备份
-            - 删除后加密数据将无法恢复
-
-        Example:
-            >>> config_manager.remove_connection("postgres_db")
-        """
-        if not name or not isinstance(name, str):
-            raise ValueError(ERROR_EMPTY_CONNECTION_NAME)
-
-        try:
-            config = self._load_config()
-
-            if name not in config["connections"]:
-                raise ConfigError(f"连接配置不存在: {name}")
-
-            del config["connections"][name]
-            self._save_config(config)
-            logger.info(f"连接配置已删除: {name}")
-
-        except Exception as e:
-            logger.error(f"删除连接配置失败 {name}: {str(e)}")
-            if isinstance(e, ConfigError):
-                raise
-            raise ConfigError(f"删除连接配置失败: {str(e)}") from e
-
-    def update_connection(self, name: str, connection_config: Dict[str, Any]) -> None:
-        """
-        更新连接配置
-
-        Args:
-            name: 连接名称
-            connection_config: 新的连接配置字典
-
-        Raises:
-            ConfigError: 当连接不存在或更新失败时
-
-        Process:
-            1. 删除旧配置
-            2. 添加新配置
-
-        Example:
-            >>> new_config = {"host": "new_host", "port": 5433}
-            >>> config_manager.update_connection("postgres_db", new_config)
-        """
-        if not name or not isinstance(name, str):
-            raise ValueError(ERROR_EMPTY_CONNECTION_NAME)
-
-        if not connection_config or not isinstance(connection_config, dict):
-            raise ValueError(ERROR_INVALID_CONFIG_DICT)
-
-        try:
-            # 先删除旧配置，再添加新配置
-            self.remove_connection(name)
-            self.add_connection(name, connection_config)
-            logger.info(f"连接配置已更新: {name}")
-
-        except Exception as e:
-            logger.error(f"更新连接配置失败 {name}: {str(e)}")
-            raise ConfigError(f"更新连接配置失败: {str(e)}") from e
+            raise ConfigError(f"连接列出失败: {str(e)}") from e
 
     def get_config_info(self) -> Dict[str, Any]:
         """
@@ -615,7 +591,7 @@ class ConfigManager:
             }
         except Exception as e:
             logger.error(f"获取配置信息失败: {str(e)}")
-            raise ConfigError(f"获取配置信息失败: {str(e)}") from e
+            raise ConfigError(f"配置信息获取失败: {str(e)}") from e
 
     def backup_config(self, backup_path: Path | None = None) -> Path:
         """
@@ -653,9 +629,32 @@ class ConfigManager:
             raise ConfigError(f"配置文件备份失败: {str(e)}") from e
 
     def __str__(self) -> str:
-        """返回配置管理器的字符串表示"""
-        return f"ConfigManager(app_name='{self.app_name}', config_file='{self.config_file}')"
+        """返回配置管理器的用户友好字符串表示"""
+        try:
+            config_info = self.get_config_info()
+            connection_count = config_info["connection_count"]
+            return f"ConfigManager('{self.app_name}', {connection_count} connections)"
+        except Exception:
+            # 如果获取配置信息失败，返回基本表示
+            return f"ConfigManager('{self.app_name}', '{self.config_file}')"
 
     def __repr__(self) -> str:
-        """返回配置管理器的详细表示"""
-        return f"ConfigManager(app_name='{self.app_name}', config_file='{self.config_file}', config_path='{self.config_path}')"
+        """返回配置管理器的详细表示，用于调试"""
+        try:
+            config_info = self.get_config_info()
+            connection_count = config_info["connection_count"]
+            version = config_info["version"]
+            return (
+                f"ConfigManager(app_name='{self.app_name}', "
+                f"config_file='{self.config_file}', "
+                f"config_path='{self.config_path}', "
+                f"version='{version}', "
+                f"connections={connection_count})"
+            )
+        except Exception:
+            # 如果获取配置信息失败，返回基本表示
+            return (
+                f"ConfigManager(app_name='{self.app_name}', "
+                f"config_file='{self.config_file}', "
+                f"config_path='{self.config_path}')"
+            )

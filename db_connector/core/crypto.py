@@ -69,12 +69,12 @@ class CryptoManager:
             self.salt = salt or self._generate_secure_salt()
             self.fernet = self._create_fernet_instance()
 
-            logger.info(
+            logger.debug(
                 f"加密管理器初始化成功，盐值长度: {len(self.salt)}, 密码长度: {len(self.password)}"
             )
 
         except Exception as e:
-            logger.error(f"加密管理器初始化失败: {str(e)}")
+            logger.error(f"初始化加密管理器失败: {str(e)}")
             raise CryptoError(f"加密系统初始化失败: {str(e)}") from e
 
     def _generate_secure_password(self) -> str:
@@ -324,33 +324,10 @@ class CryptoManager:
             logger.error(f"从保存的密钥创建实例失败: {str(e)}")
             raise CryptoError(f"密钥恢复失败: {str(e)}") from e
 
-    def verify_encryption(self, test_data: str = "test") -> bool:
-        """
-        验证加密解密功能是否正常工作
-
-        Args:
-            test_data: 测试用的数据，默认为 "test"
-
-        Returns:
-            bool: 加密解密功能是否正常
-
-        Example:
-            >>> is_working = crypto.verify_encryption()
-            >>> print(is_working)
-            True
-        """
-        try:
-            encrypted = self.encrypt(test_data)
-            decrypted = self.decrypt(encrypted)
-            return decrypted == test_data
-        except Exception as e:
-            logger.warning(f"加密验证失败: {str(e)}")
-            return False
-
     def __str__(self) -> str:
-        """返回加密管理器的字符串表示"""
-        return f"CryptoManager(salt_length={len(self.salt)}, password_length={len(self.password)})"
+        """返回加密管理器的用户友好字符串表示"""
+        return f"CryptoManager(盐值长度={self.DEFAULT_SALT_LENGTH}, 迭代次数={self.DEFAULT_ITERATIONS})"
 
     def __repr__(self) -> str:
-        """返回加密管理器的详细表示（不包含敏感信息）"""
-        return f"CryptoManager(password='***', salt=b'...', iterations={self.DEFAULT_ITERATIONS})"
+        """返回加密管理器的详细表示（安全版本）"""
+        return f"<CryptoManager object at {hex(id(self))}, salt_length={self.DEFAULT_SALT_LENGTH}, password_length={self.DEFAULT_PASSWORD_LENGTH}, iterations={self.DEFAULT_ITERATIONS}>"
