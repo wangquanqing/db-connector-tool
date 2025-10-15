@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "db-connector"
-version = "0.0.3"
+version = "0.0.4"
 description = "跨平台数据库连接管理模块"
 authors = [
     {name = "wangquanqing", email = "wangquanqing1636@sina.com"}
@@ -56,8 +56,7 @@ cli = [
 
 # 添加CLI入口点
 [project.scripts]
-db-connector = "db_connector.cli:main"           # 标准CLI
-db-connector-rich = "db_connector.rich_cli:main_enhanced"  # 增强版CLI
+db-connector = "db_connector.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/wangquanqing/db-connector-project"

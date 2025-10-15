@@ -16,7 +16,7 @@ DB Connector - 跨平台数据库连接管理模块
 许可证: MIT
 """
 
-__version__ = "0.0.3"
+__version__ = "0.0.4"
 __author__ = "wangquanqing <wangquanqing1636@sina.com>"
 __license__ = "MIT"
 
