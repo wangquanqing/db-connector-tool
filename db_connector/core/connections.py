@@ -10,6 +10,7 @@
 - 线程安全的连接操作
 - 连接生命周期管理
 - 性能监控和统计信息
+- 配置覆盖支持（临时连接配置）
 
 设计原则：
 - 简化配置验证，详细验证逻辑下放到SQLAlchemyDriver
@@ -43,8 +44,8 @@ SUPPORTED_DATABASE_TYPES: Set[str] = {
     "sqlite",
 }
 
-# 默认连接超时时间（秒）
-DEFAULT_CONNECTION_TIMEOUT = 30
+# 默认配置参数
+DEFAULT_MAX_IDLE_TIME = 300  # 5分钟
 
 
 class ConnectionInfo:
@@ -71,7 +72,7 @@ class ConnectionInfo:
         初始化连接信息
 
         Args:
-            driver: 数据库驱动实例
+            driver: 数据库驱动实例，必须已建立连接
         """
         self.driver = driver
         self.last_used = time.time()
@@ -84,14 +85,22 @@ class ConnectionInfo:
         self.last_used = time.time()
         self.use_count += 1
 
+    def invalidate(self) -> None:
+        """标记连接为无效状态"""
+        self.is_active = False
+
     def __str__(self) -> str:
         """返回连接的字符串表示"""
         last_used_str = time.strftime(
             "%Y-%m-%d %H:%M:%S", time.localtime(self.last_used)
         )
+        created_str = time.strftime(
+            "%Y-%m-%d %H:%M:%S", time.localtime(self.created_at)
+        )
         return (
             f"ConnectionInfo(use_count={self.use_count}, "
-            f"last_used={last_used_str}, is_active={self.is_active})"
+            f"last_used={last_used_str}, created_at={created_str}, "
+            f"is_active={self.is_active})"
         )
 
 
@@ -153,49 +162,8 @@ class DatabaseManager:
             }
             logger.info(f"数据库管理器初始化成功: {app_name}")
         except Exception as e:
-            logger.error(f"数据库管理器初始化失败: {str(e)}")
+            logger.error(f"初始化数据库管理器失败: {str(e)}")
             raise ConfigError(f"数据库管理器初始化失败: {str(e)}")
-
-    def _validate_basic_config(self, config: Dict[str, Any]) -> None:
-        """
-        基本配置验证
-
-        Args:
-            config: 连接配置字典
-
-        Raises:
-            ConfigError: 当基本配置验证失败时
-
-        Note:
-            详细验证逻辑由SQLAlchemyDriver处理，这里只做基本检查
-            确保配置结构正确，避免无效配置进入系统
-
-        Validation Rules:
-            - 配置不能为空且必须是字典
-            - 数据库类型必须在支持列表中
-            - 非SQLite数据库需要基本连接参数
-        """
-        if not config or not isinstance(config, dict):
-            raise ConfigError("连接配置不能为空且必须是字典")
-
-        # 验证数据库类型
-        db_type = config.get("type", "").lower()
-        if db_type not in SUPPORTED_DATABASE_TYPES:
-            supported_types = ", ".join(sorted(SUPPORTED_DATABASE_TYPES))
-            raise ConfigError(
-                f"不支持的数据库类型: {db_type}，支持的类型: {supported_types}"
-            )
-
-        # SQLite特殊处理
-        if db_type == "sqlite":
-            if "database" not in config:
-                config["database"] = ":memory:"
-        else:
-            # 验证基本必需参数
-            required_fields = ["username", "password", "host"]
-            missing_fields = [field for field in required_fields if field not in config]
-            if missing_fields:
-                raise ConfigError(f"缺少必需的连接参数: {', '.join(missing_fields)}")
 
     def add_connection(self, name: str, connection_config: Dict[str, Any]) -> None:
         """
@@ -229,7 +197,7 @@ class DatabaseManager:
         with self._lock:
             try:
                 # 检查连接是否已存在
-                existing_connections = self.config_manager.list_connections()
+                existing_connections = self.list_connections()
                 if name in existing_connections:
                     raise ConfigError(CONNECTION_ALREADY_EXISTS_MSG.format(name))
 
@@ -243,179 +211,60 @@ class DatabaseManager:
             except ConfigError:
                 raise
             except Exception as e:
-                logger.error(f"创建连接配置失败 {name}: {str(e)}")
-                raise DatabaseError(f"创建连接配置失败: {str(e)}")
+                logger.error(f"创建数据库连接配置失败 {name}: {str(e)}")
+                raise DatabaseError(f"数据库连接配置创建失败: {str(e)}")
 
-    def get_connection(
-        self, name: str, config_overrides: Dict[str, Any] | None = None
-    ) -> SQLAlchemyDriver:
+    def _validate_basic_config(self, config: Dict[str, Any]) -> None:
         """
-        获取数据库连接（连接池管理）
+        基本配置验证
 
         Args:
-            name: 连接名称
-            config_overrides: 可选的配置覆盖字典，用于临时修改连接配置
-                            例如：{"host": "127.0.0.1", "port": 3306}
-
-        Returns:
-            SQLAlchemyDriver实例，用于执行数据库操作
+            config: 连接配置字典
 
         Raises:
-            DatabaseError: 当获取连接失败时
-            ConnectionError: 当连接建立失败时
-            ConfigError: 当连接配置不存在时
-
-        Process:
-            1. 验证连接配置存在
-            2. 检查连接池中是否有有效连接
-            3. 如果连接无效，清理并重新创建
-            4. 返回可用的驱动实例
+            ConfigError: 当基本配置验证失败时
 
         Note:
-            如果连接已存在且有效，直接返回缓存的连接，否则创建新连接
-            连接池机制提高性能，避免频繁创建和销毁连接
-            当提供config_overrides时，会创建新的连接而不是使用缓存
+            详细验证逻辑由SQLAlchemyDriver处理，这里只做基本检查
+            确保配置结构正确，避免无效配置进入系统
 
-        Example:
-            >>> driver = db_manager.get_connection("mysql_db")
-            >>> result = driver.execute_query("SELECT * FROM users")
-            >>> # 使用配置覆盖
-            >>> driver = db_manager.get_connection("mysql_db", {"host": "127.0.0.1"})
+        Validation Rules:
+            - 配置不能为空且必须是字典
+            - 数据库类型必须在支持列表中
+            - 非SQLite数据库需要基本连接参数
         """
-        with self._lock:
-            try:
-                # 检查连接配置是否存在
-                self._validate_connection_exists(name)
+        if not config or not isinstance(config, dict):
+            raise ConfigError("连接配置不能为空且必须是字典")
 
-                # 如果提供了配置覆盖，则强制创建新连接
-                if config_overrides:
-                    # 清理可能存在的缓存连接
-                    if name in self.connection_pool:
-                        self._cleanup_connection(name)
+        # 验证数据库类型
+        db_type = config.get("type", "").lower()
+        if db_type not in SUPPORTED_DATABASE_TYPES:
+            supported_types = ", ".join(sorted(SUPPORTED_DATABASE_TYPES))
+            raise ConfigError(
+                f"不支持的数据库类型: {db_type}，支持的类型: {supported_types}"
+            )
 
-                    # 获取基础配置并应用覆盖
-                    base_config = self.config_manager.get_connection(name)
-                    connection_config = {**base_config, **config_overrides}
+        # SQLite数据库特殊处理
+        if db_type == "sqlite" and "database" not in config:
+            config["database"] = ":memory:"
+            return
 
-                    # 验证修改后的配置
-                    self._validate_basic_config(connection_config)
+        # 为特定数据库类型设置默认值
+        if db_type == "oracle" and "service_name" not in config:
+            config["service_name"] = "XE"
+        elif db_type == "postgresql" and "gssencmode" not in config:
+            config["gssencmode"] = "disable"
+        elif db_type == "mssql":
+            if "charset" not in config:
+                config["charset"] = "cp936"
+            if "tds_version" not in config:
+                config["tds_version"] = "7.0"
 
-                    # 创建新连接
-                    driver = SQLAlchemyDriver(connection_config)
-                    driver.connect()
-
-                    # 创建连接信息但不加入连接池（因为是临时配置）
-                    connection_info = ConnectionInfo(driver)
-                    # 注意：临时配置的连接不加入连接池，避免配置冲突
-
-                    logger.info(f"使用临时配置建立数据库连接: {name}")
-                    return driver
-
-                # 连接池管理逻辑（无配置覆盖时）
-                if name in self.connection_pool:
-                    connection_info = self.connection_pool[name]
-
-                    # 检查连接是否有效
-                    if connection_info.is_active and self._is_connection_valid(
-                        connection_info.driver
-                    ):
-                        connection_info.mark_used()
-                        logger.debug(f"使用缓存的数据库连接: {name}")
-                        return connection_info.driver
-                    else:
-                        # 连接无效，清理并重新创建
-                        self._cleanup_connection(name)
-
-                # 创建新连接
-                connection_config = self.config_manager.get_connection(name)
-                driver = SQLAlchemyDriver(connection_config)
-                driver.connect()
-
-                # 创建连接信息并加入连接池
-                connection_info = ConnectionInfo(driver)
-                self.connection_pool[name] = connection_info
-                self._statistics["total_connections_created"] += 1
-
-                logger.info(f"数据库连接已建立: {name}")
-                return driver
-
-            except (ConfigError, ConnectionError):
-                raise
-            except Exception as e:
-                self._statistics["connection_errors"] += 1
-                logger.error(f"获取数据库连接失败 {name}: {str(e)}")
-                raise DatabaseError(f"获取数据库连接失败: {str(e)}")
-
-    def _validate_connection_exists(self, name: str) -> None:
-        """
-        验证连接配置是否存在
-
-        Args:
-            name: 连接名称
-
-        Raises:
-            ConfigError: 当连接配置不存在时
-
-        Note:
-            此方法用于内部验证，确保操作前连接配置存在
-        """
-        existing_connections = self.config_manager.list_connections()
-        if name not in existing_connections:
-            raise ConfigError(CONNECTION_NOT_FOUND_MSG.format(name))
-
-    def _is_connection_valid(self, driver: SQLAlchemyDriver) -> bool:
-        """
-        检查连接是否有效
-
-        Args:
-            driver: 数据库驱动实例
-
-        Returns:
-            bool: 连接是否有效
-
-        Note:
-            使用轻量级的测试查询验证连接状态
-            避免使用复杂的验证逻辑影响性能
-        """
-        try:
-            return driver.test_connection()
-        except Exception:
-            return False
-
-    def _cleanup_connection(self, name: str) -> None:
-        """
-        清理连接资源
-
-        Args:
-            name: 连接名称
-
-        Note:
-            安全地关闭连接并清理相关资源
-            即使发生异常也不会影响其他连接
-        """
-        try:
-            if name in self.connection_pool:
-                connection_info = self.connection_pool[name]
-                if connection_info.driver.is_connected:
-                    connection_info.driver.disconnect()
-                del self.connection_pool[name]
-                self._statistics["total_connections_closed"] += 1
-                logger.debug(f"清理连接: {name}")
-        except Exception as e:
-            logger.warning(f"清理连接时发生异常 {name}: {str(e)}")
-
-    def list_connections(self) -> List[str]:
-        """
-        获取所有可用的连接名称
-
-        Returns:
-            连接名称列表
-
-        Example:
-            >>> connections = db_manager.list_connections()
-            >>> print(f"可用的连接: {', '.join(connections)}")
-        """
-        return self.config_manager.list_connections()
+        # 验证必需参数
+        required_fields = ["username", "password", "host"]
+        missing_fields = [field for field in required_fields if field not in config]
+        if missing_fields:
+            raise ConfigError(f"缺少必需的连接参数: {', '.join(missing_fields)}")
 
     def remove_connection(self, name: str) -> None:
         """
@@ -457,7 +306,46 @@ class DatabaseManager:
                 raise
             except Exception as e:
                 logger.error(f"删除连接配置失败 {name}: {str(e)}")
-                raise DatabaseError(f"删除连接配置失败: {str(e)}")
+                raise DatabaseError(f"连接配置删除失败: {str(e)}")
+
+    def _validate_connection_exists(self, name: str) -> None:
+        """
+        验证连接配置是否存在
+
+        Args:
+            name: 连接名称
+
+        Raises:
+            ConfigError: 当连接配置不存在时
+
+        Note:
+            此方法用于内部验证，确保操作前连接配置存在
+        """
+        existing_connections = self.list_connections()
+        if name not in existing_connections:
+            raise ConfigError(CONNECTION_NOT_FOUND_MSG.format(name))
+
+    def _cleanup_connection(self, name: str) -> None:
+        """
+        清理连接资源
+
+        Args:
+            name: 连接名称
+
+        Note:
+            安全地关闭连接并清理相关资源
+            即使发生异常也不会影响其他连接
+        """
+        try:
+            if name in self.connection_pool:
+                connection_info = self.connection_pool[name]
+                if connection_info.driver.is_connected:
+                    connection_info.driver.disconnect()
+                del self.connection_pool[name]
+                self._statistics["total_connections_closed"] += 1
+                logger.debug(f"清理连接: {name}")
+        except Exception as e:
+            logger.warning(f"清理连接时发生异常 {name}: {str(e)}")
 
     def update_connection(self, name: str, connection_config: Dict[str, Any]) -> None:
         """
@@ -511,60 +399,158 @@ class DatabaseManager:
                 raise
             except Exception as e:
                 logger.error(f"更新连接配置失败 {name}: {str(e)}")
-                raise DatabaseError(f"更新连接配置失败: {str(e)}")
+                raise DatabaseError(f"连接配置更新失败: {str(e)}")
 
-    def get_connection_info(self, name: str) -> Dict[str, Any]:
+    def show_connection(self, name: str) -> Dict[str, Any]:
         """
-        获取连接详细信息（包含统计信息）
+        显示指定连接的配置信息
 
         Args:
             name: 连接名称
 
         Returns:
-            连接信息字典，包含基本配置和统计信息
+            Dict[str, Any]: 连接配置信息字典
 
         Raises:
-            DatabaseError: 当获取连接信息失败时
             ConfigError: 当连接配置不存在时
 
         Example:
-            >>> info = db_manager.get_connection_info("mysql_db")
-            >>> print(f"使用次数: {info['use_count']}")
-            >>> print(f"最后使用时间: {info['last_used']}")
+            >>> config = db_manager.show_connection("mysql_db")
+            >>> print(f"主机: {config['host']}")
+        """
+        return self.config_manager.get_connection(name)
+
+    def list_connections(self) -> List[str]:
+        """
+        获取所有可用的连接名称
+
+        Returns:
+            连接名称列表
+
+        Example:
+            >>> connections = db_manager.list_connections()
+            >>> print(f"可用的连接: {', '.join(connections)}")
+        """
+        return self.config_manager.list_connections()
+
+    def get_connection(
+        self, name: str, config_overrides: Dict[str, Any] | None = None
+    ) -> SQLAlchemyDriver:
+        """
+        获取数据库连接（连接池管理）
+
+        Args:
+            name: 连接名称
+            config_overrides: 可选的配置覆盖字典，用于临时修改连接配置
+                            例如：{"host": "127.0.0.1", "port": 3306}
+
+        Returns:
+            SQLAlchemyDriver实例，用于执行数据库操作
+
+        Raises:
+            DatabaseError: 当获取连接失败时
+            ConnectionError: 当连接建立失败时
+            ConfigError: 当连接配置不存在时
+
+        Process:
+            1. 验证连接配置存在
+            2. 检查连接池中是否有有效连接
+            3. 如果连接无效，清理并重新创建
+            4. 返回可用的驱动实例
+
+        Note:
+            如果连接已存在且有效，直接返回缓存的连接，否则创建新连接
+            连接池机制提高性能，避免频繁创建和销毁连接
+            当提供config_overrides时，会创建新的连接而不是使用缓存
+
+        Example:
+            >>> driver = db_manager.get_connection("mysql_db")
+            >>> result = driver.execute_query("SELECT * FROM users")
+            >>> # 使用配置覆盖
+            >>> driver = db_manager.get_connection("mysql_db", {"host": "127.0.0.1"})
         """
         with self._lock:
             try:
-                # 检查连接是否存在
+                # 检查连接配置是否存在
                 self._validate_connection_exists(name)
 
-                # 获取基本配置信息
-                config = self.config_manager.get_connection(name)
-                info: Dict[str, Any] = {
-                    "type": config.get("type"),
-                    "host": config.get("host"),
-                    "port": config.get("port"),
-                    "database": config.get("database"),
-                }
+                # 如果提供了配置覆盖，则强制创建新连接
+                if config_overrides:
+                    # 清理可能存在的缓存连接
+                    if name in self.connection_pool:
+                        self._cleanup_connection(name)
 
-                # 添加连接池统计信息
+                    # 获取基础配置并应用覆盖
+                    base_config = self.show_connection(name)
+                    connection_config = {**base_config, **config_overrides}
+
+                    # 验证修改后的配置
+                    self._validate_basic_config(connection_config)
+
+                    # 创建新连接
+                    driver = SQLAlchemyDriver(connection_config)
+                    driver.connect()
+
+                    # 创建连接信息但不加入连接池（因为是临时配置）
+                    connection_info = ConnectionInfo(driver)
+                    # 注意：临时配置的连接不加入连接池，避免配置冲突
+
+                    logger.info(f"使用临时配置建立数据库连接: {name}")
+                    return driver
+
+                # 连接池管理逻辑（无配置覆盖时）
                 if name in self.connection_pool:
                     connection_info = self.connection_pool[name]
-                    info.update(
-                        {
-                            "use_count": connection_info.use_count,
-                            "last_used": connection_info.last_used,
-                            "created_at": connection_info.created_at,
-                            "is_active": connection_info.is_active,
-                        }
-                    )
 
-                return {k: v for k, v in info.items() if v is not None}
+                    # 检查连接是否有效
+                    if connection_info.is_active and self._is_connection_valid(
+                        connection_info.driver
+                    ):
+                        connection_info.mark_used()
+                        logger.debug(f"使用缓存的数据库连接: {name}")
+                        return connection_info.driver
+                    else:
+                        # 连接无效，清理并重新创建
+                        self._cleanup_connection(name)
 
-            except ConfigError:
+                # 创建新连接
+                connection_config = self.show_connection(name)
+                driver = SQLAlchemyDriver(connection_config)
+                driver.connect()
+
+                # 创建连接信息并加入连接池
+                connection_info = ConnectionInfo(driver)
+                self.connection_pool[name] = connection_info
+                self._statistics["total_connections_created"] += 1
+
+                logger.info(f"数据库连接已建立: {name}")
+                return driver
+
+            except (ConfigError, ConnectionError):
                 raise
             except Exception as e:
-                logger.error(f"获取连接信息失败 {name}: {str(e)}")
-                raise DatabaseError(f"获取连接信息失败: {str(e)}")
+                self._statistics["connection_errors"] += 1
+                logger.error(f"获取数据库连接失败 {name}: {str(e)}")
+                raise DatabaseError(f"数据库连接获取失败: {str(e)}")
+
+    def _is_connection_valid(self, driver: SQLAlchemyDriver) -> bool:
+        """
+        检查连接是否有效
+
+        Args:
+            driver: 数据库驱动实例
+
+        Returns:
+            bool: 连接是否有效
+
+        Note:
+            使用轻量级的测试查询验证连接状态
+            避免使用复杂的验证逻辑影响性能
+        """
+        try:
+            return driver.test_connection()
+        except Exception:
+            return False
 
     def test_connection(self, name: str) -> bool:
         """
@@ -640,7 +626,7 @@ class DatabaseManager:
             raise
         except Exception as e:
             logger.error(f"执行查询失败: {str(e)}")
-            raise DatabaseError(f"执行查询失败: {str(e)}")
+            raise DatabaseError(f"查询执行失败: {str(e)}")
 
     def execute_command(
         self,
@@ -687,7 +673,7 @@ class DatabaseManager:
             raise
         except Exception as e:
             logger.error(f"执行命令失败: {str(e)}")
-            raise DatabaseError(f"执行命令失败: {str(e)}")
+            raise DatabaseError(f"命令执行失败: {str(e)}")
 
     def close_connection(self, name: str) -> None:
         """
@@ -712,7 +698,7 @@ class DatabaseManager:
                 logger.info(f"数据库连接已关闭: {name}")
             except Exception as e:
                 logger.error(f"关闭连接失败 {name}: {str(e)}")
-                raise DatabaseError(f"关闭连接失败: {str(e)}")
+                raise DatabaseError(f"连接关闭失败: {str(e)}")
 
     def close_all_connections(self) -> None:
         """
@@ -761,6 +747,59 @@ class DatabaseManager:
                 logger.error(f"关闭所有连接失败: {str(e)}")
                 raise DatabaseError(f"关闭所有连接失败: {str(e)}")
 
+    def get_connection_info(self, name: str) -> Dict[str, Any]:
+        """
+        获取连接详细信息（包含统计信息）
+
+        Args:
+            name: 连接名称
+
+        Returns:
+            连接信息字典，包含基本配置和统计信息
+
+        Raises:
+            DatabaseError: 当获取连接信息失败时
+            ConfigError: 当连接配置不存在时
+
+        Example:
+            >>> info = db_manager.get_connection_info("mysql_db")
+            >>> print(f"使用次数: {info['use_count']}")
+            >>> print(f"最后使用时间: {info['last_used']}")
+        """
+        with self._lock:
+            try:
+                # 检查连接是否存在
+                self._validate_connection_exists(name)
+
+                # 获取基本配置信息
+                config = self.show_connection(name)
+                info: Dict[str, Any] = {
+                    "type": config.get("type"),
+                    "host": config.get("host"),
+                    "port": config.get("port"),
+                    "database": config.get("database"),
+                }
+
+                # 添加连接池统计信息
+                if name in self.connection_pool:
+                    connection_info = self.connection_pool[name]
+                    info.update(
+                        {
+                            "use_count": connection_info.use_count,
+                            "last_used": connection_info.last_used,
+                            "created_at": connection_info.created_at,
+                            "is_active": connection_info.is_active,
+                        }
+                    )
+
+                return {k: v for k, v in info.items() if v is not None}
+
+            except ConfigError:
+                raise
+            except Exception as e:
+                logger.error(f"获取连接信息失败 {name}: {str(e)}")
+                raise DatabaseError(f"连接信息获取失败: {str(e)}")
+
     def get_statistics(self) -> Dict[str, Any]:
         """
         获取连接统计信息
@@ -791,7 +830,9 @@ class DatabaseManager:
             stats["connection_pool_size"] = len(self.connection_pool)
             return stats
 
-    def cleanup_idle_connections(self, max_idle_time: int = 300) -> int:
+    def cleanup_idle_connections(
+        self, max_idle_time: int = DEFAULT_MAX_IDLE_TIME
+    ) -> int:
         """
         清理空闲连接
 

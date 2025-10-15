@@ -199,6 +199,50 @@ class PathHelper:
             raise ValueError(f"无效的路径格式 '{path}': {str(e)}")
 
     @staticmethod
+    def is_valid_path(path: str | Path) -> bool:
+        """
+        检查路径是否有效（不包含非法字符）
+
+        此方法仅检查路径格式的字符有效性，不检查路径是否存在或可访问。
+
+        Args:
+            path (str | Path): 需要检查的路径
+
+        Returns:
+            bool: 路径是否有效（不包含非法字符）
+
+        Note:
+            - 对于 Windows 系统，会特殊处理驱动器字母
+            - 此方法不验证路径是否存在或可访问
+
+        Example:
+            >>> # 有效路径
+            >>> PathHelper.is_valid_path("/valid/path/file.txt")  # True
+            >>>
+            >>> # 无效路径（包含非法字符）
+            >>> PathHelper.is_valid_path("/invalid/path/file?.txt")  # False
+        """
+        if not path:
+            return False
+
+        try:
+            path_str = str(path)
+
+            # 检查路径是否为空或只包含空白字符
+            if not path_str.strip():
+                return False
+
+            # 根据操作系统选择验证方法
+            system = platform.system().lower()
+            if system == "windows":
+                return PathHelper._is_valid_path_windows(path_str)
+            else:
+                return PathHelper._is_valid_path_unix(path_str)
+
+        except (TypeError, ValueError):
+            return False
+
+    @staticmethod
     def _is_valid_path_windows(path_str: str) -> bool:
         """
         检查 Windows 系统下的路径有效性（内部方法）
@@ -271,50 +315,6 @@ class PathHelper:
             "\f",  # 控制字符
         ]
         return not any(char in path_str for char in illegal_chars)
-
-    @staticmethod
-    def is_valid_path(path: str | Path) -> bool:
-        """
-        检查路径是否有效（不包含非法字符）
-
-        此方法仅检查路径格式的字符有效性，不检查路径是否存在或可访问。
-
-        Args:
-            path (str | Path): 需要检查的路径
-
-        Returns:
-            bool: 路径是否有效（不包含非法字符）
-
-        Note:
-            - 对于 Windows 系统，会特殊处理驱动器字母
-            - 此方法不验证路径是否存在或可访问
-
-        Example:
-            >>> # 有效路径
-            >>> PathHelper.is_valid_path("/valid/path/file.txt")  # True
-            >>>
-            >>> # 无效路径（包含非法字符）
-            >>> PathHelper.is_valid_path("/invalid/path/file?.txt")  # False
-        """
-        if not path:
-            return False
-
-        try:
-            path_str = str(path)
-
-            # 检查路径是否为空或只包含空白字符
-            if not path_str.strip():
-                return False
-
-            # 根据操作系统选择验证方法
-            system = platform.system().lower()
-            if system == "windows":
-                return PathHelper._is_valid_path_windows(path_str)
-            else:
-                return PathHelper._is_valid_path_unix(path_str)
-
-        except (TypeError, ValueError):
-            return False
 
     @staticmethod
     def get_absolute_path(

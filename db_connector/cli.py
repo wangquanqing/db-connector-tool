@@ -67,6 +67,29 @@ class DBConnectorCLI:
         """
         self.db_manager: Optional[DatabaseManager] = None
 
+    def add_connection(self, args: argparse.Namespace) -> None:
+        """
+        添加新的数据库连接配置
+
+        Args:
+            args (argparse.Namespace): 命令行参数，包含连接配置信息
+
+        Raises:
+            SystemExit: 如果添加连接失败则退出程序
+        """
+        db_manager = self._ensure_db_manager_initialized()
+        config = self._build_connection_config(args)
+
+        try:
+            db_manager.add_connection(args.name, config)
+            logger.info(f"连接 '{args.name}' 添加成功")
+            print(f"✅ 连接 '{args.name}' 添加成功")
+            self._print_custom_params(config)
+        except Exception as e:
+            logger.error(f"添加连接失败: {e}")
+            print(f"❌ 添加连接失败: {e}")
+            sys.exit(1)
+
     def _ensure_db_manager_initialized(self) -> DatabaseManager:
         """
         确保数据库管理器已初始化
@@ -82,7 +105,6 @@ class DBConnectorCLI:
         if self.db_manager is None:
             try:
                 self.db_manager = DatabaseManager()
-                logger.info("数据库管理器初始化成功")
             except Exception as e:
                 logger.error(f"初始化数据库管理器失败: {e}")
                 print(f"❌ 初始化数据库管理器失败: {e}")
@@ -203,29 +225,6 @@ class DBConnectorCLI:
         if custom_params:
             print(f"📋 自定义参数: {', '.join(custom_params)}")
 
-    def add_connection(self, args: argparse.Namespace) -> None:
-        """
-        添加新的数据库连接配置
-
-        Args:
-            args (argparse.Namespace): 命令行参数，包含连接配置信息
-
-        Raises:
-            SystemExit: 如果添加连接失败则退出程序
-        """
-        db_manager = self._ensure_db_manager_initialized()
-        config = self._build_connection_config(args)
-
-        try:
-            db_manager.add_connection(args.name, config)
-            logger.info(f"连接 '{args.name}' 添加成功")
-            print(f"✅ 连接 '{args.name}' 添加成功")
-            self._print_custom_params(config)
-        except Exception as e:
-            logger.error(f"添加连接失败: {e}")
-            print(f"❌ 添加连接失败: {e}")
-            sys.exit(1)
-
     def remove_connection(self, args: argparse.Namespace) -> None:
         """
         删除指定的数据库连接配置
@@ -260,7 +259,7 @@ class DBConnectorCLI:
         db_manager = self._ensure_db_manager_initialized()
 
         try:
-            existing_config = db_manager.config_manager.get_connection(args.name)
+            existing_config = db_manager.show_connection(args.name)
             update_config = self._build_update_config(existing_config, args)
 
             db_manager.update_connection(args.name, update_config)
@@ -315,7 +314,7 @@ class DBConnectorCLI:
         db_manager = self._ensure_db_manager_initialized()
 
         try:
-            config = db_manager.config_manager.get_connection(args.name)
+            config = db_manager.show_connection(args.name)
             safe_config = self._sanitize_sensitive_info(config)
 
             print(f"🔍 连接 '{args.name}' 的配置:")

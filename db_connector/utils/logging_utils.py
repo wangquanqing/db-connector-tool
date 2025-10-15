@@ -38,29 +38,6 @@ LOG_LEVEL_MAP = {
 }
 
 
-def _validate_log_level(level: str) -> int:
-    """
-    验证并转换日志级别字符串为对应的logging常量
-
-    Args:
-        level (str): 日志级别字符串（不区分大小写）
-
-    Returns:
-        int: 对应的logging级别常量
-
-    Raises:
-        ValueError: 当日志级别无效时抛出
-
-    Example:
-        >>> _validate_log_level("debug")  # 返回 logging.DEBUG
-        >>> _validate_log_level("invalid")  # 抛出 ValueError
-    """
-    level_upper = level.upper()
-    if level_upper not in VALID_LOG_LEVELS:
-        raise ValueError(f"无效的日志级别: '{level}'，有效值为: {VALID_LOG_LEVELS}")
-    return LOG_LEVEL_MAP[level_upper]
-
-
 def setup_logging(
     app_name: str = "db_connector",
     level: str = "INFO",
@@ -183,6 +160,29 @@ def setup_logging(
         )
 
     return logger
+
+
+def _validate_log_level(level: str) -> int:
+    """
+    验证并转换日志级别字符串为对应的logging常量
+
+    Args:
+        level (str): 日志级别字符串（不区分大小写）
+
+    Returns:
+        int: 对应的logging级别常量
+
+    Raises:
+        ValueError: 当日志级别无效时抛出
+
+    Example:
+        >>> _validate_log_level("debug")  # 返回 logging.DEBUG
+        >>> _validate_log_level("invalid")  # 抛出 ValueError
+    """
+    level_upper = level.upper()
+    if level_upper not in VALID_LOG_LEVELS:
+        raise ValueError(f"无效的日志级别: '{level}'，有效值为: {VALID_LOG_LEVELS}")
+    return LOG_LEVEL_MAP[level_upper]
 
 
 def get_logger(name: str) -> logging.Logger:

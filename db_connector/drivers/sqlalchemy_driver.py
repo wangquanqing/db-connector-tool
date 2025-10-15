@@ -151,6 +151,75 @@ class SQLAlchemyDriver:
 
         logger.debug(f"SQLAlchemy驱动实例初始化成功，数据库类型: {db_type}")
 
+    def connect(self) -> None:
+        """
+        建立数据库连接并验证连接有效性
+
+        该方法执行完整的数据库连接流程，包括：
+        1. 检查当前连接状态，避免重复连接
+        2. 构建数据库连接URL
+        3. 配置连接池参数和引擎选项
+        4. 创建SQLAlchemy引擎和会话工厂
+        5. 执行实际连接测试验证连接有效性
+        6. 更新连接状态并记录日志
+
+        Raises:
+            ConnectionError: 当连接建立或验证失败时抛出
+
+        Notes:
+            - 支持连接池配置，包括连接预检查、回收时间等
+            - 自动适配不同数据库类型的特定配置
+            - 严格区分引擎创建成功和实际连接成功
+            - 连接失败时会自动清理已创建的引擎资源
+
+        Example:
+            >>> driver = SQLAlchemyDriver(connection_config)
+            >>> driver.connect()  # 建立数据库连接
+            >>> print(driver.is_connected)  # 检查连接状态
+            True
+        """
+        try:
+            # 检查连接状态，避免重复连接
+            if self._connected:
+                logger.warning("数据库连接已存在，无需重复连接")
+                return
+
+            # 构建数据库连接URL
+            connection_url = self._build_connection_url()
+
+            # 配置连接池参数
+            pool_config = self._get_pool_config()
+
+            # 准备引擎配置参数
+            engine_kwargs: Dict[str, Any] = {
+                "echo": self.connection_config.get("echo_sql", False),
+                **pool_config,
+            }
+
+            # 添加数据库特定的引擎配置
+            db_type = self.connection_config.get("type", "").lower()
+            db_specific_config = self._get_engine_config(db_type)
+            engine_kwargs.update(db_specific_config)
+
+            # 创建SQLAlchemy引擎和会话工厂
+            self.engine = create_engine(connection_url, **engine_kwargs)
+            self.session_factory = scoped_session(sessionmaker(bind=self.engine))
+
+            logger.info(
+                f"数据库引擎创建成功: {self.connection_config.get('type')} "
+                f"({self.connection_config.get('host') or self.connection_config.get('database')})"
+            )
+
+            # 执行实际连接测试验证连接有效性
+            self._validate_connection()
+
+        except SQLAlchemyError as e:
+            # 连接过程中发生异常，清理资源并抛出错误
+            self._cleanup_on_connection_failure()
+            error_msg = f"数据库连接建立失败: {e.__class__.__name__}: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            raise ConnectionError(error_msg)
+
     def _build_connection_url(self) -> str:
         """
         构建数据库连接URL
@@ -188,11 +257,13 @@ class SQLAlchemyDriver:
         required_fields = ["username", "password", "host"]
         if db_type == "oracle":
             required_fields.append("service_name")
+        else:
+            required_fields.append("database")
+        if db_type == "postgresql":
+            required_fields.append("gssencmode")
         elif db_type == "mssql":
             required_fields.append("charset")
             required_fields.append("tds_version")
-        else:
-            required_fields.append("database")
         missing_fields = [field for field in required_fields if field not in config]
 
         if missing_fields:
@@ -391,75 +462,6 @@ class SQLAlchemyDriver:
             ]
 
         return {"connect_args": connect_args} if connect_args else {}
-
-    def connect(self) -> None:
-        """
-        建立数据库连接并验证连接有效性
-
-        该方法执行完整的数据库连接流程，包括：
-        1. 检查当前连接状态，避免重复连接
-        2. 构建数据库连接URL
-        3. 配置连接池参数和引擎选项
-        4. 创建SQLAlchemy引擎和会话工厂
-        5. 执行实际连接测试验证连接有效性
-        6. 更新连接状态并记录日志
-
-        Raises:
-            ConnectionError: 当连接建立或验证失败时抛出
-
-        Notes:
-            - 支持连接池配置，包括连接预检查、回收时间等
-            - 自动适配不同数据库类型的特定配置
-            - 严格区分引擎创建成功和实际连接成功
-            - 连接失败时会自动清理已创建的引擎资源
-
-        Example:
-            >>> driver = SQLAlchemyDriver(connection_config)
-            >>> driver.connect()  # 建立数据库连接
-            >>> print(driver.is_connected)  # 检查连接状态
-            True
-        """
-        try:
-            # 检查连接状态，避免重复连接
-            if self._connected:
-                logger.warning("数据库连接已存在，无需重复连接")
-                return
-
-            # 构建数据库连接URL
-            connection_url = self._build_connection_url()
-
-            # 配置连接池参数
-            pool_config = self._get_pool_config()
-
-            # 准备引擎配置参数
-            engine_kwargs: Dict[str, Any] = {
-                "echo": self.connection_config.get("echo_sql", False),
-                **pool_config,
-            }
-
-            # 添加数据库特定的引擎配置
-            db_type = self.connection_config.get("type", "").lower()
-            db_specific_config = self._get_engine_config(db_type)
-            engine_kwargs.update(db_specific_config)
-
-            # 创建SQLAlchemy引擎和会话工厂
-            self.engine = create_engine(connection_url, **engine_kwargs)
-            self.session_factory = scoped_session(sessionmaker(bind=self.engine))
-
-            logger.info(
-                f"数据库引擎创建成功: {self.connection_config.get('type')} "
-                f"({self.connection_config.get('host') or self.connection_config.get('database')})"
-            )
-
-            # 执行实际连接测试验证连接有效性
-            self._validate_connection()
-
-        except SQLAlchemyError as e:
-            # 连接过程中发生异常，清理资源并抛出错误
-            self._cleanup_on_connection_failure()
-            error_msg = f"数据库连接建立失败: {e.__class__.__name__}: {str(e)}"
-            logger.error(error_msg, exc_info=True)
-            raise ConnectionError(error_msg)
 
     def _validate_connection(self) -> None:
         """
@@ -846,16 +848,28 @@ class SQLAlchemyDriver:
         返回驱动实例的字符串表示
 
         Returns:
-            str: 包含数据库类型和连接状态的字符串表示
+            str: 包含数据库类型、主机、端口、数据库名和连接状态的字符串表示
 
         Example:
             >>> driver = SQLAlchemyDriver(config)
             >>> print(repr(driver))
-            <SQLAlchemyDriver mysql@localhost:3306 (connected)>
+            SQLAlchemyDriver(type='mysql', host='localhost', port=3306,
+                            database='mydb', username='***', connected=True)
         """
-        db_type = self.connection_config.get("type", "unknown")
-        host = self.connection_config.get("host", "unknown")
-        port = self.connection_config.get("port", self._get_default_port(db_type))
-        status = "connected" if self._connected else "disconnected"
+        try:
+            config = self.connection_config or {}
+            db_type = config.get("type", "unknown")
+            host = config.get("host", "unknown")
+            port = config.get("port", self._get_default_port(db_type))
+            database = config.get("database", "unknown")
+            username = config.get("username", "***")  # 掩码处理
+            status = self._connected
 
-        return f"<SQLAlchemyDriver {db_type}@{host}:{port} ({status})>"
+            return (
+                f"SQLAlchemyDriver(type={db_type!r}, host={host!r}, "
+                f"port={port!r}, database={database!r}, "
+                f"username={username!r}, connected={status!r})"
+            )
+        except Exception:
+            # 确保__repr__不会抛出异常
+            return "SQLAlchemyDriver(<error retrieving info>)"

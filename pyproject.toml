@@ -1,18 +1,29 @@
 [build-system]
-requires = ["setuptools>=45.0", "wheel", "setuptools-scm"]
+requires = ["setuptools>=45.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "db-connector"
-version = "0.0.4"
-description = "跨平台数据库连接管理模块"
+dynamic = ["version"]
+description = "跨平台数据库连接管理工具 - 支持多种数据库的安全连接管理"
 authors = [
-    {name = "wangquanqing", email = "wangquanqing1636@sina.com"}
+    {name = "wangquanqing"}, {email = "wangquanqing1636@sina.com"}
 ]
 license = {text = "MIT"}
 readme = "README.md"
 requires-python = ">=3.8"
-keywords = ["database", "connection", "manager", "orm", "sqlalchemy", "cli"]
+keywords = [
+    "database", 
+    "connection", 
+    "manager", 
+    "sqlalchemy", 
+    "cli", 
+    "oracle", 
+    "postgresql", 
+    "mysql", 
+    "sqlserver", 
+    "sqlite"
+]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
@@ -25,14 +36,16 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Topic :: Database",
+    "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 
 dependencies = [
     "cryptography>=41.0.0",
-    "tomli-w>=1.0.0",
+    "tomli-w>=1.0.0; python_version < '3.11'",
     "sqlalchemy>=2.0.0",
     "oracledb>=2.0.0",
-    "psycopg>=3.0.0",
+    "psycopg[binary]>=3.1.0",
     "pymysql>=1.1.0",
     "pymssql>=2.2.0",
 ]
@@ -44,30 +57,44 @@ dev = [
     "black>=23.0.0",
     "flake8>=6.0.0",
     "mypy>=1.0.0",
-]
-docs = [
-    "sphinx>=7.0.0",
-    "sphinx-rtd-theme>=1.0.0",
-]
-cli = [
-    "click>=8.0.0",  # 更高级的CLI框架，可选
-    "rich>=13.0.0",  # 美化输出，可选
+    "pre-commit>=3.0.0",
 ]
 
-# 添加CLI入口点
+[project.urls]
+Homepage = "https://github.com/wangquanqing/db-connector-tool"
+Repository = "https://github.com/wangquanqing/db-connector-tool"
+Documentation = "https://db-connector-tool.readthedocs.io"
+"Issue Tracker" = "https://github.com/wangquanqing/db-connector-tool/issues"
+"Changelog" = "https://github.com/wangquanqing/db-connector-tool/releases"
+
 [project.scripts]
 db-connector = "db_connector.cli:main"
 
-[project.urls]
-Homepage = "https://github.com/wangquanqing/db-connector-project"
-Repository = "https://github.com/wangquanqing/db-connector-project"
-Documentation = "https://db-connector.readthedocs.io"
-"Issue Tracker" = "https://github.com/wangquanqing/db-connector-project/issues"
+[tool.setuptools]
+packages = {find = {}}
+include-package-data = true
 
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["db_connector*"]
+exclude = ["tests*"]
 
 [tool.black]
 line-length = 88
-target-version = ['py313']
+target-version = ['py38', 'py39', 'py310', 'py311', 'py312', 'py313']
+skip-string-normalization = true
+
+[tool.mypy]
+python_version = "3.8"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--verbose --strict-markers --strict-config"
+markers = [
+    "unit: 单元测试",
+    "integration: 集成测试",
+    "slow: 慢速测试",
+]
