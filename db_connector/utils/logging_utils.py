@@ -41,7 +41,7 @@ LOG_LEVEL_MAP = {
 def setup_logging(
     app_name: str = "db_connector",
     level: str = "INFO",
-    log_to_console: bool = True,
+    log_to_console: bool = False,
     log_to_file: bool = True,
     max_file_size: int = 10 * 1024 * 1024,  # 10MB
     backup_count: int = 5,

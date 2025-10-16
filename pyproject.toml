@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "db-connector"
-dynamic = ["version"]
+version = "0.1.0"
 description = "跨平台数据库连接管理工具 - 支持多种数据库的安全连接管理"
 authors = [
     {name = "wangquanqing"}, {email = "wangquanqing1636@sina.com"}
@@ -42,10 +42,10 @@ classifiers = [
 
 dependencies = [
     "cryptography>=41.0.0",
-    "tomli-w>=1.0.0; python_version < '3.11'",
+    "tomli-w>=1.0.0",
     "sqlalchemy>=2.0.0",
     "oracledb>=2.0.0",
-    "psycopg[binary]>=3.1.0",
+    "psycopg>=3.1.0",
     "pymysql>=1.1.0",
     "pymssql>=2.2.0",
 ]

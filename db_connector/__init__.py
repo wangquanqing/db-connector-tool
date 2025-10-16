@@ -18,7 +18,7 @@ DB Connector - 跨平台数据库连接管理模块
     >>> connection = db_manager.get_connection('oracle')
 """
 
-__version__ = "0.0.5"
+__version__ = "0.1.0"
 __author__ = "wangquanqing <wangquanqing1636@sina.com>"
 __license__ = "MIT"
 
