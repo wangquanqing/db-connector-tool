@@ -3,7 +3,7 @@ requires = ["setuptools>=45.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "db-connector"
+name = "db-connector-tool"
 version = "0.1.0"
 description = "跨平台数据库连接管理工具 - 支持多种数据库的安全连接管理"
 authors = [
@@ -69,10 +69,6 @@ Documentation = "https://db-connector-tool.readthedocs.io"
 
 [project.scripts]
 db-connector = "db_connector.cli:main"
-
-[tool.setuptools]
-packages = {find = {}}
-include-package-data = true
 
 [tool.setuptools.packages.find]
 where = ["."]
