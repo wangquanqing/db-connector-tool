@@ -11,7 +11,7 @@ requires-python = ">=3.8"
 license = "MIT"
 keywords = ["database", "connector", "sqlalchemy", "oracle", "postgresql", "mysql", "sqlserver", "sqlite"]
 authors = [
-  { name = "wangquanqing", email = "wangquanqing1636@sina.com" },
+  { name = "wangquanqing"}, {email = "wangquanqing1636@sina.com" },
 ]
 classifiers = [
   "Development Status :: 4 - Beta",
@@ -53,6 +53,7 @@ dev = [
 ]
 
 [project.urls]
+Homepage = "https://github.com/wangquanqing/db-connector-tool"
 Documentation = "https://github.com/wangquanqing/db-connector-tool#readme"
 Issues = "https://github.com/wangquanqing/db-connector-tool/issues"
 Source = "https://github.com/wangquanqing/db-connector-tool"
