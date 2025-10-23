@@ -1,96 +1,99 @@
 [build-system]
-requires = ["setuptools>=45.0", "wheel"]
-build-backend = "setuptools.build_meta"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
 [project]
 name = "db-connector-tool"
-version = "0.1.0"
-description = "跨平台数据库连接管理工具 - 支持多种数据库的安全连接管理"
-authors = [
-    {name = "wangquanqing"}, {email = "wangquanqing1636@sina.com"}
-]
-license = {text = "MIT"}
+dynamic = ["version"]
+description = "跨平台数据库连接管理工具，支持多种数据库类型（Oracle, PostgreSQL, SQL Server, MySQL, SQLite）"
 readme = "README.md"
 requires-python = ">=3.8"
-keywords = [
-    "database", 
-    "connection", 
-    "manager", 
-    "sqlalchemy", 
-    "cli", 
-    "oracle", 
-    "postgresql", 
-    "mysql", 
-    "sqlserver", 
-    "sqlite"
+license = "MIT"
+keywords = ["database", "connector", "sqlalchemy", "oracle", "postgresql", "mysql", "sqlserver", "sqlite"]
+authors = [
+  { name = "wangquanqing", email = "wangquanqing1636@sina.com" },
 ]
 classifiers = [
-    "Development Status :: 4 - Beta",
-    "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
-    "Operating System :: OS Independent",
-    "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.8",
-    "Programming Language :: Python :: 3.9",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
-    "Programming Language :: Python :: 3.13",
-    "Topic :: Database",
-    "Topic :: Software Development :: Libraries :: Python Modules",
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "Topic :: Database",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python",
+  "Programming Language :: Python :: 3.8",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: Implementation :: CPython",
+  "Programming Language :: Python :: Implementation :: PyPy",
 ]
-
 dependencies = [
-    "cryptography>=41.0.0",
-    "tomli-w>=1.0.0",
-    "sqlalchemy>=2.0.0",
-    "oracledb>=2.0.0",
-    "psycopg>=3.1.0",
-    "pymysql>=1.1.0",
-    "pymssql>=2.2.0",
+  "sqlalchemy>=2.0.0",
+  "cryptography>=46.0.0",
+  "tomli-w>=1.0.0",
 ]
 
 [project.optional-dependencies]
+oracle = ["oracledb>=3.0.0"]
+postgresql = ["psycopg>=3.0.0"]
+mysql = ["pymysql>=1.0.0"]
+sqlserver = ["pymssql>=2.0.0"]
+all = [
+  "oracledb>=3.0.0",
+  "psycopg>=3.0.0",
+  "pymysql>=1.0.0",
+  "pymssql>=2.0.0",
+]
 dev = [
-    "pytest>=7.0.0",
-    "pytest-cov>=4.0.0",
-    "black>=23.0.0",
-    "flake8>=6.0.0",
-    "mypy>=1.0.0",
-    "pre-commit>=3.0.0",
+  "pytest>=7.0.0",
+  "pytest-cov>=4.0.0",
+  "black>=23.0.0",
+  "isort>=5.12.0",
+  "pyright>=1.0.0",
 ]
 
 [project.urls]
-Homepage = "https://github.com/wangquanqing/db-connector-tool"
-Repository = "https://github.com/wangquanqing/db-connector-tool"
-Documentation = "https://db-connector-tool.readthedocs.io"
-"Issue Tracker" = "https://github.com/wangquanqing/db-connector-tool/issues"
-"Changelog" = "https://github.com/wangquanqing/db-connector-tool/releases"
+Documentation = "https://github.com/wangquanqing/db-connector-tool#readme"
+Issues = "https://github.com/wangquanqing/db-connector-tool/issues"
+Source = "https://github.com/wangquanqing/db-connector-tool"
 
 [project.scripts]
-db-connector = "db_connector.cli:main"
+db-connector = "db_connector_tool.cli:main"
 
-[tool.setuptools.packages.find]
-where = ["."]
-include = ["db_connector*"]
-exclude = ["tests*"]
+[tool.hatch.version]
+path = "src/db_connector_tool/__about__.py"
 
-[tool.black]
-line-length = 88
-target-version = ['py38', 'py39', 'py310', 'py311', 'py312', 'py313']
-skip-string-normalization = true
-
-[tool.mypy]
-python_version = "3.8"
-warn_return_any = true
-warn_unused_configs = true
-disallow_untyped_defs = true
-
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-addopts = "--verbose --strict-markers --strict-config"
-markers = [
-    "unit: 单元测试",
-    "integration: 集成测试",
-    "slow: 慢速测试",
+[tool.hatch.envs.types]
+extra-dependencies = [
+  "mypy>=1.0.0",
 ]
+[tool.hatch.envs.types.scripts]
+check = "mypy --install-types --non-interactive {args:src/db_connector_tool tests}"
+
+[tool.coverage.run]
+source_pkgs = ["db_connector_tool", "tests"]
+branch = true
+parallel = true
+omit = [
+  "src/db_connector_tool/__about__.py",
+]
+
+[tool.coverage.paths]
+db_connector_tool = ["src/db_connector_tool", "*/db-connector-tool/src/db_connector_tool"]
+tests = ["tests", "*/db-connector-tool/tests"]
+
+[tool.coverage.report]
+exclude_lines = [
+  "no cov",
+  "if __name__ == .__main__.:",
+  "if TYPE_CHECKING:",
+]
+
+[tool.pixi.workspace]
+channels = ["conda-forge"]
+platforms = ["win-64"]
+
+[tool.pixi.pypi-dependencies]
+db-connector-tool = { path = ".", editable = true }
+
+[tool.pixi.tasks]
