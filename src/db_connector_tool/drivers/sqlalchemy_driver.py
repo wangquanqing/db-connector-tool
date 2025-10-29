@@ -21,10 +21,12 @@ SQLAlchemy 数据库驱动模块
 - 连接有效性验证
 """
 
+import re
 from typing import Any, Dict, List, Optional
 from urllib.parse import quote_plus
 
 from sqlalchemy import create_engine, text
+from sqlalchemy.dialects.postgresql.base import PGDialect
 from sqlalchemy.engine import Engine, Result
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import scoped_session, sessionmaker
@@ -34,6 +36,21 @@ from ..utils.logging_utils import get_logger
 
 # 获取模块级别的日志记录器
 logger = get_logger(__name__)
+
+
+def parse_kingbase_version(self, connection):
+    v = connection.exec_driver_sql("select pg_catalog.version()").scalar()
+    m = re.match(
+        r".*(?:PostgreSQL|EnterpriseDB) "
+        r"(\d+)\.?(\d+)?(?:\.(\d+))?(?:\.\d+)?(?:devel|beta)?",
+        v,
+    ) or re.search(r"V(\d+)R(\d+)C(\d+)B(\d+)", v)
+    if not m:
+        raise AssertionError("Could not determine version from string '%s'" % v)
+    return tuple([int(x) for x in m.group(1, 2, 3) if x is not None])
+
+
+PGDialect._get_server_version_info = parse_kingbase_version
 
 
 class SQLAlchemyDriver:
