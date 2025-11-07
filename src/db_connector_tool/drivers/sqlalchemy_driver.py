@@ -22,7 +22,7 @@ SQLAlchemy 数据库驱动模块
 """
 
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import quote_plus
 
 from sqlalchemy import create_engine, text
@@ -38,7 +38,19 @@ from ..utils.logging_utils import get_logger
 logger = get_logger(__name__)
 
 
-def parse_kingbase_version(self, connection):
+def parse_kingbase_version(self, connection) -> Tuple[int, ...]:
+    """
+    解析 Kingbase 数据库版本信息
+
+    Args:
+        connection: 数据库连接对象
+
+    Returns:
+        Tuple[int, ...]: 版本号元组
+
+    Raises:
+        AssertionError: 当无法从版本字符串中解析出版本信息时
+    """
     v = connection.exec_driver_sql("select pg_catalog.version()").scalar()
     m = re.match(
         r".*(?:PostgreSQL|EnterpriseDB) "
@@ -46,8 +58,8 @@ def parse_kingbase_version(self, connection):
         v,
     ) or re.search(r"V(\d+)R(\d+)C(\d+)B(\d+)", v)
     if not m:
-        raise AssertionError("Could not determine version from string '%s'" % v)
-    return tuple([int(x) for x in m.group(1, 2, 3) if x is not None])
+        raise AssertionError(f"无法从字符串 '{v}' 中解析版本信息")
+    return tuple(int(x) for x in m.group(1, 2, 3) if x is not None)
 
 
 PGDialect._get_server_version_info = parse_kingbase_version
