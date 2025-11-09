@@ -1,13 +1,13 @@
 import re
 from abc import ABC
 from datetime import datetime
-from types import ModuleType
 
 import jaydebeapi
 from dateutil import parser
 from sqlalchemy import TIMESTAMP, TypeDecorator, exc, sql, util
 from sqlalchemy.dialects import registry
 from sqlalchemy.dialects.oracle.base import OracleDialect
+from sqlalchemy.engine.interfaces import DBAPIModule
 from sqlalchemy.engine.url import make_url
 
 
@@ -76,11 +76,8 @@ class GBase8sJDBCDialect(OracleDialect, ABC):
         return jaydebeapi
 
     @classmethod
-    def import_dbapi(cls):
-        import jaydebeapi
-
-        jaydebeapi.Cursor = GBase8sCursor
-        return jaydebeapi
+    def import_dbapi(cls) -> DBAPIModule:
+        return __import__("jaydebeapi")
 
     def do_rollback(self, dbapi_connection):
         # GBase8s 不支持事务回滚操作，因此该方法留空
@@ -125,7 +122,7 @@ class GBase8sJDBCDialect(OracleDialect, ABC):
             ver_sql = sql.text("select dbinfo('version_gbase','full') from dual")
             banner = connection.execute(ver_sql).scalar()
             if isinstance(banner, str):
-                match = re.search(r"gbase ([\d+.]+\d+)", banner)
+                match = re.search(r"GBase8s ([\d+.]+\d+)", banner)
                 if match:
                     version = match.group(1)
                     return tuple(int(x) for x in version.split("."))
@@ -136,5 +133,5 @@ class GBase8sJDBCDialect(OracleDialect, ABC):
 
 
 registry.register(
-    "jdbcapi.gbase8sjdbc", "sqlalchemy_jdbcapi.gbase8sjdbc", "GBase8sJDBCDialect"
+    "gbasedbt-sqli", "db_connector_tool.drivers.gbase8s_jdbc", "GBase8sJDBCDialect"
 )

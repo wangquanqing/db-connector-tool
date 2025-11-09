@@ -46,10 +46,15 @@ def parse_kingbase_version(self, connection) -> Tuple[int, ...]:
         connection: 数据库连接对象
 
     Returns:
-        Tuple[int, ...]: 版本号元组
+        Tuple[int, ...]: 版本号元组，如 (8, 6, 0)
 
     Raises:
         AssertionError: 当无法从版本字符串中解析出版本信息时
+
+    Example:
+        >>> version = parse_kingbase_version(connection)
+        >>> print(version)
+        (8, 6, 0)
     """
     v = connection.exec_driver_sql("select pg_catalog.version()").scalar()
     m = re.match(
@@ -57,11 +62,14 @@ def parse_kingbase_version(self, connection) -> Tuple[int, ...]:
         r"(\d+)\.?(\d+)?(?:\.(\d+))?(?:\.\d+)?(?:devel|beta)?",
         v,
     ) or re.search(r"V(\d+)R(\d+)C(\d+)B(\d+)", v)
+
     if not m:
         raise AssertionError(f"无法从字符串 '{v}' 中解析版本信息")
+
     return tuple(int(x) for x in m.group(1, 2, 3) if x is not None)
 
 
+# 为 PostgreSQL 方言设置版本解析方法
 PGDialect._get_server_version_info = parse_kingbase_version
 
 
