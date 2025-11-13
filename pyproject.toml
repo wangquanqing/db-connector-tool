@@ -30,7 +30,7 @@ classifiers = [
 dependencies = [
   "sqlalchemy>=2.0.0",
   "cryptography>=46.0.0",
-  "tomli-w>=1.0.0", "jpype1==1.5.2", "jaydebeapi>=1.2.3,<2",
+  "tomli-w>=1.0.0",
 ]
 
 [project.optional-dependencies]
@@ -38,11 +38,15 @@ oracle = ["oracledb>=3.0.0"]
 postgresql = ["psycopg>=3.0.0"]
 mysql = ["pymysql>=1.0.0"]
 sqlserver = ["pymssql>=2.0.0"]
+gbase8s = ["jpype1==1.5.2", "jaydebeapi>=1.2.3,<2", "python-dateutil>=2.8.0,<3"]
 all = [
   "oracledb>=3.0.0",
   "psycopg>=3.0.0",
   "pymysql>=1.0.0",
   "pymssql>=2.0.0",
+  "jpype1==1.5.2",
+  "jaydebeapi>=1.2.3,<2",
+  "python-dateutil>=2.8.0,<3",
 ]
 dev = [
   "pytest>=7.0.0",
@@ -62,7 +66,7 @@ Source = "https://github.com/wangquanqing/db-connector-tool"
 db-connector = "db_connector_tool.cli:main"
 
 [project.entry-points."sqlalchemy.dialects"]
-gbasedbt-sqli = "db_connector_tool.drivers.gbase8s_jdbc:GBase8sJDBCDialect"
+"jdbc.gbase8s_jdbc" = "db_connector_tool.drivers.gbase8s_jdbc:GBase8sJDBCDialect"
 
 [tool.hatch.version]
 path = "src/db_connector_tool/__about__.py"

@@ -105,7 +105,7 @@ packages:
 - pypi: ./
   name: db-connector-tool
   version: 0.1.2
-  sha256: 8a4b40c92fe8f449cdc0ac224a8b7b384cf62d180d593303816b5e9695e0373f
+  sha256: 6e5ca655e1187b040bcfb6cdcd13041503d783b0c0fdbef7cc188231ca7ab349
   requires_dist:
   - cryptography>=46.0.0
   - jaydebeapi>=1.2.3,<2
