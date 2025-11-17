@@ -8,7 +8,7 @@ DB Connector - 跨平台数据库连接管理模块
 一个功能强大的数据库连接管理工具，支持多种数据库类型。
 
 主要特性:
-- 支持 Oracle, PostgreSQL, SQL Server, MySQL, SQLite
+- 支持 Oracle, PostgreSQL, SQL Server, MySQL, SQLite, GBase8s
 - 统一的连接配置管理
 - 安全的密码加密存储
 - 命令行界面和API接口

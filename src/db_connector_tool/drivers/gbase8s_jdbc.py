@@ -284,5 +284,5 @@ class GBase8sJDBCDialect(OracleDialect, ABC):
 
 # 注册方言到 SQLAlchemy
 registry.register(
-    "jdbc.gbase8s_jdbc", "db_connector_tool.drivers.gbase8s_jdbc", "GBase8sJDBCDialect"
+    "jdbcgbase8s", "db_connector_tool.drivers.gbase8s_jdbc", "GBase8sJDBCDialect"
 )

@@ -7,6 +7,7 @@ SQLAlchemy 数据库驱动模块
 - MySQL
 - SQL Server
 - SQLite
+- GBase8s
 
 该模块封装了数据库连接管理、查询执行、连接池配置和错误处理等功能，
 提供线程安全的数据库操作接口。
@@ -81,7 +82,7 @@ class SQLAlchemyDriver:
     使用连接池管理数据库连接，提高性能和资源利用率。
 
     主要特性：
-    - 多数据库类型支持（Oracle、PostgreSQL、MySQL、SQL Server、SQLite）
+    - 多数据库类型支持（Oracle、PostgreSQL、MySQL、SQL Server、SQLite、GBase8s）
     - 连接池管理和优化配置
     - 线程安全操作，支持并发访问
     - 上下文管理器支持，自动资源管理
@@ -90,7 +91,6 @@ class SQLAlchemyDriver:
     - 参数化查询支持，防止SQL注入
 
     Attributes:
-        DRIVER_MAP (Dict[str, str]): 数据库类型到驱动名称的映射
         URL_TEMPLATES (Dict[str, str]): 各数据库类型的连接URL模板
         TEST_QUERY_DEFAULT (str): 默认测试查询语句
         ORACLE_TEST_QUERY (str): Oracle专用测试查询语句
@@ -110,15 +110,6 @@ class SQLAlchemyDriver:
         ...     print(results)
     """
 
-    # 数据库驱动映射配置
-    DRIVER_MAP: Dict[str, str] = {
-        "oracle": "oracledb",
-        "postgresql": "psycopg",
-        "mysql": "pymysql",
-        "mssql": "pymssql",
-        "sqlite": "sqlite3",
-    }
-
     # 连接URL模板配置
     URL_TEMPLATES: Dict[str, str] = {
         "oracle": "oracle+oracledb://{username}:{password}@{host}:{port}/?service_name={service_name}",
@@ -126,6 +117,7 @@ class SQLAlchemyDriver:
         "mysql": "mysql+pymysql://{username}:{password}@{host}:{port}/{database}",
         "mssql": "mssql+pymssql://{username}:{password}@{host}:{port}/{database}?charset={charset}&tds_version={tds_version}",
         "sqlite": "sqlite:///{database}",
+        "gbasedbt": "jdbcgbase8s://{host}:{port}/{database}:GBASEDBTSERVER={server}?user={username}&password={password}",
     }
 
     # 测试查询常量定义
@@ -138,7 +130,7 @@ class SQLAlchemyDriver:
 
         Args:
             connection_config: 数据库连接配置字典，必需包含以下字段：
-                - type (str): 数据库类型 (oracle/postgresql/mysql/mssql/sqlite)
+                - type (str): 数据库类型 (oracle/postgresql/mysql/mssql/sqlite/gbasedbt)
                 - username (str): 用户名
                 - password (str): 密码
                 - host (str): 主机地址
@@ -301,6 +293,8 @@ class SQLAlchemyDriver:
         elif db_type == "mssql":
             required_fields.append("charset")
             required_fields.append("tds_version")
+        elif db_type == "gbasedbt":
+            required_fields.append("server")
         missing_fields = [field for field in required_fields if field not in config]
 
         if missing_fields:
@@ -343,6 +337,7 @@ class SQLAlchemyDriver:
             "postgresql": "5432",
             "mysql": "3306",
             "mssql": "1433",
+            "gbasedbt": "9088",
         }
         return default_ports.get(db_type, "")
 
@@ -400,6 +395,7 @@ class SQLAlchemyDriver:
             "mysql": self._get_mysql_config,
             "mssql": self._get_mssql_config,
             "sqlite": self._get_sqlite_config,
+            "gbasedbt": self._get_gbase8s_config,
         }
 
         getter = config_getters.get(db_type)
@@ -500,6 +496,23 @@ class SQLAlchemyDriver:
 
         return {"connect_args": connect_args} if connect_args else {}
 
+    def _get_gbase8s_config(self) -> Dict[str, Any]:
+        """
+        获取GBase8s数据库的引擎配置
+
+        Returns:
+            Dict[str, Any]: GBase8s引擎配置字典，包含connect_args等参数
+        """
+        connect_args: Dict[str, Any] = {}
+        if "timeout" in self.connection_config:
+            connect_args["timeout"] = self.connection_config["timeout"]
+        if "isolation_level" in self.connection_config:
+            connect_args["isolation_level"] = self.connection_config["isolation_level"]
+        if "connect_timeout" in self.connection_config:
+            connect_args["connect_timeout"] = self.connection_config["connect_timeout"]
+
+        return {"connect_args": connect_args} if connect_args else {}
+
     def _validate_connection(self) -> None:
         """
         验证数据库连接的实际有效性
@@ -560,6 +573,7 @@ class SQLAlchemyDriver:
             "mysql": self.TEST_QUERY_DEFAULT,
             "mssql": self.TEST_QUERY_DEFAULT,
             "sqlite": self.TEST_QUERY_DEFAULT,
+            "gbasedbt": self.ORACLE_TEST_QUERY,
         }
 
         return test_queries.get(db_type, self.TEST_QUERY_DEFAULT)

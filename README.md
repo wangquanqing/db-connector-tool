@@ -16,6 +16,7 @@
   - SQL Server (pymssql)
   - MySQL (pymysql)
   - SQLite (sqlite3)
+  - GBase8s (JDBC驱动)
 - 🏗️ **ORM 集成**: 基于 SQLAlchemy 2.0+ 的现代化ORM支持
 - 📊 **完整日志**: 使用 logging 模块记录详细操作日志
 - 🌐 **跨平台**: 支持 Windows、Linux、macOS

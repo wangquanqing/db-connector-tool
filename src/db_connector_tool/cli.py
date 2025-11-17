@@ -5,7 +5,7 @@ DB Connector CLI 工具
 提供命令行界面来管理数据库连接和执行查询。
 
 功能特性:
-- 支持多种数据库类型 (MySQL, PostgreSQL, Oracle, SQL Server, SQLite)
+- 支持多种数据库类型 (MySQL, PostgreSQL, Oracle, SQL Server, SQLite, GBase8s)
 - 连接配置管理 (添加、删除、测试、查看)
 - SQL查询执行和结果导出
 - SQL文件批量执行

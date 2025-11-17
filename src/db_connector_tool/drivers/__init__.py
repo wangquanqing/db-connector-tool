@@ -16,6 +16,7 @@
 - MySQL (PyMySQL)
 - SQL Server (pymssql)
 - SQLite (内置支持)
+- GBase8s (JDBC驱动)
 
 驱动架构：
 - SQLAlchemyDriver: 基于SQLAlchemy的通用数据库驱动
@@ -83,6 +84,7 @@ DATABASE_TO_DRIVER_MAPPING = {
     "mysql": DRIVER_TYPE_SQLALCHEMY,
     "mssql": DRIVER_TYPE_SQLALCHEMY,
     "sqlite": DRIVER_TYPE_SQLALCHEMY,
+    "gbasedbt": DRIVER_TYPE_SQLALCHEMY,
 }
 
 # 向后兼容性信息

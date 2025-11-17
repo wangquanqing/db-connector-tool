@@ -42,6 +42,7 @@ SUPPORTED_DATABASE_TYPES: Set[str] = {
     "mysql",
     "mssql",
     "sqlite",
+    "gbasedbt",
 }
 
 # 默认配置参数
@@ -259,6 +260,8 @@ class DatabaseManager:
                 config["charset"] = "cp936"
             if "tds_version" not in config:
                 config["tds_version"] = "7.0"
+        elif db_type == "gbasedbt" and "server" not in config:
+            config["server"] = "gbase01"
 
         # 验证必需参数
         required_fields = ["username", "password", "host"]
