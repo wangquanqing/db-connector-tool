@@ -7,7 +7,7 @@ SQLAlchemy 数据库驱动模块
 - MySQL
 - SQL Server
 - SQLite
-- GBase8s
+- GBase 8s
 
 该模块封装了数据库连接管理、查询执行、连接池配置和错误处理等功能，
 提供线程安全的数据库操作接口。
@@ -82,7 +82,7 @@ class SQLAlchemyDriver:
     使用连接池管理数据库连接，提高性能和资源利用率。
 
     主要特性：
-    - 多数据库类型支持（Oracle、PostgreSQL、MySQL、SQL Server、SQLite、GBase8s）
+    - 多数据库类型支持（Oracle、PostgreSQL、MySQL、SQL Server、SQLite、GBase 8s）
     - 连接池管理和优化配置
     - 线程安全操作，支持并发访问
     - 上下文管理器支持，自动资源管理
@@ -498,10 +498,10 @@ class SQLAlchemyDriver:
 
     def _get_gbase8s_config(self) -> Dict[str, Any]:
         """
-        获取GBase8s数据库的引擎配置
+        获取GBase 8s数据库的引擎配置
 
         Returns:
-            Dict[str, Any]: GBase8s引擎配置字典，包含connect_args等参数
+            Dict[str, Any]: GBase 8s引擎配置字典，包含connect_args等参数
         """
         connect_args: Dict[str, Any] = {}
         if "timeout" in self.connection_config:

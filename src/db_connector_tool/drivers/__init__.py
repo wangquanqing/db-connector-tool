@@ -16,7 +16,7 @@
 - MySQL (PyMySQL)
 - SQL Server (pymssql)
 - SQLite (内置支持)
-- GBase8s (JDBC驱动)
+- GBase 8s (JDBC驱动)
 
 驱动架构：
 - SQLAlchemyDriver: 基于SQLAlchemy的通用数据库驱动
@@ -31,7 +31,7 @@
 - 可选依赖: 各数据库的Python客户端库
 
 使用示例：
-    >>> from db_connector.drivers import SQLAlchemyDriver
+    >>> from db_connector_tool.drivers import SQLAlchemyDriver
     >>>
     >>> # 创建数据库驱动实例
     >>> config = {

@@ -16,7 +16,7 @@
   - SQL Server (pymssql)
   - MySQL (pymysql)
   - SQLite (sqlite3)
-  - GBase8s (JDBC驱动)
+  - GBase 8s (JDBC驱动)
 - 🏗️ **ORM 集成**: 基于 SQLAlchemy 2.0+ 的现代化ORM支持
 - 📊 **完整日志**: 使用 logging 模块记录详细操作日志
 - 🌐 **跨平台**: 支持 Windows、Linux、macOS
@@ -44,7 +44,7 @@ pip install db-connector-tool
 ### 基础用法
 
 ```python
-from db_connector import DatabaseManager
+from db_connector_tool import DatabaseManager
 
 # 创建数据库管理器
 db_manager = DatabaseManager()
@@ -72,7 +72,7 @@ db_manager.close_all_connections()
 ### 多数据库操作示例
 
 ```python
-from db_connector import DatabaseManager
+from db_connector_tool import DatabaseManager
 
 db_manager = DatabaseManager()
 
@@ -167,9 +167,9 @@ config = {
 
 ### 配置文件位置
 
-- **配置文件**: `~/.config/db_connector/connections.toml`
-- **日志文件**: `~/.config/db_connector/logs/db_connector.log`
-- **加密密钥**: `~/.config/db_connector/encryption.key`
+- **配置文件**: `~/.config/db_connector_tool/connections.toml`
+- **日志文件**: `~/.config/db_connector_tool/logs/db_connector_tool.log`
+- **加密密钥**: `~/.config/db_connector_tool/encryption.key`
 
 ## 🧪 开发
 
@@ -183,7 +183,7 @@ pytest
 pytest tests/test_database.py
 
 # 带覆盖率的测试
-pytest --cov=db_connector tests/
+pytest --cov=db_connector_tool tests/
 
 # 运行快速测试（跳过慢速测试）
 pytest -m "not slow"
@@ -193,13 +193,13 @@ pytest -m "not slow"
 
 ```bash
 # 代码格式化
-black db_connector/ tests/
+black db_connector_tool/ tests/
 
 # 代码检查
-flake8 db_connector/ tests/
+flake8 db_connector_tool/ tests/
 
 # 类型检查
-mypy db_connector/
+mypy db_connector_tool/
 ```
 
 ## 📄 许可证

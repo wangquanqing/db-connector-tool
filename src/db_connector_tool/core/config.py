@@ -62,7 +62,7 @@ class ConfigManager:
     """
 
     def __init__(
-        self, app_name: str = "db_connector", config_file: str = "connections.toml"
+        self, app_name: str = "db_connector_tool", config_file: str = "connections.toml"
     ) -> None:
         """
         初始化配置管理器

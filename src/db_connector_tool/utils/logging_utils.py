@@ -39,7 +39,7 @@ LOG_LEVEL_MAP = {
 
 
 def setup_logging(
-    app_name: str = "db_connector",
+    app_name: str = "db_connector_tool",
     level: str = "INFO",
     log_to_console: bool = False,
     log_to_file: bool = True,
@@ -55,7 +55,7 @@ def setup_logging(
     并确保线程安全的日志操作。
 
     Args:
-        app_name (str): 应用名称，用于创建日志目录和logger名称，默认"db_connector"
+        app_name (str): 应用名称，用于创建日志目录和logger名称，默认"db_connector_tool"
         level (str): 日志级别，可选值：DEBUG, INFO, WARNING, ERROR, CRITICAL，默认"INFO"
         log_to_console (bool): 是否输出到控制台，默认True
         log_to_file (bool): 是否输出到文件，默认True
@@ -229,10 +229,10 @@ def set_log_level(logger_name: str, level: str) -> None:
 
     Example:
         >>> # 设置特定模块的日志级别
-        >>> set_log_level("db_connector.core", "DEBUG")
+        >>> set_log_level("db_connector_tool.core", "DEBUG")
 
         >>> # 设置整个应用的日志级别
-        >>> set_log_level("db_connector", "WARNING")
+        >>> set_log_level("db_connector_tool", "WARNING")
     """
     log_level = _validate_log_level(level)
     logger = get_logger(logger_name)
@@ -268,12 +268,12 @@ class LogManager:
         >>> log_manager.cleanup()
     """
 
-    def __init__(self, app_name: str = "db_connector") -> None:
+    def __init__(self, app_name: str = "db_connector_tool") -> None:
         """
         初始化日志管理器实例
 
         Args:
-            app_name (str): 应用名称，用于标识不同的日志配置，默认"db_connector"
+            app_name (str): 应用名称，用于标识不同的日志配置，默认"db_connector_tool"
         """
         self.app_name = app_name
         # 创建LogManager自身的logger，用于记录管理操作
@@ -429,7 +429,7 @@ class LogManager:
 
         Example:
             >>> info = log_manager.get_loggers_info()
-            >>> print(info["db_connector.core"])
+            >>> print(info["db_connector_tool.core"])
             {'level': 'DEBUG', 'handlers': 2, 'propagate': True}
         """
         with self._lock:
@@ -448,7 +448,7 @@ class LogManager:
 
     @staticmethod
     def quick_setup(
-        app_name: str = "db_connector", level: str = "INFO"
+        app_name: str = "db_connector_tool", level: str = "INFO"
     ) -> "LogManager":
         """
         快速创建并配置LogManager实例
@@ -456,7 +456,7 @@ class LogManager:
         提供便捷的静态方法，简化日志管理器的创建和配置过程。
 
         Args:
-            app_name (str): 应用名称，默认"db_connector"
+            app_name (str): 应用名称，默认"db_connector_tool"
             level (str): 日志级别，默认"INFO"
 
         Returns:

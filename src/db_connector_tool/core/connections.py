@@ -133,7 +133,7 @@ class DatabaseManager:
         >>> results = db_manager.execute_query("mysql_db", "SELECT * FROM users")
     """
 
-    def __init__(self, app_name: str = "db_connector") -> None:
+    def __init__(self, app_name: str = "db_connector_tool") -> None:
         """
         初始化数据库管理器
 

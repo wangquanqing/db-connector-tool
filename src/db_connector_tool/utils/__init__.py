@@ -33,10 +33,10 @@
 - 核心依赖: 标准库 (logging, os, pathlib等)
 
 使用示例：
-    >>> from db_connector.utils import get_logger, setup_logging, PathHelper
+    >>> from db_connector_tool.utils import get_logger, setup_logging, PathHelper
     >>>
     >>> # 初始化日志系统
-    >>> setup_logging(level="INFO", log_file="db_connector.log")
+    >>> setup_logging(level="INFO", log_file="db_connector_tool.log")
     >>>
     >>> # 获取模块日志器
     >>> logger = get_logger(__name__)

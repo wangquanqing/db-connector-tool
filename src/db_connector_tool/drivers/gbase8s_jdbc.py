@@ -5,7 +5,7 @@ from typing import Any, Literal, Tuple
 
 import jaydebeapi
 from dateutil import parser
-from sqlalchemy import TIMESTAMP, TypeDecorator, exc, sql, util
+from sqlalchemy import TIMESTAMP, TypeDecorator, exc, sql, util, VARCHAR, CHAR
 from sqlalchemy.dialects import registry
 from sqlalchemy.dialects.oracle.base import OracleDialect
 from sqlalchemy.engine.interfaces import DBAPIModule
@@ -14,14 +14,14 @@ from sqlalchemy.engine.url import make_url
 
 class GBase8sCursor(jaydebeapi.Cursor):
     """
-    GBase8s JDBC 游标类，用于处理 GBaseClob2 类型的特殊转换。
+    GBase 8s JDBC 游标类，用于处理 GBaseClob2 类型的特殊转换。
 
     继承自 jaydebeapi.Cursor，重写未知 SQL 类型转换器以正确处理 GBaseClob2 类型。
     """
 
     def __init__(self, connection: Any, converters: Any) -> None:
         """
-        初始化 GBase8s 游标。
+        初始化 GBase 8s 游标。
 
         Args:
             connection: JDBC 连接对象
@@ -59,9 +59,9 @@ class GBase8sCursor(jaydebeapi.Cursor):
 
 class ObTimestamp(TypeDecorator):
     """
-    GBase8s 时间戳类型装饰器。
+    GBase 8s 时间戳类型装饰器。
 
-    处理 Python datetime 对象与 GBase8s 时间戳类型之间的转换。
+    处理 Python datetime 对象与 GBase 8s 时间戳类型之间的转换。
     """
 
     impl = TIMESTAMP
@@ -101,14 +101,21 @@ class ObTimestamp(TypeDecorator):
 
 
 # 更新列规范，将 TIMESTAMP 类型替换为自定义的 ObTimestamp
-colspecs = util.update_copy(dict(OracleDialect.colspecs), {TIMESTAMP: ObTimestamp})
+colspecs = util.update_copy(
+    dict(OracleDialect.colspecs),
+    {
+        TIMESTAMP: ObTimestamp,
+        VARCHAR: VARCHAR,  # 确保VARCHAR类型正确映射
+        CHAR: CHAR,  # CHAR类型映射
+    },
+)
 
 
 class GBase8sJDBCDialect(OracleDialect, ABC):
     """
-    GBase8s JDBC 方言实现。
+    GBase 8s JDBC 方言实现。
 
-    基于 OracleDialect 实现，适配 GBase8s 数据库的特性。
+    基于 OracleDialect 实现，适配 GBase 8s 数据库的特性。
     """
 
     name = "gbasedbt-sqli"
@@ -130,7 +137,7 @@ class GBase8sJDBCDialect(OracleDialect, ABC):
         Args:
             connection: SQLAlchemy 连接对象
         """
-        # 由于 GBase8s 与 Oracle 有差异，不调用父类初始化
+        # 由于 GBase 8s 与 Oracle 有差异，不调用父类初始化
         pass
 
     @classmethod
@@ -160,12 +167,12 @@ class GBase8sJDBCDialect(OracleDialect, ABC):
         """
         执行回滚操作。
 
-        GBase8s 不支持事务回滚操作，因此该方法为空实现。
+        GBase 8s 不支持事务回滚操作，因此该方法为空实现。
 
         Args:
             dbapi_connection: 数据库 API 连接对象
         """
-        # GBase8s 不支持事务回滚，留空实现
+        # GBase 8s 不支持事务回滚，留空实现
         pass
 
     def create_connect_args(self, url: Any) -> Tuple[Tuple, dict]:
@@ -179,23 +186,40 @@ class GBase8sJDBCDialect(OracleDialect, ABC):
             包含连接参数的元组和字典
         """
         url_obj = make_url(url)
-        jdbc_url = (
-            f"jdbc:{self.name}://{url_obj.host}:{url_obj.port}/{url_obj.database}"
-        )
+
+        # 构建JDBC URL，处理可选端口和数据库名
+        jdbc_url_parts = [f"jdbc:{self.name}://{url_obj.host}"]
+        if url_obj.port:
+            jdbc_url_parts.append(f":{url_obj.port}")
+        if url_obj.database:
+            jdbc_url_parts.append(f"/{url_obj.database}")
+        jdbc_url = "".join(jdbc_url_parts)
 
         # 基础连接参数
-        connect_args = {"user": url_obj.username, "password": url_obj.password}
+        connect_args = {}
+        if url_obj.username:
+            connect_args["user"] = url_obj.username
+        if url_obj.password:
+            connect_args["password"] = url_obj.password
 
-        # 添加查询字符串参数
+        # 添加查询字符串参数（支持批量操作优化）
         if url_obj.query:
             for key, value in url_obj.query.items():
                 connect_args[key] = value if isinstance(value, str) else str(value)
+
+        # 默认添加批量操作优化参数
+        if "rewriteBatchedStatements" not in connect_args:
+            connect_args["rewriteBatchedStatements"] = "true"
 
         kwargs = {
             "jclassname": self.driver,
             "url": jdbc_url,
             "driver_args": connect_args,
         }
+
+        # 处理jar文件路径（如果通过URL参数指定）
+        if url_obj.query and "jarpath" in url_obj.query:
+            kwargs["jars"] = url_obj.query["jarpath"]
 
         return (), kwargs
 
@@ -205,7 +229,7 @@ class GBase8sJDBCDialect(OracleDialect, ABC):
         检查是否为 Oracle 8 数据库。
 
         Returns:
-            False，因为这是 GBase8s 方言
+            False，因为这是 GBase 8s 方言
         """
         return False
 
@@ -257,11 +281,24 @@ class GBase8sJDBCDialect(OracleDialect, ABC):
             版本号元组，如果获取失败则返回 None
         """
         try:
-            version_sql = sql.text("select dbinfo('version_gbase','full') from dual")
-            banner = connection.execute(version_sql).scalar()
+            # 尝试多种版本查询方式
+            version_queries = [
+                "select dbinfo('version_gbase','full') from dual",
+                "select dbinfo('version','full') from dual",
+            ]
+
+            banner = None
+            for query in version_queries:
+                try:
+                    version_sql = sql.text(query)
+                    banner = connection.execute(version_sql).scalar()
+                    if banner:
+                        break
+                except exc.DBAPIError:
+                    continue
 
             if isinstance(banner, str):
-                # 正则表达式匹配 GBase8s 版本格式
+                # 正则表达式匹配 GBase 8s 版本格式
                 version_pattern = (
                     r"GBase8sV?([\d.]+)"  # 主版本号
                     r"(?:_TL_([\d.]+))?"  # TL 版本（可选）
@@ -274,12 +311,44 @@ class GBase8sJDBCDialect(OracleDialect, ABC):
                 if match:
                     version_str = match.group(1)
                     return tuple(int(part) for part in version_str.split("."))
+                else:
+                    # 尝试简单版本号提取
+                    simple_match = re.search(r"(\d+)\.(\d+)", banner)
+                    if simple_match:
+                        return (int(simple_match.group(1)), int(simple_match.group(2)))
 
             return None
 
         except exc.DBAPIError:
             # 版本查询失败，返回 None
             return None
+        except Exception:
+            # 其他异常，返回 None
+            return None
+
+    def is_disconnect(self, e: Exception, connection: Any, cursor: Any) -> bool:
+        """
+        检查异常是否为连接断开错误。
+
+        Args:
+            e: 异常对象
+            connection: 连接对象
+            cursor: 游标对象
+
+        Returns:
+            如果是连接断开错误返回 True，否则返回 False
+        """
+        error_str = str(e).lower()
+        disconnect_indicators = [
+            "connection closed",
+            "socket closed",
+            "broken pipe",
+            "connection reset",
+            "jdbc connection",
+            "network error",
+        ]
+
+        return any(indicator in error_str for indicator in disconnect_indicators)
 
 
 # 注册方言到 SQLAlchemy

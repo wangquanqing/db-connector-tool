@@ -38,7 +38,7 @@ class PathHelper:
     """
 
     @staticmethod
-    def get_user_config_dir(app_name: str = "db_connector") -> Path:
+    def get_user_config_dir(app_name: str = "db_connector_tool") -> Path:
         """
         获取用户配置目录路径
 
@@ -46,7 +46,7 @@ class PathHelper:
         支持自动回退机制，当标准目录创建失败时回退到当前工作目录。
 
         Args:
-            app_name (str): 应用名称，默认为"db_connector"
+            app_name (str): 应用名称，默认为"db_connector_tool"
 
         Returns:
             Path: 配置目录的Path对象

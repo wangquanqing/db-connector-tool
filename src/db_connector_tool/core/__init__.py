@@ -19,7 +19,7 @@
 - 依赖: SQLAlchemy, cryptography
 
 使用示例：
-    >>> from db_connector.core import DatabaseManager, ConfigManager
+    >>> from db_connector_tool.core import DatabaseManager, ConfigManager
     >>>
     >>> # 创建数据库管理器
     >>> db_manager = DatabaseManager("my_app")
