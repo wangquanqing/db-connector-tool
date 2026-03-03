@@ -250,7 +250,24 @@ class DatabaseManager:
             config["database"] = ":memory:"
             return
 
-        # 为特定数据库类型设置默认值
+        # 应用特定数据库类型的默认配置
+        self._apply_default_config(config)
+
+        # 验证必需参数
+        required_fields = ["username", "password", "host"]
+        missing_fields = [field for field in required_fields if field not in config]
+        if missing_fields:
+            raise ConfigError(f"缺少必需的连接参数: {', '.join(missing_fields)}")
+
+    def _apply_default_config(self, config: Dict[str, Any]) -> None:
+        """
+        应用特定数据库类型的默认配置
+
+        Args:
+            config: 连接配置字典
+        """
+        db_type = config.get("type", "").lower()
+
         if db_type == "oracle" and "service_name" not in config:
             config["service_name"] = "XE"
         elif db_type == "postgresql" and "gssencmode" not in config:
@@ -262,12 +279,6 @@ class DatabaseManager:
                 config["tds_version"] = "7.0"
         elif db_type == "gbasedbt" and "server" not in config:
             config["server"] = "gbase01"
-
-        # 验证必需参数
-        required_fields = ["username", "password", "host"]
-        missing_fields = [field for field in required_fields if field not in config]
-        if missing_fields:
-            raise ConfigError(f"缺少必需的连接参数: {', '.join(missing_fields)}")
 
     def remove_connection(self, name: str) -> None:
         """

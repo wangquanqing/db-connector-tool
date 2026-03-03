@@ -1,15 +1,20 @@
+import os
 import re
+import warnings
 from abc import ABC
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Literal, Tuple
 
 import jaydebeapi
 from dateutil import parser
-from sqlalchemy import TIMESTAMP, TypeDecorator, exc, sql, util, VARCHAR, CHAR
+from sqlalchemy import CHAR, TIMESTAMP, VARCHAR, TypeDecorator, exc, sql, util
 from sqlalchemy.dialects import registry
 from sqlalchemy.dialects.oracle.base import OracleDialect
 from sqlalchemy.engine.interfaces import DBAPIModule
 from sqlalchemy.engine.url import make_url
+
+from ..utils.path_utils import PathHelper
 
 
 class GBase8sCursor(jaydebeapi.Cursor):
@@ -187,29 +192,11 @@ class GBase8sJDBCDialect(OracleDialect, ABC):
         """
         url_obj = make_url(url)
 
-        # 构建JDBC URL，处理可选端口和数据库名
-        jdbc_url_parts = [f"jdbc:{self.name}://{url_obj.host}"]
-        if url_obj.port:
-            jdbc_url_parts.append(f":{url_obj.port}")
-        if url_obj.database:
-            jdbc_url_parts.append(f"/{url_obj.database}")
-        jdbc_url = "".join(jdbc_url_parts)
+        # 构建 JDBC URL
+        jdbc_url = self._build_jdbc_url(url_obj)
 
-        # 基础连接参数
-        connect_args = {}
-        if url_obj.username:
-            connect_args["user"] = url_obj.username
-        if url_obj.password:
-            connect_args["password"] = url_obj.password
-
-        # 添加查询字符串参数（支持批量操作优化）
-        if url_obj.query:
-            for key, value in url_obj.query.items():
-                connect_args[key] = value if isinstance(value, str) else str(value)
-
-        # 默认添加批量操作优化参数
-        if "rewriteBatchedStatements" not in connect_args:
-            connect_args["rewriteBatchedStatements"] = "true"
+        # 构建连接参数
+        connect_args = self._build_connect_args(url_obj)
 
         kwargs = {
             "jclassname": self.driver,
@@ -217,11 +204,74 @@ class GBase8sJDBCDialect(OracleDialect, ABC):
             "driver_args": connect_args,
         }
 
-        # 处理jar文件路径（如果通过URL参数指定）
-        if url_obj.query and "jarpath" in url_obj.query:
-            kwargs["jars"] = url_obj.query["jarpath"]
+        # 处理 JAR 路径
+        self._handle_jar_path(url_obj, kwargs)
 
         return (), kwargs
+
+    def _build_jdbc_url(self, url_obj: Any) -> str:
+        """构建 JDBC 连接 URL 字符串。"""
+        jdbc_url_parts = [f"jdbc:{self.name}://{url_obj.host}"]
+        if url_obj.port:
+            jdbc_url_parts.append(f":{url_obj.port}")
+        if url_obj.database:
+            jdbc_url_parts.append(f"/{url_obj.database}")
+        return "".join(jdbc_url_parts)
+
+    def _build_connect_args(self, url_obj: Any) -> dict:
+        """构建数据库连接参数字典。"""
+        connect_args = {}
+        if url_obj.username:
+            connect_args["user"] = url_obj.username
+        if url_obj.password:
+            connect_args["password"] = url_obj.password
+
+        if url_obj.query:
+            for key, value in url_obj.query.items():
+                connect_args[key] = value if isinstance(value, str) else str(value)
+
+        if "rewriteBatchedStatements" not in connect_args:
+            connect_args["rewriteBatchedStatements"] = "true"
+
+        return connect_args
+
+    def _handle_jar_path(self, url_obj: Any, kwargs: dict) -> None:
+        """
+        处理 JDBC 驱动 JAR 文件路径。
+
+        优先级：URL参数 > 环境变量 > 默认路径
+
+        Args:
+            url_obj: SQLAlchemy URL对象
+        """
+
+        jar_path = None
+
+        # 1. 优先使用URL参数
+        if url_obj.query and "jarpath" in url_obj.query:
+            jar_path = url_obj.query["jarpath"]
+
+        # 2. 其次使用环境变量
+        elif "GBASE8S_JDBC_JARPATH" in os.environ:
+            jar_path = os.environ["GBASE8S_JDBC_JARPATH"]
+
+        # 3. 尝试常见默认路径
+        else:
+            app_name = "db_connector_tool"
+            config_dir = PathHelper.get_user_config_dir(app_name)
+            config_path = config_dir / "jars"
+            path = Path(config_path)
+            # 使用 glob 递归获取所有文件
+            files = [p for p in path.rglob("*gbase*.jar") if p.is_file()]
+            for file in files:
+                jar_path = str(file)
+                break
+
+        if isinstance(jar_path, str) and os.path.exists(jar_path):
+            kwargs["jars"] = jar_path
+        else:
+            warnings.warn(f"JDBC 驱动 jar 文件不存在：{jar_path}", UserWarning)
+            kwargs["jars"] = jar_path
 
     @property
     def _is_oracle_8(self) -> bool:
