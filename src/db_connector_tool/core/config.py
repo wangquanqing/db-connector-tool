@@ -365,7 +365,7 @@ class ConfigManager:
                     if minor_num >= 10:
                         minor_num = 0
                         # 检查第一位是否发生变化
-                        if original_major + 1 != original_major:
+                        if original_major == 10:
                             raise ConfigError(
                                 ERROR_VERSION_MAJOR_CHANGE,
                                 details={

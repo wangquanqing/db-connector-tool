@@ -11,7 +11,7 @@
 - 异常处理: 统一的异常体系，支持精确的错误分类和处理
 
 支持的数据库类型：
-- Oracle, PostgreSQL, MySQL, SQL Server, SQLite
+- Oracle, PostgreSQL, MySQL, SQL Server, SQLite, GBase 8s
 
 版本信息：
 - 模块版本: 1.0.0
@@ -96,4 +96,11 @@ CryptoManagerType = CryptoManager
 
 # 这些常量用于标识模块的兼容性要求
 REQUIRED_PYTHON_VERSION = (3, 8)
-SUPPORTED_DATABASE_TYPES = {"oracle", "postgresql", "mysql", "mssql", "sqlite"}
+SUPPORTED_DATABASE_TYPES = {
+    "oracle",
+    "postgresql",
+    "mysql",
+    "mssql",
+    "sqlite",
+    "gbasedbt",
+}

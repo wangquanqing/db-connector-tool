@@ -103,8 +103,8 @@ packages:
   timestamp: 1770772636527
 - pypi: ./
   name: db-connector-tool
-  version: 0.2.0
-  sha256: 66038398d2acb65cdb1696a4444889cffddc6643090d202cfa82d28115c2159d
+  version: 0.3.1
+  sha256: a138df0c84a0b2296b3afd4bd859a5dbbb27c55bcccacf247845ca532cbd3ba7
   requires_dist:
   - cryptography>=46.0.0
   - sqlalchemy>=2.0.0
@@ -139,6 +139,7 @@ packages:
   - perl >=5.32.1.1,<5.33.0a0 *_strawberry
   - openssl >=3.5.5,<4.0a0
   license: LGPL-2.0-only
+  license_family: LGPL
   purls: []
   size: 959142
   timestamp: 1772362336906
@@ -529,7 +530,8 @@ packages:
   - vs2015_runtime 14.44.35208.* *_34
   license: LicenseRef-MicrosoftVisualCpp2015-2022Runtime
   license_family: Proprietary
-  purls: []
+  purls:
+  - pkg:pypi/vcomp14
   size: 115235
   timestamp: 1767320173250
 - conda: https://conda.anaconda.org/conda-forge/win-64/zstd-1.5.7-h534d264_6.conda

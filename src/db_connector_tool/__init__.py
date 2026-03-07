@@ -41,11 +41,27 @@ except ImportError:
     DBConnectorCLI = None
     cli_main = None
 
+# 批量管理器导入
+try:
+    from .batch_manager import (
+        BatchDatabaseManager,
+        cleanup_temp_configs,
+        generate_ip_range,
+    )
+except ImportError:
+    # 在安装过程中或缺少依赖时，批量管理器可能不可用
+    BatchDatabaseManager = None
+    generate_ip_range = None
+
 # 公共API导出列表
 __all__ = [
     # 核心管理器
     "ConfigManager",
     "DatabaseManager",
+    # 批量管理器
+    "BatchDatabaseManager",
+    "cleanup_temp_configs",
+    "generate_ip_range",
     # 异常类
     "DBConnectorError",
     "ConfigError",

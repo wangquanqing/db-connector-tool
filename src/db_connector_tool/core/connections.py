@@ -114,6 +114,7 @@ class DatabaseManager:
 
     Attributes:
         app_name (str): 应用名称，用于配置文件的命名空间
+        config_file (str): 配置文件名
         config_manager (ConfigManager): 配置管理器实例
         connection_pool (Dict[str, ConnectionInfo]): 连接池字典
         _lock (threading.RLock): 可重入锁，确保线程安全
@@ -133,12 +134,15 @@ class DatabaseManager:
         >>> results = db_manager.execute_query("mysql_db", "SELECT * FROM users")
     """
 
-    def __init__(self, app_name: str = "db_connector_tool") -> None:
+    def __init__(
+        self, app_name: str = "db_connector_tool", config_file: str = "connections.toml"
+    ) -> None:
         """
         初始化数据库管理器
 
         Args:
             app_name: 应用名称，用于配置文件的命名空间和日志标识
+            config_file: 配置文件名，默认为"connections.toml"
 
         Raises:
             ConfigError: 当配置管理器初始化失败时
@@ -147,12 +151,13 @@ class DatabaseManager:
             建议为每个应用使用唯一的 app_name，避免配置冲突和日志混淆
 
         Example:
-            >>> db_manager = DatabaseManager("my_app")
+            >>> db_manager = DatabaseManager("my_app", "database.toml")
             >>> print(f"应用名称: {db_manager.app_name}")
         """
         try:
             self.app_name = app_name
-            self.config_manager = ConfigManager(app_name)
+            self.config_file = config_file
+            self.config_manager = ConfigManager(app_name, config_file)
             self.connection_pool: Dict[str, ConnectionInfo] = {}
             self._lock = threading.RLock()
             self._statistics = {
