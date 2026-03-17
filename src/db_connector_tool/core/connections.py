@@ -47,6 +47,8 @@ SUPPORTED_DATABASE_TYPES: Set[str] = {
 
 # 默认配置参数
 DEFAULT_MAX_IDLE_TIME = 300  # 5分钟
+DEFAULT_CONNECTION_TIMEOUT = 30  # 30秒连接超时
+DEFAULT_POOL_RECYCLE = 3600  # 1小时连接回收
 
 
 class ConnectionInfo:
@@ -164,7 +166,9 @@ class DatabaseManager:
                 "total_connections_created": 0,
                 "total_connections_closed": 0,
                 "connection_errors": 0,
+                "idle_connections_cleaned": 0,
                 "start_time": time.time(),
+                "last_cleanup_time": time.time(),
             }
             logger.info(f"数据库管理器初始化成功: {app_name}")
         except Exception as e:
@@ -346,25 +350,52 @@ class DatabaseManager:
 
     def _cleanup_connection(self, name: str) -> None:
         """
-        清理连接资源
+        安全清理连接资源
 
         Args:
             name: 连接名称
 
         Note:
-            安全地关闭连接并清理相关资源
-            即使发生异常也不会影响其他连接
+            安全地关闭连接并清理相关资源，确保无资源泄漏
+            即使发生异常也不会影响其他连接，但会记录详细错误
         """
+        if name not in self.connection_pool:
+            logger.debug(f"连接 {name} 不在连接池中，无需清理")
+            return
+
+        connection_info = self.connection_pool[name]
+
         try:
-            if name in self.connection_pool:
-                connection_info = self.connection_pool[name]
-                if connection_info.driver.is_connected:
+            # 标记连接为无效状态
+            connection_info.invalidate()
+
+            # 安全关闭连接
+            if (
+                hasattr(connection_info.driver, "is_connected")
+                and connection_info.driver.is_connected
+            ):
+                try:
                     connection_info.driver.disconnect()
+                    logger.debug(f"连接 {name} 已安全关闭")
+                except Exception as disconnect_error:
+                    logger.warning(
+                        f"关闭连接 {name} 时发生异常: {str(disconnect_error)}"
+                    )
+            else:
+                logger.debug(f"连接 {name} 未连接或已关闭")
+
+        except Exception as e:
+            logger.error(f"清理连接 {name} 时发生严重异常: {str(e)}")
+        finally:
+            # 确保从连接池中移除，避免内存泄漏
+            try:
                 del self.connection_pool[name]
                 self._statistics["total_connections_closed"] += 1
-                logger.debug(f"清理连接: {name}")
-        except Exception as e:
-            logger.warning(f"清理连接时发生异常 {name}: {str(e)}")
+                logger.debug(f"连接 {name} 已从连接池中移除")
+            except KeyError:
+                logger.debug(f"连接 {name} 已从连接池中移除")
+            except Exception as e:
+                logger.error(f"从连接池中移除连接 {name} 时发生异常: {str(e)}")
 
     def update_connection(self, name: str, connection_config: Dict[str, Any]) -> None:
         """
@@ -554,20 +585,28 @@ class DatabaseManager:
 
     def _is_connection_valid(self, driver: SQLAlchemyDriver) -> bool:
         """
-        最小化修复的连接有效性检查
+        全面的连接有效性检查
 
         Args:
             driver: 数据库驱动实例
 
         Returns:
             bool: 连接是否有效
+
+        Note:
+            提供多层次的连接有效性验证，包括基本状态检查和实际查询测试
         """
         try:
-            # 添加基本的连接状态检查
-            if not hasattr(driver, "is_connected") or not driver.is_connected:
+            # 第一层检查：基本属性验证
+            if not hasattr(driver, "is_connected"):
+                logger.debug("驱动实例缺少is_connected属性")
                 return False
 
-            # 原有的测试逻辑，但添加更好的错误处理
+            if not driver.is_connected:
+                logger.debug("驱动实例标记为未连接状态")
+                return False
+
+            # 第二层检查：实际查询测试
             return driver.test_connection()
 
         except Exception as e:
@@ -724,18 +763,19 @@ class DatabaseManager:
 
     def close_all_connections(self) -> None:
         """
-        关闭所有数据库连接
+        安全关闭所有数据库连接
 
-        清理所有活跃的连接资源，释放数据库连接池。
+        彻底清理所有活跃的连接资源，确保无资源泄漏。
 
         Raises:
             DatabaseError: 当关闭所有连接失败时
 
         Process:
             1. 获取所有连接名称的副本
-            2. 逐个关闭连接
+            2. 逐个安全关闭连接
             3. 统计成功和失败数量
-            4. 记录汇总日志
+            4. 记录详细汇总日志
+            5. 清理连接池字典
 
         Note:
             使用list()创建副本确保线程安全，避免在迭代过程中修改字典
@@ -746,27 +786,54 @@ class DatabaseManager:
         """
         with self._lock:
             try:
-                # 注意：这里必须使用list()创建副本，因为在迭代过程中会调用close_connection
-                # 这可能会修改connection_pool字典，导致RuntimeError
+                # 创建连接名称副本，避免迭代过程中字典修改
                 connection_names = list(self.connection_pool.keys())
+                total_connections = len(connection_names)
                 success_count = 0
                 error_count = 0
 
+                if total_connections == 0:
+                    logger.info("连接池为空，无需关闭连接")
+                    return
+
+                logger.info(f"开始关闭所有连接，共 {total_connections} 个连接")
+
                 for name in connection_names:
                     try:
-                        self.close_connection(name)
+                        # 使用内部清理方法，避免递归调用close_connection
+                        self._cleanup_connection(name)
                         success_count += 1
-                    except Exception:
+                        logger.debug(f"连接 {name} 关闭成功")
+                    except Exception as e:
                         error_count += 1
+                        logger.error(f"关闭连接 {name} 失败: {str(e)}")
 
+                # 最终检查连接池是否完全清空
+                remaining_connections = len(self.connection_pool)
+                if remaining_connections > 0:
+                    logger.warning(
+                        f"连接池清理不完整，仍有 {remaining_connections} 个连接未清理"
+                    )
+                    # 强制清空连接池
+                    self.connection_pool.clear()
+                    logger.info("已强制清空连接池")
+
+                # 记录详细汇总信息
                 if error_count > 0:
                     logger.warning(
-                        f"关闭所有连接完成，成功: {success_count}, 失败: {error_count}"
+                        f"关闭所有连接完成，成功: {success_count}, 失败: {error_count}, 总数: {total_connections}"
                     )
                 else:
-                    logger.info(f"所有数据库连接已关闭，共 {success_count} 个连接")
+                    logger.info(f"所有数据库连接已安全关闭，共 {success_count} 个连接")
+
             except Exception as e:
-                logger.error(f"关闭所有连接失败: {str(e)}")
+                logger.error(f"关闭所有连接时发生严重异常: {str(e)}")
+                # 即使发生异常也要尝试清理连接池
+                try:
+                    self.connection_pool.clear()
+                    logger.info("异常情况下已强制清空连接池")
+                except Exception:
+                    pass
                 raise DatabaseError(f"关闭所有连接失败: {str(e)}")
 
     def get_connection_info(self, name: str) -> Dict[str, Any]:
@@ -856,47 +923,105 @@ class DatabaseManager:
         self, max_idle_time: int = DEFAULT_MAX_IDLE_TIME
     ) -> int:
         """
-        清理空闲连接
+        清理空闲时间过长的连接
 
         Args:
             max_idle_time: 最大空闲时间（秒），默认5分钟
 
         Returns:
-            清理的连接数量
+            int: 清理的连接数量
+
+        Raises:
+            DatabaseError: 当清理过程发生严重错误时
 
         Process:
-            1. 获取当前时间
-            2. 遍历连接池，检查空闲时间
-            3. 清理超时的空闲连接
-            4. 返回清理数量
-
-        Note:
-            定期调用此方法可以释放长时间未使用的连接资源
-            避免连接泄漏和资源浪费
+            1. 检查所有连接的空闲时间
+            2. 清理超过最大空闲时间的连接
+            3. 记录清理统计信息
 
         Example:
             >>> cleaned_count = db_manager.cleanup_idle_connections(600)  # 10分钟
+            >>> print(f"清理了 {cleaned_count} 个空闲连接")
+        """
+        with self._lock:
+            try:
+                current_time = time.time()
+                connection_names = list(self.connection_pool.keys())
+                cleaned_count = 0
+
+                if not connection_names:
+                    logger.debug("连接池为空，无需清理空闲连接")
+                    return 0
+
+                logger.info(f"开始清理空闲连接，最大空闲时间: {max_idle_time}秒")
+
+                for name in connection_names:
+                    if name not in self.connection_pool:
+                        continue
+
+                    connection_info = self.connection_pool[name]
+                    idle_time = current_time - connection_info.last_used
+
+                    if idle_time > max_idle_time:
+                        try:
+                            logger.debug(
+                                f"连接 {name} 空闲时间 {idle_time:.1f}秒超过限制，执行清理"
+                            )
+                            self._cleanup_connection(name)
+                            cleaned_count += 1
+                            self._statistics["idle_connections_cleaned"] += 1
+                        except Exception as e:
+                            logger.warning(f"清理空闲连接 {name} 失败: {str(e)}")
+
+                self._statistics["last_cleanup_time"] = current_time
+
+                if cleaned_count > 0:
+                    logger.info(f"空闲连接清理完成，共清理 {cleaned_count} 个连接")
+                else:
+                    logger.debug("未发现需要清理的空闲连接")
+
+                return cleaned_count
+
+            except Exception as e:
+                logger.error(f"清理空闲连接时发生异常: {str(e)}")
+                raise DatabaseError(f"空闲连接清理失败: {str(e)}")
+
+    def get_connection_pool_status(self) -> Dict[str, Any]:
+        """
+        获取连接池状态信息
+
+        Returns:
+            Dict[str, Any]: 连接池状态信息字典
+
+        Example:
+            >>> status = db_manager.get_connection_pool_status()
+            >>> print(f"活跃连接数: {status['active_connections']}")
+            >>> print(f"总创建连接数: {status['total_created']}")
         """
         with self._lock:
             current_time = time.time()
-            cleaned_count = 0
 
-            # 注意：这里必须使用list()创建副本，因为在迭代过程中会调用_cleanup_connection
-            # 这会删除字典项，导致RuntimeError
-            connection_pool = list(self.connection_pool.items())
-            for name, connection_info in connection_pool:
-                if (current_time - connection_info.last_used) > max_idle_time:
-                    try:
-                        self._cleanup_connection(name)
-                        cleaned_count += 1
-                        logger.debug(f"清理空闲连接: {name}")
-                    except Exception as e:
-                        logger.warning(f"清理空闲连接失败 {name}: {str(e)}")
+            # 计算连接池统计信息
+            active_connections = 0
+            total_use_count = 0
+            max_idle_time = 0
 
-            if cleaned_count > 0:
-                logger.info(f"清理了 {cleaned_count} 个空闲连接")
+            for name, connection_info in self.connection_pool.items():
+                if connection_info.is_active:
+                    active_connections += 1
+                    total_use_count += connection_info.use_count
+                    idle_time = current_time - connection_info.last_used
+                    max_idle_time = max(max_idle_time, idle_time)
 
-            return cleaned_count
+            return {
+                "active_connections": active_connections,
+                "total_connections": len(self.connection_pool),
+                "total_use_count": total_use_count,
+                "max_idle_time": max_idle_time,
+                "statistics": self._statistics.copy(),
+                "uptime": current_time - self._statistics["start_time"],
+                "last_cleanup": current_time - self._statistics["last_cleanup_time"],
+            }
 
     def __str__(self) -> str:
         """返回数据库管理器的字符串表示"""

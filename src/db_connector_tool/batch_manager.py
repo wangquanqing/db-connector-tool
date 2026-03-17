@@ -86,6 +86,7 @@ class BatchDatabaseManager:
         self.base_config: Optional[Dict[str, Any]] = None
         self._connection_names = []
         self._lock = threading.RLock()
+        self._is_cleaned = False
 
         logger.info(f"批量管理器初始化完成 - 临时配置文件: {self.temp_config_file}")
 
@@ -156,27 +157,122 @@ class BatchDatabaseManager:
         logger.info(f"批量添加完成: {success_count}/{len(ip_list)} 个连接成功")
         return results
 
+    def cleanup(self) -> None:
+        """
+        清理批量管理器所有资源
+
+        安全关闭所有数据库连接，清理临时配置文件，释放所有资源。
+
+        Raises:
+            Exception: 当清理过程中发生严重错误时
+
+        Example:
+            >>> batch_manager.cleanup()
+        """
+        if self._is_cleaned:
+            logger.debug("批量管理器已清理，无需重复操作")
+            return
+
+        try:
+            logger.info("开始清理批量管理器资源")
+
+            # 1. 关闭所有数据库连接
+            connection_names = self._get_all_connection_names()
+            if connection_names:
+                logger.info(f"关闭 {len(connection_names)} 个数据库连接")
+                for conn_name in connection_names:
+                    try:
+                        self.db_manager.close_connection(conn_name)
+                        logger.debug(f"连接 {conn_name} 已关闭")
+                    except Exception as e:
+                        logger.warning(f"关闭连接 {conn_name} 失败: {str(e)}")
+
+            # 2. 清理连接名称列表
+            with self._lock:
+                self._connection_names.clear()
+                logger.debug("连接名称列表已清空")
+
+            # 3. 清理临时配置文件
+            try:
+                config_path = (
+                    PathHelper.get_user_config_dir(self.app_name)
+                    / self.temp_config_file
+                )
+                if config_path.exists():
+                    config_path.unlink()
+                    logger.info(f"临时配置文件已删除: {config_path}")
+                else:
+                    logger.debug("临时配置文件不存在，无需删除")
+            except Exception as e:
+                logger.warning(f"删除临时配置文件失败: {str(e)}")
+
+            # 4. 清理基础配置
+            self.base_config = None
+
+            self._is_cleaned = True
+            logger.info("批量管理器资源清理完成")
+
+        except Exception as e:
+            logger.error(f"批量管理器资源清理失败: {str(e)}")
+            raise
+
+    def __enter__(self):
+        """上下文管理器入口"""
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """上下文管理器出口，确保资源清理"""
+        self.cleanup()
+
+    def __del__(self):
+        """析构函数，确保资源清理"""
+        if not self._is_cleaned:
+            try:
+                self.cleanup()
+            except Exception:
+                # 析构函数中忽略异常
+                pass
+
     def _remove_existing_connection(self, connection_name: str) -> None:
         """
-        删除已存在的连接配置
+        安全删除已存在的连接配置
 
         Args:
             connection_name: 要删除的连接名称
+
+        Note:
+            确保连接被完全清理，包括关闭连接和清理配置
         """
-        try:
-            # 从数据库管理器中删除连接
-            self.db_manager.remove_connection(connection_name)
-            logger.debug(f"已从数据库管理器中删除连接: {connection_name}")
-        except Exception as e:
-            logger.warning(f"从数据库管理器删除连接失败 {connection_name}: {e}")
-
-        # 从连接名称列表中移除
         with self._lock:
-            if connection_name in self._connection_names:
-                self._connection_names.remove(connection_name)
-                logger.debug(f"已从连接名称列表中移除: {connection_name}")
+            try:
+                # 1. 先关闭连接
+                try:
+                    self.db_manager.close_connection(connection_name)
+                    logger.debug(f"连接 {connection_name} 已关闭")
+                except Exception as close_error:
+                    logger.warning(
+                        f"关闭连接 {connection_name} 失败: {str(close_error)}"
+                    )
 
-        logger.info(f"连接 {connection_name} 删除完成")
+                # 2. 从数据库管理器中删除连接配置
+                try:
+                    self.db_manager.remove_connection(connection_name)
+                    logger.debug(f"已从数据库管理器中删除连接配置: {connection_name}")
+                except Exception as remove_error:
+                    logger.warning(
+                        f"从数据库管理器删除连接配置失败 {connection_name}: {str(remove_error)}"
+                    )
+
+                # 3. 从连接名称列表中移除
+                if connection_name in self._connection_names:
+                    self._connection_names.remove(connection_name)
+                    logger.debug(f"已从连接名称列表中移除: {connection_name}")
+
+                logger.info(f"连接 {connection_name} 删除完成")
+
+            except Exception as e:
+                logger.error(f"删除连接 {connection_name} 时发生严重错误: {str(e)}")
+                raise
 
     def test_batch_connections(self, max_workers: int = 10) -> Dict[str, bool]:
         """
