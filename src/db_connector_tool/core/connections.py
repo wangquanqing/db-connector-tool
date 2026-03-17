@@ -554,21 +554,24 @@ class DatabaseManager:
 
     def _is_connection_valid(self, driver: SQLAlchemyDriver) -> bool:
         """
-        检查连接是否有效
+        最小化修复的连接有效性检查
 
         Args:
             driver: 数据库驱动实例
 
         Returns:
             bool: 连接是否有效
-
-        Note:
-            使用轻量级的测试查询验证连接状态
-            避免使用复杂的验证逻辑影响性能
         """
         try:
+            # 添加基本的连接状态检查
+            if not hasattr(driver, "is_connected") or not driver.is_connected:
+                return False
+
+            # 原有的测试逻辑，但添加更好的错误处理
             return driver.test_connection()
-        except Exception:
+
+        except Exception as e:
+            logger.debug(f"连接有效性检查失败: {str(e)}")
             return False
 
     def test_connection(self, name: str) -> bool:

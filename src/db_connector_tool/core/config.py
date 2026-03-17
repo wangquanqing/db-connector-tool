@@ -18,7 +18,10 @@
 """
 
 import json
+import platform
 import shutil
+import stat
+import subprocess
 import tomllib
 from datetime import datetime
 from pathlib import Path
@@ -94,7 +97,7 @@ class ConfigManager:
         try:
             if not self.config_path.exists():
                 self._create_default_config()
-            self._load_or_create_crypto_key()
+            self._load_or_create_crypto_key_secure()
             logger.debug(f"配置文件就绪: {self.config_path}")
         except Exception as e:
             logger.error(f"初始化配置文件失败: {str(e)}")
@@ -171,6 +174,47 @@ class ConfigManager:
             if field not in config:
                 raise ConfigError(f"配置文件缺少必需字段: {field}")
 
+    def _load_or_create_crypto_key_secure(self) -> None:
+        """
+        使用操作系统密钥存储服务加载或创建加密密钥
+
+        Raises:
+            ConfigError: 当密钥加载或创建失败时
+        """
+        try:
+            # 尝试使用keyring库（如果可用）
+            try:
+                import keyring
+
+                service_name = f"{self.app_name}_crypto"
+                username = "master_key"
+
+                # 尝试从密钥环获取密钥
+                stored_key = keyring.get_password(service_name, username)
+
+                if stored_key:
+                    # 解析存储的密钥数据
+                    key_data = json.loads(stored_key)
+                    self.crypto = CryptoManager.from_saved_key(
+                        key_data["password"], key_data["salt"]
+                    )
+                    logger.debug("从操作系统密钥存储加载密钥成功")
+                else:
+                    # 创建新密钥并存储
+                    self.crypto = CryptoManager()
+                    key_data = self.crypto.get_key_info()
+                    keyring.set_password(service_name, username, json.dumps(key_data))
+                    logger.info("新加密密钥已安全存储到操作系统密钥环")
+
+            except ImportError:
+                # keyring不可用，回退到文件权限方案
+                logger.warning("keyring库不可用，使用文件权限保护方案")
+                self._load_or_create_crypto_key()
+
+        except Exception as e:
+            logger.error(f"安全密钥管理失败: {str(e)}")
+            raise ConfigError(f"安全密钥管理失败: {str(e)}") from e
+
     def _load_or_create_crypto_key(self) -> None:
         """
         加载或创建加密密钥
@@ -183,6 +227,9 @@ class ConfigManager:
         if key_file.exists():
             # 加载现有密钥
             try:
+                # 设置文件权限为仅所有者可读写
+                self._secure_file_permissions(key_file)
+
                 with open(key_file, "r", encoding="utf-8") as f:
                     key_data = tomllib.loads(f.read())
 
@@ -203,14 +250,65 @@ class ConfigManager:
                 self.crypto = CryptoManager()
                 key_data = self.crypto.get_key_info()
 
+                # 先写入文件，然后设置安全权限
                 with open(key_file, "w", encoding="utf-8") as f:
                     f.write(tomli_w.dumps(key_data))
+
+                # 设置文件权限为仅所有者可读写
+                self._secure_file_permissions(key_file)
 
                 logger.info("新加密密钥创建成功")
 
             except Exception as e:
                 logger.error(f"创建加密密钥失败: {str(e)}")
                 raise ConfigError(f"加密密钥创建失败: {str(e)}") from e
+
+    def _secure_file_permissions(self, file_path: Path) -> None:
+        """
+        设置文件安全权限，仅允许所有者读写
+
+        Args:
+            file_path: 文件路径
+
+        Raises:
+            ConfigError: 当权限设置失败时
+        """
+        try:
+            system = platform.system().lower()
+
+            if system == "windows":
+                # Windows系统：使用icacls设置权限
+                try:
+                    # 移除所有用户的权限
+                    subprocess.run(
+                        ["icacls", str(file_path), "/reset"],
+                        check=True,
+                        capture_output=True,
+                    )
+                    # 仅当前用户完全控制
+                    subprocess.run(
+                        ["icacls", str(file_path), "/grant", f"%username%:F"],
+                        check=True,
+                        capture_output=True,
+                    )
+                    # 拒绝其他所有用户访问
+                    subprocess.run(
+                        ["icacls", str(file_path), "/inheritance:r"],
+                        check=True,
+                        capture_output=True,
+                    )
+                except (subprocess.CalledProcessError, FileNotFoundError):
+                    # 如果icacls不可用，使用基本的文件属性
+                    file_path.chmod(stat.S_IREAD | stat.S_IWRITE)
+            else:
+                # Unix-like系统：设置600权限（仅所有者可读写）
+                file_path.chmod(stat.S_IREAD | stat.S_IWRITE)
+
+            logger.debug("设置文件权限成功")
+
+        except Exception as e:
+            logger.warning(f"设置文件权限失败 {file_path}: {str(e)}")
+            # 权限设置失败不应阻止程序运行，但记录警告
 
     def add_connection(self, name: str, connection_config: Dict[str, Any]) -> None:
         """
@@ -352,32 +450,52 @@ class ConfigManager:
             if len(version_parts) == 3:
                 # 标准语义化版本号格式：x.y.z
                 major, minor, patch = version_parts
-                original_major = int(major)
-
-                # 第一位保持不变，第二、三位按照10进制每次加1，满10进1
-                patch_num = int(patch) + 1
+                major_num = int(major)
                 minor_num = int(minor)
+                patch_num = int(patch)
+
+                # 递增修订号（patch）
+                patch_num += 1
 
                 # 处理进位逻辑
                 if patch_num >= 10:
                     patch_num = 0
                     minor_num += 1
+
+                    # 处理次要版本进位
                     if minor_num >= 10:
                         minor_num = 0
-                        # 检查第一位是否发生变化
-                        if original_major == 10:
+                        major_num += 1
+
+                        # 检查主版本号是否会发生重大变化（限制主版本号不超过99）
+                        if major_num > 9:
                             raise ConfigError(
                                 ERROR_VERSION_MAJOR_CHANGE,
                                 details={
                                     "current_version": current_version,
-                                    "would_become": f"{original_major + 1}.{minor_num}.{patch_num}",
+                                    "would_become": f"{major_num}.{minor_num}.{patch_num}",
+                                    "max_major_version": 9,
                                 },
                             )
 
-                new_version = f"{original_major}.{minor_num}.{patch_num}"
+                new_version = f"{major_num}.{minor_num}.{patch_num}"
+
+                # 验证新版本号格式
+                if not self._is_valid_version_format(new_version):
+                    raise ConfigError(
+                        "版本号格式无效",
+                        details={
+                            "current_version": current_version,
+                            "new_version": new_version,
+                        },
+                    )
+
             else:
                 # 非标准版本号格式，使用默认递增逻辑
                 new_version = f"{current_version}.1"
+                logger.warning(
+                    f"非标准版本号格式，使用默认递增: {current_version} -> {new_version}"
+                )
 
             config["version"] = new_version
             logger.debug(f"配置文件版本号已更新: {current_version} -> {new_version}")
@@ -388,6 +506,32 @@ class ConfigManager:
         except Exception as e:
             logger.warning(f"版本号递增失败，保持原版本号: {str(e)}")
             # 如果版本号递增失败，不影响主要功能，继续使用原版本号
+
+    def _is_valid_version_format(self, version: str) -> bool:
+        """
+        验证版本号格式是否有效
+
+        Args:
+            version: 版本号字符串
+
+        Returns:
+            bool: 版本号格式是否有效
+        """
+        try:
+            parts = version.split(".")
+            if len(parts) != 3:
+                return False
+
+            for part in parts:
+                if not part.isdigit():
+                    return False
+                num = int(part)
+                if num < 0:
+                    return False
+
+            return True
+        except (ValueError, AttributeError):
+            return False
 
     def remove_connection(self, name: str) -> None:
         """
