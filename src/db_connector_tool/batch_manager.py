@@ -33,7 +33,7 @@
 import ipaddress
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from .core.connections import DatabaseManager
 from .core.exceptions import QueryError
@@ -391,35 +391,9 @@ class BatchDatabaseManager:
         results = {}
 
         def upgrade_single_database(conn_name):
-            try:
-                execution_results = []
-
-                for sql in upgrade_sqls:
-                    try:
-                        result = self.db_manager.execute_query(conn_name, sql)
-                        execution_results.append(
-                            {
-                                "sql": sql,
-                                "success": True,
-                                "affected_rows": len(result) if result else 0,
-                            }
-                        )
-                    except QueryError as e:
-                        execution_results.append(
-                            {"sql": sql, "success": False, "error": str(e)}
-                        )
-                        # 如果某条SQL失败，尝试回滚
-                        if rollback_sqls:
-                            self._execute_rollback(conn_name, rollback_sqls)
-                        break
-
-                return conn_name, {
-                    "success": all(r["success"] for r in execution_results),
-                    "executions": execution_results,
-                }
-
-            except Exception as e:
-                return conn_name, {"success": False, "error": str(e), "executions": []}
+            return self._upgrade_single_database_internal(
+                conn_name, upgrade_sqls, rollback_sqls
+            )
 
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             future_to_conn = {
@@ -439,6 +413,74 @@ class BatchDatabaseManager:
         """获取所有连接名称"""
         with self._lock:
             return self._connection_names.copy()
+
+    def _upgrade_single_database_internal(
+        self,
+        conn_name: str,
+        upgrade_sqls: List[str],
+        rollback_sqls: Optional[List[str]],
+    ) -> Tuple[str, Dict]:
+        """
+        单个数据库升级的内部逻辑
+
+        Args:
+            conn_name: 连接名称
+            upgrade_sqls: 升级SQL语句列表
+            rollback_sqls: 回滚SQL语句列表
+
+        Returns:
+            Tuple[str, Dict]: 连接名称和升级结果
+        """
+        try:
+            execution_results = self._execute_upgrade_sqls(
+                conn_name, upgrade_sqls, rollback_sqls
+            )
+            return conn_name, {
+                "success": all(r["success"] for r in execution_results),
+                "executions": execution_results,
+            }
+        except Exception as e:
+            return conn_name, {"success": False, "error": str(e), "executions": []}
+
+    def _execute_upgrade_sqls(
+        self,
+        conn_name: str,
+        upgrade_sqls: List[str],
+        rollback_sqls: Optional[List[str]],
+    ) -> List[Dict]:
+        """
+        执行升级SQL语句
+
+        Args:
+            conn_name: 连接名称
+            upgrade_sqls: 升级SQL语句列表
+            rollback_sqls: 回滚SQL语句列表
+
+        Returns:
+            List[Dict]: 执行结果列表
+        """
+        execution_results = []
+
+        for sql in upgrade_sqls:
+            try:
+                result = self.db_manager.execute_query(conn_name, sql)
+                execution_results.append(
+                    {
+                        "sql": sql,
+                        "success": True,
+                        "affected_rows": len(result) if result else 0,
+                    }
+                )
+            except QueryError as e:
+                execution_results.append(
+                    {"sql": sql, "success": False, "error": str(e)}
+                )
+                # 如果某条SQL失败，尝试回滚
+                if rollback_sqls:
+                    self._execute_rollback(conn_name, rollback_sqls)
+                break
+
+        return execution_results
 
     def _execute_rollback(self, conn_name: str, rollback_sqls: List[str]) -> None:
         """执行回滚操作"""

@@ -287,7 +287,7 @@ class ConfigManager:
                     )
                     # 仅当前用户完全控制
                     subprocess.run(
-                        ["icacls", str(file_path), "/grant", f"%username%:F"],
+                        ["icacls", str(file_path), "/grant", "%username%:F"],
                         check=True,
                         capture_output=True,
                     )

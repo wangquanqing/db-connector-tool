@@ -87,17 +87,46 @@ def setup_logging(
         ...     backup_count=10
         ... )
     """
-    # 验证日志级别
     log_level = _validate_log_level(level)
+    log_dir_path = _get_log_dir_path(app_name, log_dir)
+    _ensure_log_dir_exists(log_dir_path)
 
-    # 获取日志目录路径
+    log_file = log_dir_path / f"{app_name}.log"
+    log_file_exists = os.path.exists(log_file)
+
+    formatter = _create_formatter(log_format)
+    logger = _setup_logger(app_name, log_level)
+
+    handlers_added = _configure_handlers(
+        logger=logger,
+        formatter=formatter,
+        log_to_file=log_to_file,
+        log_to_console=log_to_console,
+        log_file=log_file,
+        log_dir_path=log_dir_path,
+        app_name=app_name,
+        log_level=log_level,
+        separate_error_log=separate_error_log,
+        max_file_size=max_file_size,
+        backup_count=backup_count,
+    )
+
+    _validate_handlers_count(handlers_added)
+    _log_initialization_info(logger, log_file_exists, app_name, level, log_file)
+
+    return logger
+
+
+def _get_log_dir_path(app_name: str, log_dir: str | None) -> Path:
+    """获取日志目录路径"""
     if log_dir is None:
         base_dir = PathHelper.get_user_config_dir(app_name)
-        log_dir_path = base_dir / "logs"
-    else:
-        log_dir_path = Path(log_dir)
+        return base_dir / "logs"
+    return Path(log_dir)
 
-    # 确保日志目录存在
+
+def _ensure_log_dir_exists(log_dir_path: Path) -> None:
+    """确保日志目录存在"""
     try:
         log_dir_path.mkdir(parents=True, exist_ok=True)
     except PermissionError as e:
@@ -105,14 +134,15 @@ def setup_logging(
     except OSError as e:
         raise OSError(f"无法创建日志目录 {log_dir_path}: {str(e)}")
 
-    log_file = log_dir_path / f"{app_name}.log"
-    log_file_exists = os.path.exists(log_file)
 
-    # 设置日志格式
+def _create_formatter(log_format: str | None) -> logging.Formatter:
+    """创建日志格式化器"""
     format_to_use = log_format if log_format is not None else DEFAULT_LOG_FORMAT
-    formatter = logging.Formatter(format_to_use)
+    return logging.Formatter(format_to_use)
 
-    # 获取应用专用logger（避免使用root logger）
+
+def _setup_logger(app_name: str, log_level: int) -> logging.Logger:
+    """设置logger并清除已有handlers"""
     logger = logging.getLogger(app_name)
     logger.setLevel(log_level)
 
@@ -121,61 +151,137 @@ def setup_logging(
         logger.removeHandler(handler)
         handler.close()
 
+    return logger
+
+
+def _configure_handlers(
+    logger: logging.Logger,
+    formatter: logging.Formatter,
+    log_to_file: bool,
+    log_to_console: bool,
+    log_file: Path,
+    log_dir_path: Path,
+    app_name: str,
+    log_level: int,
+    separate_error_log: bool,
+    max_file_size: int,
+    backup_count: int,
+) -> int:
+    """配置所有handlers并返回添加的handler数量"""
     handlers_added = 0
 
-    # 配置文件handler（滚动日志）
     if log_to_file:
-        try:
-            file_handler = logging.handlers.RotatingFileHandler(
-                filename=str(log_file),
-                maxBytes=max_file_size,
-                backupCount=backup_count,
-                encoding="utf-8",
-            )
-            file_handler.setFormatter(formatter)
-            file_handler.setLevel(log_level)
-            logger.addHandler(file_handler)
-            handlers_added += 1
+        handlers_added += _configure_file_handlers(
+            logger=logger,
+            formatter=formatter,
+            log_file=log_file,
+            log_dir_path=log_dir_path,
+            app_name=app_name,
+            log_level=log_level,
+            separate_error_log=separate_error_log,
+            max_file_size=max_file_size,
+            backup_count=backup_count,
+        )
 
-            # 配置单独的error级别日志文件
-            if separate_error_log and log_level <= logging.ERROR:
-                error_log_file = log_dir_path / f"{app_name}_error.log"
-                error_file_handler = logging.handlers.RotatingFileHandler(
-                    filename=str(error_log_file),
-                    maxBytes=max_file_size,
-                    backupCount=backup_count,
-                    encoding="utf-8",
-                )
-                error_file_handler.setFormatter(formatter)
-                error_file_handler.setLevel(logging.ERROR)  # 只记录ERROR及以上级别
-                logger.addHandler(error_file_handler)
-                handlers_added += 1
-
-        except PermissionError as e:
-            raise PermissionError(f"没有权限写入日志文件 {log_file}: {str(e)}")
-        except OSError as e:
-            raise OSError(f"无法创建日志文件 {log_file}: {str(e)}")
-
-    # 配置控制台handler
     if log_to_console:
-        console_handler = logging.StreamHandler(sys.stdout)
-        console_handler.setFormatter(formatter)
-        console_handler.setLevel(log_level)
-        logger.addHandler(console_handler)
+        handlers_added += _configure_console_handler(logger, formatter, log_level)
+
+    return handlers_added
+
+
+def _configure_file_handlers(
+    logger: logging.Logger,
+    formatter: logging.Formatter,
+    log_file: Path,
+    log_dir_path: Path,
+    app_name: str,
+    log_level: int,
+    separate_error_log: bool,
+    max_file_size: int,
+    backup_count: int,
+) -> int:
+    """配置文件handlers"""
+    try:
+        handlers_added = 0
+
+        # 主日志文件handler
+        file_handler = logging.handlers.RotatingFileHandler(
+            filename=str(log_file),
+            maxBytes=max_file_size,
+            backupCount=backup_count,
+            encoding="utf-8",
+        )
+        file_handler.setFormatter(formatter)
+        file_handler.setLevel(log_level)
+        logger.addHandler(file_handler)
         handlers_added += 1
 
-    # 验证至少配置了一个输出handler
+        # 错误日志文件handler
+        if separate_error_log and log_level <= logging.ERROR:
+            error_file_handler = _create_error_file_handler(
+                log_dir_path, app_name, formatter, max_file_size, backup_count
+            )
+            logger.addHandler(error_file_handler)
+            handlers_added += 1
+
+        return handlers_added
+
+    except PermissionError as e:
+        raise PermissionError(f"没有权限写入日志文件 {log_file}: {str(e)}")
+    except OSError as e:
+        raise OSError(f"无法创建日志文件 {log_file}: {str(e)}")
+
+
+def _create_error_file_handler(
+    log_dir_path: Path,
+    app_name: str,
+    formatter: logging.Formatter,
+    max_file_size: int,
+    backup_count: int,
+) -> logging.Handler:
+    """创建错误日志文件handler"""
+    error_log_file = log_dir_path / f"{app_name}_error.log"
+    error_file_handler = logging.handlers.RotatingFileHandler(
+        filename=str(error_log_file),
+        maxBytes=max_file_size,
+        backupCount=backup_count,
+        encoding="utf-8",
+    )
+    error_file_handler.setFormatter(formatter)
+    error_file_handler.setLevel(logging.ERROR)
+    return error_file_handler
+
+
+def _configure_console_handler(
+    logger: logging.Logger, formatter: logging.Formatter, log_level: int
+) -> int:
+    """配置控制台handler"""
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setFormatter(formatter)
+    console_handler.setLevel(log_level)
+    logger.addHandler(console_handler)
+    return 1
+
+
+def _validate_handlers_count(handlers_added: int) -> None:
+    """验证至少配置了一个输出handler"""
     if handlers_added == 0:
         raise ValueError("至少需要启用一种日志输出方式（控制台或文件）")
 
-    # 只在文件不存在时才打印初始化信息，避免重复日志
+
+def _log_initialization_info(
+    logger: logging.Logger,
+    log_file_exists: bool,
+    app_name: str,
+    level: str,
+    log_file: Path,
+) -> None:
+    """记录初始化信息"""
     if not log_file_exists:
         logger.info(
             f"日志系统初始化完成 - 应用: {app_name}, "
             f"级别: {level.upper()}, 日志文件: {log_file}"
         )
-
-    return logger
 
 
 def _validate_log_level(level: str) -> int:
