@@ -920,11 +920,15 @@ def create_argument_parser(cli_instance: DBConnectorCLI) -> argparse.ArgumentPar
         help="显示选定命令的帮助信息",
     )
 
-    subparsers = parser.add_subparsers(title="下列命令有效", dest="command")
+    # 添加版本选项
+    parser.add_argument(
+        "-v",
+        "--version",
+        action="store_true",
+        help="显示当前模块版本信息",
+    )
 
-    # version 命令
-    version_parser = subparsers.add_parser("version", help="显示当前模块版本信息")
-    version_parser.set_defaults(func=cli_instance.show_version)
+    subparsers = parser.add_subparsers(title="下列命令有效", dest="command")
 
     # add 命令
     add_parser = subparsers.add_parser("add", help="添加新的数据库连接")
@@ -1053,6 +1057,11 @@ def main():
         sys.exit(0)
 
     args = parser.parse_args()
+
+    # 处理版本选项
+    if hasattr(args, "version") and args.version:
+        cli.show_version(args)
+        sys.exit(0)
 
     if hasattr(args, "func"):
         args.func(args)
