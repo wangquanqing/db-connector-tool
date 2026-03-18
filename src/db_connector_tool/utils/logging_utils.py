@@ -47,6 +47,7 @@ def setup_logging(
     backup_count: int = 5,
     log_format: str | None = None,
     log_dir: str | None = None,
+    separate_error_log: bool = True,
 ) -> logging.Logger:
     """
     配置并初始化应用程序的日志系统
@@ -135,6 +136,21 @@ def setup_logging(
             file_handler.setLevel(log_level)
             logger.addHandler(file_handler)
             handlers_added += 1
+
+            # 配置单独的error级别日志文件
+            if separate_error_log and log_level <= logging.ERROR:
+                error_log_file = log_dir_path / f"{app_name}_error.log"
+                error_file_handler = logging.handlers.RotatingFileHandler(
+                    filename=str(error_log_file),
+                    maxBytes=max_file_size,
+                    backupCount=backup_count,
+                    encoding="utf-8",
+                )
+                error_file_handler.setFormatter(formatter)
+                error_file_handler.setLevel(logging.ERROR)  # 只记录ERROR及以上级别
+                logger.addHandler(error_file_handler)
+                handlers_added += 1
+
         except PermissionError as e:
             raise PermissionError(f"没有权限写入日志文件 {log_file}: {str(e)}")
         except OSError as e:

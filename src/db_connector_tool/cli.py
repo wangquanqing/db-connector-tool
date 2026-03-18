@@ -21,16 +21,18 @@ DB Connector CLI 工具
 
 import argparse
 import csv
+import getpass
 import json
 import os
 import re
 import sys
 from typing import Any, Dict, List, Optional, Tuple, Union
 
+from .__about__ import __version__
 from .core.connections import SUPPORTED_DATABASE_TYPES, DatabaseManager
 from .utils.logging_utils import setup_logging
 
-logger = setup_logging()
+logger = setup_logging(level="debug")
 
 
 class DBConnectorCLI:
@@ -90,6 +92,18 @@ class DBConnectorCLI:
             print(f"❌ 添加连接失败: {e}")
             sys.exit(1)
 
+    def show_version(self, args: argparse.Namespace) -> None:
+        """
+        显示当前模块版本信息
+
+        Args:
+            args (argparse.Namespace): 命令行参数
+        """
+        print(f"DB Connector Tool 版本: {__version__}")
+        print("支持的数据类型: Oracle, PostgreSQL, MySQL, SQL Server, SQLite, GBase 8s")
+        print("许可证: MIT")
+        print("作者: wangquanqing")
+
     def _ensure_db_manager_initialized(self) -> DatabaseManager:
         """
         确保数据库管理器已初始化
@@ -128,6 +142,14 @@ class DBConnectorCLI:
             value = getattr(args, param, None)
             if value is not None:
                 config[param] = value
+
+        # 检查密码参数，如果使用了密码选项但密码为空，提示用户输入密码
+        if hasattr(args, "password") and args.password is not None:
+            if args.password == "":
+                # 密码为空字符串，提示用户输入密码
+                config["password"] = getpass.getpass("请输入数据库密码: ")
+            else:
+                config["password"] = args.password
 
         # 添加自定义参数
         if hasattr(args, "custom_params") and args.custom_params:
@@ -291,6 +313,14 @@ class DBConnectorCLI:
             value = getattr(args, param, None)
             if value is not None:
                 update_config[param] = value
+
+        # 检查密码参数，如果使用了密码选项但密码为空，提示用户输入密码
+        if hasattr(args, "password") and args.password is not None:
+            if args.password == "":
+                # 密码为空字符串，提示用户输入密码
+                update_config["password"] = getpass.getpass("请输入数据库密码: ")
+            else:
+                update_config["password"] = args.password
 
         # 更新自定义参数
         if hasattr(args, "custom_params") and args.custom_params:
@@ -892,6 +922,10 @@ def create_argument_parser(cli_instance: DBConnectorCLI) -> argparse.ArgumentPar
 
     subparsers = parser.add_subparsers(title="下列命令有效", dest="command")
 
+    # version 命令
+    version_parser = subparsers.add_parser("version", help="显示当前模块版本信息")
+    version_parser.set_defaults(func=cli_instance.show_version)
+
     # add 命令
     add_parser = subparsers.add_parser("add", help="添加新的数据库连接")
     _setup_connection_arguments(add_parser)
@@ -976,7 +1010,14 @@ def _setup_connection_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("-H", "--host", help="数据库主机")
     parser.add_argument("-P", "--port", type=int, help="数据库端口")
     parser.add_argument("-u", "--username", help="用户名")
-    parser.add_argument("-p", "--password", help="密码")
+    parser.add_argument(
+        "-p",
+        "--password",
+        nargs="?",
+        default=None,
+        const="",
+        help="密码（使用-p不提供参数将提示输入密码）",
+    )
     parser.add_argument("-d", "--database", help="数据库名")
     parser.add_argument("-s", "--service-name", help="Oracle服务名称")
     parser.add_argument(
