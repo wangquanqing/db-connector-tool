@@ -899,15 +899,7 @@ def create_argument_parser(cli_instance: DBConnectorCLI) -> argparse.ArgumentPar
         usage="db-connector [<命令>] [<选项>]",
         description="DB Connector - 数据库连接管理工具",
         formatter_class=ChineseHelpFormatter,
-        epilog="""
-使用示例:
-  db-connector add mysql-dev --type mysql --host localhost --username root
-  db-connector list
-  db-connector query mysql-dev "SELECT * FROM users"
-  db-connector shell mysql-dev
-
-更多帮助请参考项目文档。
-        """,
+        epilog="可在此找到更多帮助: https://github.com/wangquanqing/db-connector-tool/blob/main/TUTORIAL.md",
         add_help=False,
     )
 

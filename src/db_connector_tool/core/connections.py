@@ -637,7 +637,7 @@ class DatabaseManager:
             driver = self.get_connection(name)
             success = driver.test_connection()
             if success:
-                logger.debug(f"连接测试成功: {name}")
+                logger.info(f"连接测试成功: {name}")
             else:
                 logger.warning(f"连接测试失败: {name}")
             return success

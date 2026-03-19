@@ -121,7 +121,7 @@ class ConfigManager:
             },
         }
         self._save_config(default_config)
-        logger.info(f"创建默认配置文件: {self.config_path}")
+        logger.info(f"默认配置文件已创建: {self.config_path}")
 
     def _save_config(self, config: Dict[str, Any]) -> None:
         """
