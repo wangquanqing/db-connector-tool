@@ -9,18 +9,21 @@
 ## ✨ 特性
 
 ### 🔐 安全特性
+
 - **全字段加密**: 使用 `cryptography.fernet` 加密所有敏感连接信息
 - **密钥管理**: 支持操作系统密钥环和文件权限保护双重方案
 - **PBKDF2派生**: 使用480,000次迭代的PBKDF2密钥派生算法
-- **安全随机数**: 基于`secrets`模块的密码学安全随机数生成
+- **安全随机数**: 基于 `secrets`模块的密码学安全随机数生成
 
 ### 🏗️ 架构设计
+
 - **模块化架构**: 清晰的职责分离（核心、驱动、工具模块）
 - **连接池管理**: 线程安全的连接池，支持连接复用和生命周期管理
 - **异常体系**: 统一的异常处理，支持精确错误分类和上下文信息
 - **批量操作**: 支持基于模板的批量连接配置和并发执行
 
 ### 🗄️ 多数据库支持
+
 - **Oracle**: 通过 oracledb 驱动（原生支持）
 - **PostgreSQL**: 通过 psycopg3 驱动（异步支持）
 - **MySQL**: 通过 pymysql 驱动（纯Python实现）
@@ -29,6 +32,7 @@
 - **GBase 8s**: 通过 JDBC 驱动（完整SQLAlchemy方言支持）
 
 ### 📊 运维特性
+
 - **配置管理**: 基于 TOML 的配置文件，支持自动备份和版本控制
 - **完整日志**: 多级别日志输出，支持文件轮转和格式化
 - **CLI工具**: 完整的命令行界面，支持交互式SQL Shell
@@ -109,7 +113,7 @@ for name, config in databases.items():
 
 # 跨数据库操作
 users = db_manager.execute_query('app_db', 'SELECT * FROM users')
-db_manager.execute_command('log_db', 'INSERT INTO access_log VALUES (?, ?)', (user_id, 'login'))
+db_manager.execute_command('log_db', 'INSERT INTO access_log VALUES (?, ?)', {"user_id": "user_id", "action": "login"})
 
 db_manager.close_all_connections()
 ```
@@ -172,19 +176,23 @@ db-connector shell mysql-dev
 详细API文档和使用示例请查看 [TUTORIAL.md](TUTORIAL.md)，包含：
 
 ### 核心管理类
+
 - **DatabaseManager**: 数据库连接生命周期管理
-- **BatchDatabaseManager**: 批量连接配置和并发操作  
+- **BatchDatabaseManager**: 批量连接配置和并发操作
 - **ConfigManager**: 配置文件加密存储和管理
 - **CryptoManager**: 数据加密解密功能
 
 ### 功能模块
+
 - 完整的异常处理体系和使用示例
 - 工具函数和辅助类详细说明
 - 命令行工具(CLI)完整指南
 - 最佳实践和故障排除
 
 ### 快速查找
+
 在教程文件中可以找到：
+
 - 每个方法的详细参数说明
 - 实际使用代码示例
 - 错误处理最佳实践
@@ -195,16 +203,19 @@ db-connector shell mysql-dev
 ### 多层安全保护
 
 #### 1. 数据加密
+
 - **全字段加密**: 所有连接配置字段自动加密存储
 - **强加密算法**: 使用 AES-256 加密和 PBKDF2 密钥派生
 - **安全迭代**: 480,000次PBKDF2迭代，符合OWASP安全标准
 
 #### 2. 密钥管理
+
 - **操作系统密钥环**: 优先使用系统密钥存储服务（keyring）
 - **文件权限保护**: 回退方案使用严格的文件权限控制
 - **密钥派生**: 基于用户密码和随机盐值动态派生加密密钥
 
 #### 3. 配置安全
+
 - **配置文件完整性**: TOML格式验证和版本兼容性检查
 - **自动备份**: 配置文件变更时自动创建备份
 - **敏感信息处理**: 日志中自动屏蔽密码等敏感信息
@@ -231,7 +242,7 @@ encrypted = crypto.encrypt("sensitive_data")
 - **主配置文件**: `~/.config/db_connector_tool/connections.toml`
 - **临时配置文件**: `~/.config/db_connector_tool/connections_*.toml`（批量管理）
 - **日志文件**: `~/.config/db_connector_tool/logs/db_connector_tool.log`
-- **加密密钥**: 操作系统密钥环或`~/.config/db_connector_tool/encryption.key`
+- **加密密钥**: 操作系统密钥环或 `~/.config/db_connector_tool/encryption.key`
 
 ## 🧪 开发
 

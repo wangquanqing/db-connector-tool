@@ -104,8 +104,7 @@ class SQLAlchemyDriver:
         ...     "database": "test_db",
         ...     "pool_config": {"pool_size": 5}
         ... }
-        >>> driver = SQLAlchemyDriver(config)
-        >>> with driver:
+        >>> with SQLAlchemyDriver(config) as driver:
         ...     results = driver.execute_query("SELECT * FROM users")
         ...     print(results)
     """

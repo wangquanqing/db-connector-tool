@@ -626,6 +626,7 @@ class DatabaseManager:
         Note:
             测试失败时会记录详细的错误信息，但不会抛出异常
             适合用于健康检查或连接监控
+            测试完成后会自动清理连接，避免连接池污染
 
         Example:
             >>> if db_manager.test_connection("mysql_db"):
@@ -640,8 +641,17 @@ class DatabaseManager:
                 logger.info(f"连接测试成功: {name}")
             else:
                 logger.warning(f"连接测试失败: {name}")
+
+            # 测试完成后立即清理连接，避免连接池污染
+            self.close_connection(name)
+
             return success
         except Exception as e:
+            # 确保异常情况下也清理连接
+            try:
+                self.close_connection(name)
+            except Exception:
+                pass  # 忽略清理过程中的异常
             logger.error(f"连接测试失败 {name}: {str(e)}")
             return False
 
@@ -671,6 +681,7 @@ class DatabaseManager:
         Note:
             此方法封装了连接获取和错误处理，提供统一的查询接口
             适合执行SELECT等查询操作
+            连接由连接池管理，无需手动管理连接生命周期
 
         Example:
             >>> results = db_manager.execute_query(
@@ -681,8 +692,8 @@ class DatabaseManager:
         """
         try:
             driver = self.get_connection(connection_name)
-            with driver:
-                return driver.execute_query(query, params)
+            # 直接调用驱动方法，连接生命周期由连接池管理
+            return driver.execute_query(query, params)
         except (ConfigError, ConnectionError):
             raise
         except Exception as e:
@@ -718,6 +729,7 @@ class DatabaseManager:
         Note:
             适合执行数据修改操作，返回受影响的行数
             提供事务安全的命令执行环境
+            连接由连接池管理，无需手动管理连接生命周期
 
         Example:
             >>> affected_rows = db_manager.execute_command(
@@ -728,8 +740,8 @@ class DatabaseManager:
         """
         try:
             driver = self.get_connection(connection_name)
-            with driver:
-                return driver.execute_command(command, params)
+            # 直接调用驱动方法，连接生命周期由连接池管理
+            return driver.execute_command(command, params)
         except (ConfigError, ConnectionError):
             raise
         except Exception as e:
