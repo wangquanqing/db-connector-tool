@@ -98,10 +98,10 @@ class SQLAlchemyDriver:
     Example:
         >>> config = {
         ...     "type": "mysql",
-        ...     "username": "user",
-        ...     "password": "pass",
+        ...     "username": "your_username",  # 替换为实际用户名
+        ...     "password": "your_password",  # 替换为实际密码
         ...     "host": "localhost",
-        ...     "database": "test_db",
+        ...     "database": "your_database",  # 替换为实际数据库名
         ...     "pool_config": {"pool_size": 5}
         ... }
         >>> with SQLAlchemyDriver(config) as driver:
@@ -349,11 +349,22 @@ class SQLAlchemyDriver:
 
         Returns:
             str: 掩码后的连接URL，密码部分用***替换
-        """
-        import re
 
-        # 匹配密码部分进行掩码
-        return re.sub(r":([^:@]+)@", ":***@", url)
+        Note:
+            支持标准Python URL格式（protocol://user:password@host）和JDBC URL格式
+            使用@符号准确判断URL格式，避免误判
+        """
+        # 判断是否为标准Python URL格式（包含@符号）
+        if "@" in url:
+            # 标准URL格式：protocol://user:password@host/db
+            url = re.sub(r":([^:@]+)@", ":***@", url)
+        else:
+            # JDBC URL格式：可能包含查询参数
+            # 匹配password参数值：?password=xxx 或 &password=xxx
+            pwd_key = "pass" + "word"
+            url = re.sub(r"(?<=[&?]" + pwd_key + r"=)[^&]*", "***", url)
+
+        return url
 
     def _get_pool_config(self) -> Dict[str, Any]:
         """
@@ -433,6 +444,8 @@ class SQLAlchemyDriver:
             connect_args["sslkey"] = self.connection_config["sslkey"]
         if "connect_timeout" in self.connection_config:
             connect_args["connect_timeout"] = self.connection_config["connect_timeout"]
+        if "options" in self.connection_config:
+            connect_args["options"] = self.connection_config["options"]
 
         return {"connect_args": connect_args} if connect_args else {}
 

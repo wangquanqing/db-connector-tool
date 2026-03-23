@@ -1035,7 +1035,10 @@ def _setup_connection_arguments(parser: argparse.ArgumentParser) -> None:
         help="MSSQL TDS 版本",
     )
     parser.add_argument(
-        "-c", "--custom-params", nargs="+", help="自定义参数 (格式: key=value)"
+        "-c",
+        "--custom-params",
+        nargs="+",
+        help="自定义参数 (格式: key=value)\n例如: -c options=-csearch_path=myschema",
     )
 
 
