@@ -279,7 +279,7 @@ class GBase8sJDBCDialect(OracleDialect, ABC):
                 f"GBase 8s JDBC驱动jar文件未找到。\n"
                 f"当前搜索路径: {path_display}\n"
                 f"解决方案:\n"
-                f"1. 在连接URL中添加jarpath参数: jdbc:gbase8s://host:port/db?jarpath=/path/to/gbase8s-jdbc.jar\n"
+                f"1. 在连接URL中添加jarpath参数: jdbcgbase8s://host:port/db?jarpath=/path/to/gbase8s-jdbc.jar\n"
                 f"2. 设置环境变量: GBASE8S_JDBC_JARPATH=/path/to/gbase8s-jdbc.jar\n"
                 f"3. 将jar文件放置在默认目录: {default_jar_path}",
                 UserWarning,
