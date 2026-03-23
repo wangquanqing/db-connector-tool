@@ -1038,7 +1038,7 @@ def _setup_connection_arguments(parser: argparse.ArgumentParser) -> None:
         "-c",
         "--custom-params",
         nargs="+",
-        help="自定义参数 (格式: key=value)\n例如: -c options=-csearch_path=myschema",
+        help="自定义参数 (格式: key=value), 例如: -c options=-csearch_path=myschema connect_timeout=10",
     )
 
 
