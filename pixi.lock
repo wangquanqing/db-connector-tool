@@ -103,14 +103,15 @@ packages:
   timestamp: 1770772636527
 - pypi: ./
   name: db-connector-tool
-  version: 0.3.1
-  sha256: a138df0c84a0b2296b3afd4bd859a5dbbb27c55bcccacf247845ca532cbd3ba7
+  version: 0.6.0
+  sha256: 5e13d2d5fcf88d1718bce4df020a74ee3967a49bec260246bb7054d73c6ae5a1
   requires_dist:
   - cryptography>=46.0.0
   - sqlalchemy>=2.0.0
   - tomli-w>=1.0.0
   - jaydebeapi>=1.2.3,<2 ; extra == 'all'
   - jpype1==1.5.2 ; extra == 'all'
+  - keyring>=23.0.0 ; extra == 'all'
   - oracledb>=3.0.0 ; extra == 'all'
   - psycopg>=3.0.0 ; extra == 'all'
   - pymssql>=2.0.0 ; extra == 'all'
@@ -127,6 +128,7 @@ packages:
   - pymysql>=1.0.0 ; extra == 'mysql'
   - oracledb>=3.0.0 ; extra == 'oracle'
   - psycopg>=3.0.0 ; extra == 'postgresql'
+  - keyring>=23.0.0 ; extra == 'secure'
   - pymssql>=2.0.0 ; extra == 'sqlserver'
   requires_python: '>=3.8'
 - conda: https://conda.anaconda.org/conda-forge/win-64/freetds-1.5.14-pl5321ha65405a_0.conda
