@@ -34,6 +34,7 @@
 
 版本: 1.0.0
 作者: db-connector-tool 开发团队
+许可证: MIT
 """
 
 import base64
@@ -279,10 +280,10 @@ class CryptoManager:
         验证密码强度（静态方法）
 
         Args:
-            password: 要验证的密码
+            password (str): 要验证的密码字符串
 
         Returns:
-            bool: 密码强度是否足够
+            bool: 密码强度是否足够（True/False）
 
         Password Strength Requirements:
             - 长度至少为 16 字符
@@ -290,6 +291,12 @@ class CryptoManager:
             - 包含至少 1 个小写字母
             - 包含至少 1 个数字
             - 包含至少 1 个特殊字符
+
+        Example:
+            >>> CryptoManager.validate_password_strength("Weak123")
+            False
+            >>> CryptoManager.validate_password_strength("StrongP@ssw0rd123!")
+            True
         """
         # 检查密码长度
         if len(password) < 16:
@@ -304,7 +311,7 @@ class CryptoManager:
             return False
 
         # 检查是否包含数字
-        if not re.search(r"[0-9]", password):
+        if not re.search(r"\d", password):
             return False
 
         # 检查是否包含特殊字符
@@ -319,10 +326,25 @@ class CryptoManager:
         获取密码强度等级（静态方法）
 
         Args:
-            password: 要评估的密码
+            password (str): 要评估的密码字符串
 
         Returns:
-            str: 密码强度等级 (weak, medium, strong, very_strong)
+            str: 密码强度等级，可能的值包括：
+                 - "weak": 弱密码
+                 - "medium": 中等强度密码
+                 - "strong": 强密码
+                 - "very_strong": 非常强的密码
+
+        Scoring System:
+            - 长度得分：8字符=1分，16字符=2分，24字符=3分
+            - 复杂度得分：大写字母、小写字母、数字、特殊字符各1分
+            - 总分≥7: very_strong, ≥5: strong, ≥3: medium, <3: weak
+
+        Example:
+            >>> CryptoManager.get_password_strength("password")
+            'weak'
+            >>> CryptoManager.get_password_strength("StrongP@ssw0rd123!")
+            'very_strong'
         """
         score = 0
 
@@ -339,7 +361,7 @@ class CryptoManager:
             score += 1
         if re.search(r"[a-z]", password):
             score += 1
-        if re.search(r"[0-9]", password):
+        if re.search(r"\d", password):
             score += 1
         if re.search(r'[!@#$%^&*(),.?":{}|<>]', password):
             score += 1
@@ -382,7 +404,7 @@ class CryptoManager:
         # 测试基础迭代次数的执行时间
         test_iterations = 100000
         test_password = "test_password"
-        test_salt = b"test_salt_123456"
+        test_salt = secrets.token_bytes(16)  # 使用16字节随机盐值
 
         start_time = time.time()
         kdf = PBKDF2HMAC(
@@ -538,6 +560,11 @@ class CryptoManager:
             >>> # 加密 Unicode 文本
             >>> encrypted = crypto.encrypt("中文文本 🌟 emoji 表情")
             >>> print("加密成功")
+
+        Note:
+            - 加密结果包含时间戳，可检测重放攻击
+            - 支持任意长度的字符串加密
+            - 输出为 URL 安全的 base64 编码
         """
         if not data or not isinstance(data, str):
             raise ValueError("加密数据不能为空且必须是字符串")
@@ -590,6 +617,11 @@ class CryptoManager:
             ...     print(f"解密失败: {e}")
             ... except InvalidToken:
             ...     print("令牌无效，数据可能被篡改")
+
+        Note:
+            - 解密时会验证数据完整性和时间戳
+            - 如果使用不同的密钥或数据被篡改，会抛出 InvalidToken 异常
+            - 支持解密任意长度的加密字符串
         """
         if not encrypted_data or not isinstance(encrypted_data, str):
             raise ValueError("加密数据不能为空且必须是字符串")
@@ -755,10 +787,9 @@ class CryptoManager:
         Raises:
             ValueError: 当密码强度不足时
         """
-        if password is not None:
-            if not cls.validate_password_strength(password):
-                strength = cls.get_password_strength(password)
-                raise ValueError(f"密码强度不足 ({strength})，请使用更强的密码")
+        if password is not None and not cls.validate_password_strength(password):
+            strength = cls.get_password_strength(password)
+            raise ValueError(f"密码强度不足 ({strength})，请使用更强的密码")
 
         # 使用推荐的迭代次数和自动生成的盐值
         return cls(password=password, iterations=cls.DEFAULT_ITERATIONS)

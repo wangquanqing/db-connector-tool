@@ -1,12 +1,12 @@
-# pixi environments
-.pixi/*
-!.pixi/config.toml
-
-# Python
+# 字节编译/优化/DLL文件
 __pycache__/
-*.py[cod]
+*.py[codz]
 *$py.class
+
+# C扩展
 *.so
+
+# 分发/打包
 .Python
 build/
 develop-eggs/
@@ -26,8 +26,127 @@ share/python-wheels/
 *.egg
 MANIFEST
 
-# Virtual environments
+# PyInstaller
+#   通常这些文件由Python脚本从模板写入
+#   在PyInstaller构建exe之前，用于注入日期/其他信息
+*.manifest
+*.spec
+
+# 安装器日志
+pip-log.txt
+pip-delete-this-directory.txt
+
+# 单元测试/覆盖率报告
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py.cover
+.hypothesis/
+.pytest_cache/
+cover/
+
+# 翻译文件
+*.mo
+*.pot
+
+# Django相关
+*.log
+local_settings.py
+db.sqlite3
+db.sqlite3-journal
+
+# Flask相关
+instance/
+.webassets-cache
+
+# Scrapy相关
+.scrapy
+
+# Sphinx文档
+docs/_build/
+
+# PyBuilder
+.pybuilder/
+target/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# IPython
+profile_default/
+ipython_config.py
+
+# pyenv
+#   对于库或包，您可能希望忽略这些文件，因为代码旨在在多个环境中运行
+#   否则，请将它们检入版本控制
+# .python-version
+
+# pipenv
+#   根据pypa/pipenv#598，建议将Pipfile.lock包含在版本控制中
+#   然而，在协作情况下，如果有平台特定的依赖项或没有跨平台支持的依赖项
+#   pipenv可能会安装不起作用的依赖项，或者不安装所有必需的依赖项
+# Pipfile.lock
+
+# UV
+#   类似于Pipfile.lock，通常建议将uv.lock包含在版本控制中
+#   这对于二进制包特别推荐以确保可重现性，对于库更常被忽略
+# uv.lock
+
+# poetry
+#   类似于Pipfile.lock，通常建议将poetry.lock包含在版本控制中
+#   这对于二进制包特别推荐以确保可重现性，对于库更常被忽略
+#   https://python-poetry.org/docs/basic-usage/#commit-your-poetrylock-file-to-version-control
+# poetry.lock
+# poetry.toml
+
+# pdm
+#   类似于Pipfile.lock，通常建议将pdm.lock包含在版本控制中
+#   pdm建议将项目范围的配置包含在pdm.toml中，但排除.pdm-python
+#   https://pdm-project.org/en/latest/usage/project/#working-with-version-control
+# pdm.lock
+# pdm.toml
+.pdm-python
+.pdm-build/
+
+# pixi
+#   类似于Pipfile.lock，通常建议将pixi.lock包含在版本控制中
+# pixi.lock
+#   Pixi在.pixi目录中创建虚拟环境，就像venv模块在.venv目录中创建一样
+#   建议不要将此目录包含在版本控制中
+.pixi
+
+# PEP 582; 被例如github.com/David-OConnor/pyflow和github.com/pdm-project/pdm使用
+__pypackages__/
+
+# Celery相关
+celerybeat-schedule
+celerybeat.pid
+
+# Redis
+*.rdb
+*.aof
+*.pid
+
+# RabbitMQ
+mnesia/
+rabbitmq/
+rabbitmq-data/
+
+# ActiveMQ
+activemq-data/
+
+# SageMath解析文件
+*.sage.py
+
+# 环境文件
 .env
+.envrc
 .venv
 env/
 venv/
@@ -35,43 +154,60 @@ ENV/
 env.bak/
 venv.bak/
 
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
+# Spyder项目设置
+.spyderproject
+.spyproject
 
-# OS
-.DS_Store
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
-ehthumbs.db
-Thumbs.db
+# Rope项目设置
+.ropeproject
 
-# Testing
-.coverage
-.pytest_cache/
-.tox/
-nosetests.xml
-coverage.xml
-*.cover
-.hypothesis/
+# mkdocs文档
+/site
 
-# Logs
-*.log
-logs/
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
 
-# Database
-*.db
-*.sqlite3
+# Pyre类型检查器
+.pyre/
 
-# Temporary files
-*.tmp
-*.temp
+# pytype静态类型分析器
+.pytype/
 
-# Distribution / packaging
-.Python
-pip-wheel-metadata/
+# Cython调试符号
+cython_debug/
+
+# PyCharm
+#   JetBrains特定模板维护在单独的JetBrains.gitignore中
+#   可以在https://github.com/github/gitignore/blob/main/Global/JetBrains.gitignore找到
+#   可以添加到全局gitignore或合并到此文件中。对于更极端的选项（不推荐）
+#   您可以取消注释以下内容以忽略整个idea文件夹
+# .idea/
+
+# Abstra
+#   Abstra是一个AI驱动的流程自动化框架
+#   忽略包含用户凭据、本地状态和设置的目录
+#   了解更多：https://abstra.io/docs
+.abstra/
+
+# Visual Studio Code
+#   Visual Studio Code特定模板维护在单独的VisualStudioCode.gitignore中
+#   可以在https://github.com/github/gitignore/blob/main/Global/VisualStudioCode.gitignore找到
+#   可以添加到全局gitignore或合并到此文件中。但是，如果您愿意
+#   您可以取消注释以下内容以忽略整个vscode文件夹
+# .vscode/
+
+# Ruff相关
+.ruff_cache/
+
+# PyPI配置文件
+.pypirc
+
+# Marimo
+marimo/_static/
+marimo/_lsp/
+__marimo__/
+
+# Streamlit
+.streamlit/secrets.toml
