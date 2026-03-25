@@ -269,10 +269,10 @@ pytest -m "not slow"
 black db_connector_tool/ tests/
 
 # 代码检查
-flake8 db_connector_tool/ tests/
+pylint db_connector_tool/ tests/
 
 # 类型检查
-mypy db_connector_tool/
+pyright db_connector_tool/
 ```
 
 ## 📄 许可证
