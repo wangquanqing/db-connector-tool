@@ -40,6 +40,7 @@
 import base64
 import re
 import secrets
+import string
 import time
 from typing import Any, Dict
 
@@ -61,6 +62,7 @@ class CryptoManager:
 
     提供基于 Fernet 对称加密的完整密码管理和数据保护解决方案。
     使用 PBKDF2-HMAC-SHA256 进行安全的密钥派生，支持自动参数优化。
+    支持上下文管理器模式，确保敏感数据的精确生命周期管理。
 
     主要功能：
     - 安全的密码和盐值生成
@@ -68,6 +70,7 @@ class CryptoManager:
     - 密钥信息的持久化存储和恢复
     - 密码强度验证和自动调整
     - 敏感数据的安全清理
+    - 上下文管理器支持（精确生命周期控制）
 
     类属性说明：
         DEFAULT_SALT_LENGTH (int): 默认盐值长度（16字节，符合安全标准）
@@ -80,6 +83,7 @@ class CryptoManager:
         - 强制密码复杂度要求（长度≥16，包含大小写字母、数字、特殊字符）
         - 自动内存清理防止敏感数据泄漏
         - 支持硬件安全模块集成（通过扩展）
+        - 上下文管理器确保精确的清理时机
 
     性能优化：
         - 自动根据系统性能调整迭代次数
@@ -109,6 +113,18 @@ class CryptoManager:
         ...     key_info['salt'],
         ...     key_info['iterations']
         ... )
+        >>>
+        >>> # 使用上下文管理器（推荐方式）
+        >>> with CryptoManager() as crypto:
+        ...     encrypted = crypto.encrypt("敏感数据")
+        ...     # 退出 with 块时自动清理敏感数据
+        ...
+        >>> # 手动关闭（备选方式）
+        >>> crypto = CryptoManager()
+        >>> try:
+        ...     encrypted = crypto.encrypt("敏感数据")
+        ... finally:
+        ...     crypto.close()  # 确保清理
     """
 
     # 默认加密参数
@@ -116,6 +132,7 @@ class CryptoManager:
     MIN_SALT_LENGTH = 16  # 最小盐值长度（16字节，符合安全要求）
     DEFAULT_PASSWORD_LENGTH = 32
     DEFAULT_ITERATIONS = 480000  # OWASP 推荐的迭代次数
+    MIN_ITERATIONS = 100000
 
     def __init__(
         self,
@@ -183,8 +200,10 @@ class CryptoManager:
 
             # 确定迭代次数
             if iterations is not None:
-                if iterations < 100000:
-                    logger.warning(f"迭代次数 {iterations} 过低，建议至少 100000 次")
+                if iterations < self.MIN_ITERATIONS:
+                    logger.warning(
+                        f"迭代次数 {iterations} 过低，建议至少 {self.MIN_ITERATIONS} 次"
+                    )
                 self.iterations = iterations
             else:
                 # 根据系统性能自动调整迭代次数
@@ -200,11 +219,76 @@ class CryptoManager:
             logger.error(f"初始化加密管理器失败: {str(e)}")
             raise CryptoError(f"加密系统初始化失败: {str(e)}") from e
 
-    def __del__(self):
+    def __str__(self) -> str:
+        """返回加密管理器的用户友好字符串表示"""
+        status = "✅ 已初始化" if self.is_initialized() else "❌ 未初始化"
+        return (
+            f"CryptoManager({status}, 盐值:{len(self.salt)}B, 迭代:{self.iterations:,})"
+        )
+
+    def __repr__(self) -> str:
+        """返回加密管理器的详细表示（安全版本）"""
+        status = (
+            "initialized"
+            if hasattr(self, "fernet") and self.fernet
+            else "uninitialized"
+        )
+        cleaned = "cleaned" if getattr(self, "_cleaned", False) else "active"
+        return f"CryptoManager(status='{status}', cleaned='{cleaned}', salt_length={len(self.salt)}, password_length={len(self.password)}, iterations={self.iterations})"
+
+    def __enter__(self):
         """
-        析构函数，确保敏感数据在对象销毁时被清理
+        上下文管理器入口，返回自身实例
+
+        Returns:
+            CryptoManager: 当前加密管理器实例
+
+        Note:
+            允许使用 with 语句来精确控制加密管理器的生命周期
+        """
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """
+        上下文管理器退出，确保敏感数据被安全清理
+
+        Args:
+            exc_type: 异常类型（如果有异常发生）
+            exc_val: 异常值（如果有异常发生）
+            exc_tb: 异常回溯（如果有异常发生）
+
+        Note:
+            无论是否发生异常，都会确保敏感数据被安全清理
         """
         self._clear_sensitive_data()
+        logger.debug("上下文管理器退出，敏感数据已安全清理")
+
+    def __del__(self):
+        """
+        析构函数，确保敏感数据在对象销毁时被清理（后备机制）
+
+        Note:
+            作为上下文管理器的后备机制，确保即使不使用 with 语句也能安全清理
+        """
+        # 检查是否已经被清理过
+        if not getattr(self, "_cleaned", False):
+            try:
+                self._clear_sensitive_data()
+                self._cleaned = True
+            except Exception as e:
+                logger.warning(f"析构函数清理敏感数据时发生错误: {e}")
+        else:
+            logger.debug("敏感数据已被上下文管理器清理，跳过析构函数清理")
+
+    def close(self):
+        """
+        手动关闭加密管理器，清理敏感数据
+
+        Note:
+            提供显式的清理方法，适用于不使用 with 语句的场景
+        """
+        self._clear_sensitive_data()
+        logger.info("加密管理器已手动关闭")
 
     def _clear_sensitive_data(self):
         """
@@ -220,14 +304,18 @@ class CryptoManager:
 
         Note:
             - 调用后需要重新创建实例才能继续使用
-            - 主要用于析构函数和密码更改操作
+            - 主要用于上下文管理器和析构函数
             - 符合内存安全最佳实践
 
         Implementation:
             - 密码: 固定字符覆盖 → 随机字符覆盖 → 清零
             - 盐值: 零字节覆盖 → 随机字节覆盖 → 清零
             - Fernet: 设置为 None
+            - 标记已清理状态
         """
+        # 标记清理状态
+        self._cleaned = True
+
         if hasattr(self, "password") and self.password:
             # 使用固定字符覆盖密码字符串，确保长度一致
             original_len = len(self.password)
@@ -247,146 +335,124 @@ class CryptoManager:
         if hasattr(self, "fernet"):
             # 清除 Fernet 实例
             self.fernet = None
-        logger.debug("敏感数据已清理")
+        logger.debug("敏感数据已安全清理")
 
     def _generate_secure_password(self, max_attempts: int = 10) -> str:
         """
         生成安全的随机密码
 
+        使用密码学安全的随机数生成器创建符合强度要求的密码。
+        采用更丰富的字符集提高密码熵值，使用迭代代替递归优化性能。
+
         Args:
-            max_attempts: 最大尝试次数，防止无限递归
+            max_attempts (int): 最大尝试次数，防止无限循环，默认10次
 
         Returns:
-            str: base64 编码的安全随机密码
+            str: 符合安全标准的随机密码
 
-        Note:
-            使用 secrets 模块生成密码，比 random 模块更安全，适用于密码学场景
+        Security:
+            - 使用 secrets 模块确保密码学安全性
+            - 包含大小写字母、数字、特殊字符的丰富字符集
+            - 强制满足密码强度要求
+
+        Performance:
+            - 使用迭代代替递归，避免栈溢出风险
+            - 优化的字符选择算法
+
+        Character Set (94个字符):
+            - 大写字母: A-Z (26个)
+            - 小写字母: a-z (26个)
+            - 数字: 0-9 (10个)
+            - 特殊字符: !@#$%^&*()_+-=[]{}|;:,.<>?~`\"'\\/ (32个)
         """
-        random_bytes = secrets.token_bytes(self.DEFAULT_PASSWORD_LENGTH)
-        password = base64.urlsafe_b64encode(random_bytes).decode("utf-8")
-        # 验证生成的密码强度
-        if not self.validate_password_strength(password) and max_attempts > 0:
-            # 如果密码强度不足，重新生成
-            logger.warning("生成的密码强度不足，重新生成")
-            return self._generate_secure_password(max_attempts - 1)
-        elif not self.validate_password_strength(password):
-            # 如果达到最大尝试次数，使用当前密码
-            logger.warning("达到最大尝试次数，使用当前密码")
+        # 定义丰富的字符集（94个字符）
+        characters = (
+            string.ascii_uppercase  # 大写字母 A-Z (26)
+            + string.ascii_lowercase  # 小写字母 a-z (26)
+            + string.digits  # 数字 0-9 (10)
+            + "!@#$%^&*()_+-=[]{}|;:,.<>?~`\"'\\/"  # 特殊字符 (32)
+        )
+
+        # 使用迭代代替递归
+        for attempt in range(max_attempts):
+            # 方法1: 直接选择字符（更优的熵值）
+            password = "".join(secrets.choice(characters) for _ in range(24))
+
+            # 验证密码强度
+            if self.validate_password_strength(password):
+                logger.debug(f"密码生成成功，尝试次数: {attempt + 1}")
+                return password
+
+            # 方法2: 如果方法1失败，使用Base64后备方案
+            if attempt == max_attempts // 2:  # 中途切换策略
+                random_bytes = secrets.token_bytes(24)
+                password = base64.urlsafe_b64encode(random_bytes).decode("utf-8")
+                # 移除可能存在的填充字符
+                password = password.rstrip("=")
+
+                if self.validate_password_strength(password):
+                    logger.debug(f"Base64方法生成成功，尝试次数: {attempt + 1}")
+                    return password
+
+            logger.debug(f"密码强度不足，第{attempt + 1}次重新生成")
+
+        # 达到最大尝试次数，使用强制生成方法
+        logger.warning(f"达到最大尝试次数({max_attempts})，使用强制生成的密码")
+        return self._generate_forced_strong_password()
+
+    def _generate_forced_strong_password(self) -> str:
+        """
+        强制生成符合强度要求的密码
+
+        当常规方法达到最大尝试次数时使用，确保一定能生成有效密码。
+
+        Returns:
+            str: 强制生成的符合强度要求的密码
+        """
+        # 确保每个类别至少有一个字符
+        uppercase = secrets.choice(string.ascii_uppercase)
+        lowercase = secrets.choice(string.ascii_lowercase)
+        digit = secrets.choice(string.digits)
+        special = secrets.choice("!@#$%^&*()_+-=[]{}|;:,.<>?~`\"'\\/")
+
+        # 生成剩余字符
+        characters = (
+            string.ascii_letters + string.digits + "!@#$%^&*()_+-=[]{}|;:,.<>?~`\"'\\/"
+        )
+        remaining_length = 20  # 总长度24 - 4个强制字符
+        remaining_chars = "".join(
+            secrets.choice(characters) for _ in range(remaining_length)
+        )
+
+        # 组合所有字符并随机打乱
+        all_chars = list(uppercase + lowercase + digit + special + remaining_chars)
+        secrets.SystemRandom().shuffle(all_chars)
+
+        password = "".join(all_chars)
+        logger.debug("使用强制方法生成密码成功")
         return password
 
-    @staticmethod
-    def validate_password_strength(password: str) -> bool:
-        """
-        验证密码强度（静态方法）
-
-        Args:
-            password (str): 要验证的密码字符串
-
-        Returns:
-            bool: 密码强度是否足够（True/False）
-
-        Password Strength Requirements:
-            - 长度至少为 16 字符
-            - 包含至少 1 个大写字母
-            - 包含至少 1 个小写字母
-            - 包含至少 1 个数字
-            - 包含至少 1 个特殊字符
-
-        Example:
-            >>> CryptoManager.validate_password_strength("Weak123")
-            False
-            >>> CryptoManager.validate_password_strength("StrongP@ssw0rd123!")
-            True
-        """
-        # 检查密码长度
-        if len(password) < 16:
-            return False
-
-        # 检查是否包含大写字母
-        if not re.search(r"[A-Z]", password):
-            return False
-
-        # 检查是否包含小写字母
-        if not re.search(r"[a-z]", password):
-            return False
-
-        # 检查是否包含数字
-        if not re.search(r"\d", password):
-            return False
-
-        # 检查是否包含特殊字符
-        if not re.search(r'[!@#$%^&*(),.?":{}|<>]', password):
-            return False
-
-        return True
-
-    @staticmethod
-    def get_password_strength(password: str) -> str:
-        """
-        获取密码强度等级（静态方法）
-
-        Args:
-            password (str): 要评估的密码字符串
-
-        Returns:
-            str: 密码强度等级，可能的值包括：
-                 - "weak": 弱密码
-                 - "medium": 中等强度密码
-                 - "strong": 强密码
-                 - "very_strong": 非常强的密码
-
-        Scoring System:
-            - 长度得分：8字符=1分，16字符=2分，24字符=3分
-            - 复杂度得分：大写字母、小写字母、数字、特殊字符各1分
-            - 总分≥7: very_strong, ≥5: strong, ≥3: medium, <3: weak
-
-        Example:
-            >>> CryptoManager.get_password_strength("password")
-            'weak'
-            >>> CryptoManager.get_password_strength("StrongP@ssw0rd123!")
-            'very_strong'
-        """
-        score = 0
-
-        # 长度得分
-        if len(password) >= 24:
-            score += 3
-        elif len(password) >= 16:
-            score += 2
-        elif len(password) >= 8:
-            score += 1
-
-        # 复杂度得分
-        if re.search(r"[A-Z]", password):
-            score += 1
-        if re.search(r"[a-z]", password):
-            score += 1
-        if re.search(r"\d", password):
-            score += 1
-        if re.search(r'[!@#$%^&*(),.?":{}|<>]', password):
-            score += 1
-
-        # 评估强度等级
-        if score >= 7:
-            return "very_strong"
-        elif score >= 5:
-            return "strong"
-        elif score >= 3:
-            return "medium"
-        else:
-            return "weak"
-
-    def _generate_secure_salt(self) -> bytes:
+    def _generate_secure_salt(self, length: int | None = None) -> bytes:
         """
         生成安全的随机盐值
 
         Returns:
             bytes: 安全的随机盐值
 
+        Security:
+            - 使用 secrets 模块确保密码学安全性
+            - 盐值长度符合安全标准（16字节）
+            - 每个盐值都是唯一的随机值
+
         Note:
-            使用 secrets 模块生成盐值，确保密码学安全性
+            secrets.token_bytes() 比 random 模块更安全，适用于密码学场景
         """
-        return secrets.token_bytes(self.DEFAULT_SALT_LENGTH)
+        salt_length = length or self.DEFAULT_SALT_LENGTH
+
+        if salt_length < self.MIN_SALT_LENGTH:
+            raise ValueError(f"盐值长度必须至少为 {self.MIN_SALT_LENGTH} 字节")
+
+        return secrets.token_bytes(salt_length)
 
     def _auto_adjust_iterations(self) -> int:
         """
@@ -402,9 +468,9 @@ class CryptoManager:
             4. 最高迭代次数不超过 1000000
         """
         # 测试基础迭代次数的执行时间
-        test_iterations = 100000
+        test_iterations = self.MIN_ITERATIONS
         test_password = "test_password"
-        test_salt = secrets.token_bytes(16)  # 使用16字节随机盐值
+        test_salt = secrets.token_bytes(self.MIN_SALT_LENGTH)  # 使用16字节随机盐值
 
         start_time = time.time()
         kdf = PBKDF2HMAC(
@@ -708,46 +774,6 @@ class CryptoManager:
             "iterations": self.iterations,
         }
 
-    @classmethod
-    def from_saved_key(
-        cls, password: str, salt: str, iterations: int | None = None
-    ) -> "CryptoManager":
-        """
-        从保存的密钥信息创建加密管理器实例
-
-        Args:
-            password: 之前保存的密码
-            salt: base64 编码的盐值字符串
-            iterations: 之前使用的迭代次数，如果为 None 则使用默认值
-
-        Returns:
-            CryptoManager: 新的加密管理器实例
-
-        Raises:
-            CryptoError: 当密钥恢复失败时
-            ValueError: 当密码或盐值格式无效时
-
-        Example:
-            >>> crypto = CryptoManager.from_saved_key("saved_password", "saved_salt_base64", 480000)
-        """
-        if not password or not salt:
-            raise ValueError("密码和盐值不能为空")
-
-        try:
-            salt_bytes = base64.urlsafe_b64decode(salt.encode("utf-8"))
-            return cls(password, salt_bytes, iterations, skip_password_validation=True)
-        except Exception as e:
-            logger.error(f"从保存的密钥创建实例失败: {str(e)}")
-            raise CryptoError(f"密钥恢复失败: {str(e)}") from e
-
-    def __str__(self) -> str:
-        """返回加密管理器的用户友好字符串表示"""
-        return f"CryptoManager(盐值长度={len(self.salt)}, 迭代次数={self.iterations})"
-
-    def __repr__(self) -> str:
-        """返回加密管理器的详细表示（安全版本）"""
-        return f"<CryptoManager object at {hex(id(self))}, salt_length={len(self.salt)}, password_length={len(self.password)}, iterations={self.iterations}>"
-
     def is_initialized(self) -> bool:
         """
         检查加密管理器是否已正确初始化
@@ -772,27 +798,6 @@ class CryptoManager:
             "algorithm": "AES-128-CBC",
             "key_derivation": "PBKDF2-HMAC-SHA256",
         }
-
-    @classmethod
-    def create_secure_instance(cls, password: str | None = None) -> "CryptoManager":
-        """
-        创建安全的加密管理器实例（便捷方法）
-
-        Args:
-            password: 可选密码，如果提供会验证强度，否则自动生成
-
-        Returns:
-            CryptoManager: 新的加密管理器实例
-
-        Raises:
-            ValueError: 当密码强度不足时
-        """
-        if password is not None and not cls.validate_password_strength(password):
-            strength = cls.get_password_strength(password)
-            raise ValueError(f"密码强度不足 ({strength})，请使用更强的密码")
-
-        # 使用推荐的迭代次数和自动生成的盐值
-        return cls(password=password, iterations=cls.DEFAULT_ITERATIONS)
 
     def verify_encryption(self, test_data: str = "test_encryption_data") -> bool:
         """
@@ -847,3 +852,158 @@ class CryptoManager:
         except Exception as e:
             logger.error(f"更改密码失败: {str(e)}")
             raise CryptoError(f"密码更改失败: {str(e)}") from e
+
+    @classmethod
+    def from_saved_key(
+        cls, password: str, salt: str, iterations: int | None = None
+    ) -> "CryptoManager":
+        """
+        从保存的密钥信息创建加密管理器实例
+
+        Args:
+            password: 之前保存的密码
+            salt: base64 编码的盐值字符串
+            iterations: 之前使用的迭代次数，如果为 None 则使用默认值
+
+        Returns:
+            CryptoManager: 新的加密管理器实例
+
+        Raises:
+            CryptoError: 当密钥恢复失败时
+            ValueError: 当密码或盐值格式无效时
+
+        Example:
+            >>> crypto = CryptoManager.from_saved_key("saved_password", "saved_salt_base64", 480000)
+        """
+        if not password or not salt:
+            raise ValueError("密码和盐值不能为空")
+
+        try:
+            salt_bytes = base64.urlsafe_b64decode(salt.encode("utf-8"))
+            return cls(password, salt_bytes, iterations, skip_password_validation=True)
+        except Exception as e:
+            logger.error(f"从保存的密钥创建实例失败: {str(e)}")
+            raise CryptoError(f"密钥恢复失败: {str(e)}") from e
+
+    @classmethod
+    def create_secure_instance(cls, password: str | None = None) -> "CryptoManager":
+        """
+        创建安全的加密管理器实例（便捷方法）
+
+        Args:
+            password: 可选密码，如果提供会验证强度，否则自动生成
+
+        Returns:
+            CryptoManager: 新的加密管理器实例
+
+        Raises:
+            ValueError: 当密码强度不足时
+        """
+        if password is not None and not cls.validate_password_strength(password):
+            strength = cls.get_password_strength(password)
+            raise ValueError(f"密码强度不足 ({strength})，请使用更强的密码")
+
+        # 使用推荐的迭代次数和自动生成的盐值
+        return cls(password=password, iterations=cls.DEFAULT_ITERATIONS)
+
+    @staticmethod
+    def validate_password_strength(password: str) -> bool:
+        """
+        验证密码强度（静态方法）
+
+        Args:
+            password (str): 要验证的密码字符串
+
+        Returns:
+            bool: 密码强度是否足够（True/False）
+
+        Password Strength Requirements:
+            - 长度至少为 16 字符
+            - 包含至少 1 个大写字母
+            - 包含至少 1 个小写字母
+            - 包含至少 1 个数字
+            - 包含至少 1 个特殊字符
+
+        Example:
+            >>> CryptoManager.validate_password_strength("Weak123")
+            False
+            >>> CryptoManager.validate_password_strength("StrongP@ssw0rd123!")
+            True
+        """
+        # 检查密码长度
+        if len(password) < 16:
+            return False
+
+        # 检查是否包含大写字母
+        if not re.search(r"[A-Z]", password):
+            return False
+
+        # 检查是否包含小写字母
+        if not re.search(r"[a-z]", password):
+            return False
+
+        # 检查是否包含数字
+        if not re.search(r"\d", password):
+            return False
+
+        # 检查是否包含特殊字符
+        if not re.search(r'[!@#$%^&*()_+\-=\[\]{}|;:,.<>?~`"\'\\\\/]', password):
+            return False
+
+        return True
+
+    @staticmethod
+    def get_password_strength(password: str) -> str:
+        """
+        获取密码强度等级（静态方法）
+
+        Args:
+            password (str): 要评估的密码字符串
+
+        Returns:
+            str: 密码强度等级，可能的值包括：
+                 - "weak": 弱密码
+                 - "medium": 中等强度密码
+                 - "strong": 强密码
+                 - "very_strong": 非常强的密码
+
+        Scoring System:
+            - 长度得分：8字符=1分，16字符=2分，24字符=3分
+            - 复杂度得分：大写字母、小写字母、数字、特殊字符各1分
+            - 总分≥7: very_strong, ≥5: strong, ≥3: medium, <3: weak
+
+        Example:
+            >>> CryptoManager.get_password_strength("password")
+            'weak'
+            >>> CryptoManager.get_password_strength("StrongP@ssw0rd123!")
+            'very_strong'
+        """
+        score = 0
+
+        # 长度得分
+        if len(password) >= 24:
+            score += 3
+        elif len(password) >= 16:
+            score += 2
+        elif len(password) >= 8:
+            score += 1
+
+        # 复杂度得分
+        if re.search(r"[A-Z]", password):
+            score += 1
+        if re.search(r"[a-z]", password):
+            score += 1
+        if re.search(r"\d", password):
+            score += 1
+        if re.search(r'[!@#$%^&*()_+\-=\[\]{}|;:,.<>?~`"\'\\\\/]', password):
+            score += 1
+
+        # 评估强度等级
+        if score >= 7:
+            return "very_strong"
+        elif score >= 5:
+            return "strong"
+        elif score >= 3:
+            return "medium"
+        else:
+            return "weak"
