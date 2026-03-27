@@ -18,8 +18,8 @@ import base64
 import unittest
 from typing import Any, Dict
 
-from db_connector_tool.core.crypto import CryptoManager
-from db_connector_tool.core.exceptions import CryptoError
+from src.db_connector_tool.core.crypto import CryptoManager
+from src.db_connector_tool.core.exceptions import CryptoError
 
 
 class TestCryptoManager(unittest.TestCase):

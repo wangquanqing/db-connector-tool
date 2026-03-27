@@ -10,6 +10,5 @@
         "test_*.py"
     ],
     "python.testing.pytestEnabled": false,
-    "python.testing.unittestEnabled": true,
-    "python.envFile": "${workspaceFolder}/.env"
+    "python.testing.unittestEnabled": true
 }

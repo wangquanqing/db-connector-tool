@@ -81,18 +81,14 @@ extra-dependencies = [
 check = "mypy --install-types --non-interactive {args:src/db_connector_tool tests}"
 
 [tool.coverage.run]
-source_pkgs = ["src/db_connector_tool"]
+source = ["src"]
 branch = true
-parallel = true
+parallel = false
 omit = [
   "*/__about__.py",
   "*/__init__.py",
   "tests/*",
 ]
-
-[tool.coverage.paths]
-db_connector_tool = ["src/db_connector_tool", "*/db-connector-tool/src/db_connector_tool"]
-tests = ["tests", "*/db-connector-tool/tests"]
 
 [tool.coverage.report]
 exclude_lines = [
@@ -104,6 +100,9 @@ exclude_lines = [
   "raise NotImplementedError",
   "pass",
 ]
+
+[tool.coverage.html]
+directory = "htmlcov"
 
 [tool.pixi.workspace]
 channels = ["conda-forge"]
