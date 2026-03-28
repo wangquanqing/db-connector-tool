@@ -81,7 +81,7 @@ extra-dependencies = [
 check = "mypy --install-types --non-interactive {args:src/db_connector_tool tests}"
 
 [tool.coverage.run]
-source = ["src"]
+source = ["src/db_connector_tool"]
 branch = true
 parallel = false
 omit = [
@@ -92,7 +92,7 @@ omit = [
 
 [tool.coverage.report]
 exclude_lines = [
-  "no cov",
+  "no cover",
   "if __name__ == .__main__.:",
   "if TYPE_CHECKING:",
   "def __repr__",
