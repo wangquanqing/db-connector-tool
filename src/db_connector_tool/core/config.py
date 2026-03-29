@@ -41,8 +41,22 @@ from ..utils.path_utils import PathHelper
 from .crypto import CryptoManager
 from .exceptions import ConfigError, CryptoError
 
+# 条件导入keyring库
+keyring_available = False
+_keyring = None  # 内部使用的模块引用
+try:
+    import keyring
+
+    keyring_available = True
+    _keyring = keyring
+except ImportError:
+    pass
+
 # 获取模块级别的日志记录器
 logger = get_logger(__name__)
+
+# 模块级别的锁，用于保护类级别锁的初始化
+_module_lock = threading.Lock()
 
 # 配置文件创建时的初始时间戳（固定值）
 CONFIG_CREATION_TIMESTAMP = datetime.now().astimezone().isoformat()
@@ -54,6 +68,7 @@ VERSION_INCREMENT_ON_CHANGE = True  # 每次配置变更时自动递增版本号
 ERROR_EMPTY_CONNECTION_NAME = "连接名称不能为空且必须是字符串"
 ERROR_INVALID_CONFIG_DICT = "连接配置不能为空且必须是字典"
 ERROR_VERSION_MAJOR_CHANGE = "版本号递增导致第一位发生变化，变更过于频繁，请手动检查"
+ERROR_CONFIG_OPERATION_FAILED = "配置文件操作失败: %s"
 
 # 操作类型常量
 OPERATION_ADD = "add"
@@ -99,6 +114,9 @@ class ConfigManager:
 
         Example:
             >>> config_manager = ConfigManager("my_app", "database.toml")
+            >>> with ConfigManager("my_app") as config_manager:
+            ...     # 自动管理敏感数据
+            ...     config_manager.add_connection("test", {...})
         """
         self.app_name = app_name
         self.config_file = config_file
@@ -112,14 +130,19 @@ class ConfigManager:
 
         # 检查依赖可用性（类级别，只执行一次，线程安全）
         if not ConfigManager._dependencies_checked:
-            # 懒加载锁对象
+            # 使用双重检查锁定模式确保线程安全
             if ConfigManager._dependency_check_lock is None:
-                ConfigManager._dependency_check_lock = threading.RLock()
+                # 使用模块级别的锁来保护类级别锁的初始化
+                with _module_lock:
+                    if ConfigManager._dependency_check_lock is None:
+                        ConfigManager._dependency_check_lock = threading.RLock()
 
-            with ConfigManager._dependency_check_lock:
-                # 再次检查，防止竞态条件
-                if not ConfigManager._dependencies_checked:
-                    ConfigManager._check_dependencies()
+            # 确保锁已经正确初始化
+            if ConfigManager._dependency_check_lock is not None:
+                with ConfigManager._dependency_check_lock:
+                    # 再次检查，防止竞态条件
+                    if not ConfigManager._dependencies_checked:
+                        ConfigManager._check_dependencies()
 
         # 确保配置文件存在
         self._ensure_config_exists()
@@ -130,7 +153,7 @@ class ConfigManager:
             config_info = self.get_config_info()
             connection_count = config_info["connection_count"]
             return f"ConfigManager('{self.app_name}', {connection_count} connections)"
-        except Exception:
+        except (ConfigError, KeyError, TypeError, OSError):
             # 如果获取配置信息失败，返回基本表示
             return f"ConfigManager('{self.app_name}', '{self.config_file}')"
 
@@ -147,13 +170,51 @@ class ConfigManager:
                 f"version='{version}', "
                 f"connections={connection_count})"
             )
-        except Exception:
+        except (ConfigError, KeyError, TypeError, OSError):
             # 如果获取配置信息失败，返回基本表示
             return (
                 f"ConfigManager(app_name='{self.app_name}', "
                 f"config_file='{self.config_file}', "
                 f"config_path='{self.config_path}')"
             )
+
+    def __enter__(self):
+        """
+        上下文管理器入口，返回自身实例
+
+        Returns:
+            ConfigManager: 当前配置管理器实例
+        """
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """
+        上下文管理器退出，自动清理敏感数据
+
+        Args:
+            exc_type: 异常类型
+            exc_val: 异常值
+            exc_tb: 异常回溯
+        """
+        self._clear_sensitive_data()
+        logger.debug("配置管理器上下文已退出，敏感数据已自动清理")
+
+    def _clear_sensitive_data(self):
+        """
+        清理内存中的敏感数据（内部方法）
+
+        Security Note:
+            - 清理加密管理器中的敏感数据
+            - 清理配置缓存
+            - 调用后需要重新初始化才能使用加密功能
+        """
+        if self.crypto is not None:
+            self.crypto.close()
+            self.crypto = None
+        # 清理配置缓存
+        self._config_cache = None
+        self._config_mtime = None
+        logger.debug("配置管理器敏感数据和缓存已清理")
 
     @staticmethod
     def handle_config_operation(operation_name: str) -> Callable:
@@ -173,13 +234,13 @@ class ConfigManager:
                 try:
                     return func(self, *args, **kwargs)
                 except OSError as e:
-                    logger.error(f"配置文件操作失败: {str(e)}")
+                    logger.error(ERROR_CONFIG_OPERATION_FAILED, str(e))
                     raise ConfigError(f"{operation_name}失败: {str(e)}") from e
                 except (json.JSONDecodeError, TypeError, ValueError) as e:
-                    logger.error(f"配置数据处理失败: {str(e)}")
+                    logger.error("配置数据处理失败: %s", str(e))
                     raise ConfigError(f"{operation_name}失败: {str(e)}") from e
-                except Exception as e:
-                    logger.error(f"{operation_name}失败: {str(e)}")
+                except (AttributeError, RuntimeError, MemoryError) as e:
+                    logger.error("%s失败: %s", operation_name, str(e))
                     raise ConfigError(f"{operation_name}失败: {str(e)}") from e
 
             return wrapper
@@ -197,7 +258,7 @@ class ConfigManager:
         if not self.config_path.exists():
             self._create_default_config()
         self._load_or_create_crypto_key_secure()
-        logger.debug(f"配置文件就绪: {self.config_path}")
+        logger.debug("配置文件就绪: %s", self.config_path)
 
     def _create_default_config(self) -> None:
         """
@@ -220,7 +281,7 @@ class ConfigManager:
             },
         }
         self._save_config(default_config)
-        logger.info(f"默认配置文件已创建: {self.config_path}")
+        logger.info("默认配置文件已创建: %s", self.config_path)
 
     def _save_config(
         self, config: Dict[str, Any], operation: str = OPERATION_UPDATE
@@ -303,16 +364,16 @@ class ConfigManager:
             # 清除缓存，确保下次加载时重新读取文件
             self._config_cache = None
             self._config_mtime = None
-            logger.debug(f"配置文件已保存: {self.config_path}")
+            logger.debug("配置文件已保存: %s", self.config_path)
 
         except OSError as e:
-            logger.error(f"配置文件写入失败: {str(e)}")
+            logger.error("配置文件写入失败: %s", str(e))
             raise ConfigError(f"配置文件保存失败: {str(e)}") from e
         except (json.JSONDecodeError, TypeError, ValueError) as e:
-            logger.error(f"配置数据序列化失败: {str(e)}")
+            logger.error("配置数据序列化失败: %s", str(e))
             raise ConfigError(f"配置文件保存失败: {str(e)}") from e
-        except Exception as e:
-            logger.error(f"保存配置文件失败: {str(e)}")
+        except RuntimeError as e:
+            logger.error("保存配置文件失败: %s", str(e))
             raise ConfigError(f"配置文件保存失败: {str(e)}") from e
 
     def _get_secure_hmac_key(self) -> bytes:
@@ -442,14 +503,12 @@ class ConfigManager:
         """
         try:
             # 尝试使用keyring库（如果可用）
-            try:
-                import keyring
-
+            if keyring_available and _keyring is not None:
                 service_name = f"{self.app_name}_master_key"
                 username = "crypto"
 
                 # 尝试从密钥环获取密钥
-                stored_key = keyring.get_password(service_name, username)
+                stored_key = _keyring.get_password(service_name, username)
 
                 if stored_key:
                     # 解析存储的密钥数据
@@ -462,19 +521,19 @@ class ConfigManager:
                     # 创建新密钥并存储
                     self.crypto = CryptoManager()
                     key_data = self.crypto.get_key_info()
-                    keyring.set_password(service_name, username, json.dumps(key_data))
+                    _keyring.set_password(service_name, username, json.dumps(key_data))
                     logger.info("新加密密钥已安全存储到操作系统密钥环")
 
-            except ImportError:
+            else:
                 # keyring不可用，回退到文件权限方案
                 logger.warning("keyring库不可用，使用文件权限保护方案")
                 self._load_or_create_crypto_key()
 
         except (json.JSONDecodeError, TypeError, ValueError) as e:
-            logger.error(f"密钥数据解析失败: {str(e)}")
+            logger.error("密钥数据解析失败: %s", str(e))
             raise ConfigError(f"安全密钥管理失败: {str(e)}") from e
-        except Exception as e:
-            logger.error(f"安全密钥管理失败: {str(e)}")
+        except (RuntimeError, MemoryError) as e:
+            logger.error("安全密钥管理失败: %s", str(e))
             raise ConfigError(f"安全密钥管理失败: {str(e)}") from e
 
     @handle_config_operation("加密密钥加载")
@@ -565,22 +624,22 @@ class ConfigManager:
             else:
                 self._set_unix_permissions(file_path)
 
-            logger.debug(f"设置文件权限成功: {file_path}")
+            logger.debug("设置文件权限成功: %s", file_path)
 
-        except Exception as e:
-            logger.warning(f"设置文件权限失败 {file_path}: {str(e)}")
+        except (OSError, AttributeError) as e:
+            logger.warning("设置文件权限失败 %s: %s", file_path, str(e))
             # 权限设置失败不应阻止程序运行，但记录警告
 
     def _handle_crypto_error(self, key_file: Path, crypto_error: CryptoError) -> None:
         """处理加密错误：删除旧密钥并创建新的"""
-        logger.warning(f"解密密钥文件失败: {str(crypto_error)}，将创建新的密钥文件")
+        logger.warning("解密密钥文件失败: %s，将创建新的密钥文件", str(crypto_error))
         try:
             key_file.unlink()
             logger.info("已删除旧的密钥文件")
             # 直接创建新的密钥，避免递归调用
             self._create_new_key(key_file)
         except Exception as delete_error:
-            logger.error(f"删除旧密钥文件失败: {str(delete_error)}")
+            logger.error("删除旧密钥文件失败: %s", str(delete_error))
             raise ConfigError(
                 f"加密密钥加载失败: {str(crypto_error)}"
             ) from crypto_error
@@ -618,12 +677,12 @@ class ConfigManager:
             )
 
             if result.returncode != 0:
-                logger.warning(f"icacls设置权限警告: {result.stderr}")
+                logger.warning("icacls设置权限警告: %s", result.stderr)
             else:
                 logger.debug("Windows: 已设置密钥文件权限为仅当前用户读写")
 
-        except Exception as e:
-            logger.warning(f"Windows文件权限设置失败: {str(e)}，请手动确保文件安全")
+        except (OSError, subprocess.SubprocessError) as e:
+            logger.warning("Windows文件权限设置失败: %s，请手动确保文件安全", str(e))
 
     def _set_unix_permissions(self, key_file: Path) -> None:
         """
@@ -686,7 +745,7 @@ class ConfigManager:
             self._increment_config_version(config)
 
             self._save_config(config, OPERATION_ADD)
-            logger.info(f"连接配置已添加: {name}")
+            logger.info("连接配置已添加: %s", name)
         else:
             self._load_or_create_crypto_key_secure()
 
@@ -735,13 +794,13 @@ class ConfigManager:
             return config
 
         except tomllib.TOMLDecodeError as e:
-            logger.error(f"配置文件TOML格式错误: {str(e)}")
+            logger.error("配置文件TOML格式错误: %s", str(e))
             raise ConfigError(f"配置文件格式无效: {str(e)}") from e
         except OSError as e:
-            logger.error(f"配置文件操作失败: {str(e)}")
+            logger.error(ERROR_CONFIG_OPERATION_FAILED, str(e))
             raise ConfigError(f"配置文件加载失败: {str(e)}") from e
         except Exception as e:
-            logger.error(f"加载配置文件失败: {str(e)}")
+            logger.error("加载配置文件失败: %s", str(e))
             raise ConfigError(f"配置文件加载失败: {str(e)}") from e
 
     def _verify_config_signature(self, config: Dict[str, Any]) -> bool:
@@ -804,15 +863,15 @@ class ConfigManager:
                     if abs(time_diff) > 3600:
                         logger.warning("配置文件签名时间戳过期，可能是重放攻击")
                         return False
-                except Exception as e:
-                    logger.warning(f"时间戳验证失败: {str(e)}")
+                except (ValueError, TypeError) as e:
+                    logger.warning("时间戳验证失败: %s", str(e))
                     # 时间戳验证失败不影响签名验证结果
 
             logger.debug("配置文件数字签名验证成功")
             return True
 
-        except Exception as e:
-            logger.warning(f"配置文件签名验证失败: {str(e)}")
+        except (ValueError, AttributeError, RuntimeError) as e:
+            logger.warning("配置文件签名验证失败: %s", str(e))
             # 不抛出异常，允许加载但记录警告
             return False
 
@@ -831,8 +890,8 @@ class ConfigManager:
         try:
             config = self._load_config()
             return config.get("metadata", {}).get("audit_log", [])
-        except Exception as e:
-            logger.error(f"获取审计日志失败: {str(e)}")
+        except (OSError, KeyError, TypeError) as e:
+            logger.error("获取审计日志失败: %s", str(e))
             return []
 
     def _serialize_value(self, value: Any) -> str:
@@ -880,7 +939,7 @@ class ConfigManager:
             if not self._is_valid_version_format(current_version):
                 # 如果当前版本号格式无效，重置为初始版本
                 logger.warning(
-                    f"无效的版本号格式，重置为初始版本: {current_version} -> 1.0.0"
+                    "无效的版本号格式，重置为初始版本: %s -> 1.0.0", current_version
                 )
                 config["version"] = "1.0.0"
                 return
@@ -928,10 +987,10 @@ class ConfigManager:
                 )
 
             config["version"] = new_version
-            logger.debug(f"配置文件版本号已更新: {current_version} -> {new_version}")
+            logger.debug("配置文件版本号已更新: %s -> %s", current_version, new_version)
 
-        except Exception as e:
-            logger.warning(f"版本号递增失败，保持原版本号: {str(e)}")
+        except (ValueError, AttributeError, RuntimeError) as e:
+            logger.warning("版本号递增失败，保持原版本号: %s", str(e))
             # 如果版本号递增失败，不影响主要功能，继续使用原版本号
 
     def _validate_connection_name(self, name: str) -> None:
@@ -997,7 +1056,7 @@ class ConfigManager:
 
         del config["connections"][name]
         self._save_config(config, OPERATION_REMOVE)
-        logger.info(f"连接配置已删除: {name}")
+        logger.info("连接配置已删除: %s", name)
 
     @handle_config_operation("连接配置更新")
     def update_connection(self, name: str, connection_config: Dict[str, Any]) -> None:
@@ -1036,7 +1095,7 @@ class ConfigManager:
         config["connections"][name] = encrypted_config
         self._increment_config_version(config)
         self._save_config(config, OPERATION_UPDATE)
-        logger.info(f"连接配置已更新: {name}")
+        logger.info("连接配置已更新: %s", name)
 
     @handle_config_operation("连接配置获取")
     def get_connection(self, name: str) -> Dict[str, Any]:
@@ -1075,7 +1134,7 @@ class ConfigManager:
 
         # 使用统一的解密方法
         decrypted_config = self._decrypt_connection_config(connection_config)
-        logger.debug(f"连接配置已获取: {name}")
+        logger.debug("连接配置已获取: %s", name)
         return decrypted_config
 
     def _deserialize_value(self, json_str: str) -> Any:
@@ -1105,7 +1164,7 @@ class ConfigManager:
             value_info = json.loads(json_str)
             return value_info["value"]
         except (json.JSONDecodeError, KeyError, TypeError) as e:
-            logger.warning(f"反序列化失败，返回原始字符串: {str(e)}")
+            logger.warning("反序列化失败，返回原始字符串: %s", str(e))
             # 如果JSON解析失败，尝试直接返回字符串值
             return json_str
 
@@ -1179,14 +1238,14 @@ class ConfigManager:
                 backup_path = self.config_dir / f"{self.config_file}.backup.{timestamp}"
 
             shutil.copy2(self.config_path, backup_path)
-            logger.info(f"配置文件已备份: {backup_path}")
+            logger.info("配置文件已备份: %s", backup_path)
             return backup_path
 
         except OSError as e:
-            logger.error(f"配置文件备份操作失败: {str(e)}")
+            logger.error("配置文件备份操作失败: %s", str(e))
             raise ConfigError(f"配置文件备份失败: {str(e)}") from e
         except Exception as e:
-            logger.error(f"备份配置文件失败: {str(e)}")
+            logger.error("备份配置文件失败: %s", str(e))
             raise ConfigError(f"配置文件备份失败: {str(e)}") from e
 
     def rotate_encryption_key(self) -> str:
@@ -1210,74 +1269,113 @@ class ConfigManager:
             "2"
         """
         try:
-            # 备份当前配置
-            backup_path = self.backup_config()
-            logger.info(f"密钥轮换前已备份配置: {backup_path}")
-
-            # 加载当前配置
-            config = self._load_config()
-
-            # 解密所有连接配置
-            decrypted_connections = {}
-            for name, encrypted_config in config["connections"].items():
-                # 确保加密管理器已初始化
-                if self.crypto is None:
-                    raise ConfigError("加密管理器未初始化，无法解密敏感信息")
-
-                # 解密连接配置
-                decrypted_config = {}
-                for key, encrypted_value in encrypted_config.items():
-                    serialized_value = self.crypto.decrypt(encrypted_value)
-                    decrypted_config[key] = self._deserialize_value(serialized_value)
-                decrypted_connections[name] = decrypted_config
-
-            # 生成新的加密密钥
-            new_crypto = CryptoManager()
-            self.crypto = new_crypto
-
-            # 更新密钥版本
-            current_key_version = int(
-                config.get("metadata", {}).get("key_version", "1")
-            )
-            new_key_version = str(current_key_version + 1)
-            config["metadata"]["key_version"] = new_key_version
-
-            # 重新加密所有连接配置
-            re_encrypted_connections = {}
-            for name, decrypted_config in decrypted_connections.items():
-                encrypted_config = {}
-                for key, value in decrypted_config.items():
-                    serialized_value = self._serialize_value(value)
-                    encrypted_config[key] = self.crypto.encrypt(serialized_value)
-                re_encrypted_connections[name] = encrypted_config
-
-            config["connections"] = re_encrypted_connections
-
-            # 保存新的密钥文件
-            key_file = self.config_dir / "encryption.key"
-            key_data = self.crypto.get_key_info()
-
-            # 先写入文件，然后设置安全权限
-            with open(key_file, "w", encoding="utf-8") as f:
-                f.write(tomli_w.dumps(key_data))
-
-            self._set_secure_file_permissions(key_file)
-
-            # 保存更新后的配置
-            self._save_config(config, "rotate_key")
-
-            logger.info(f"密钥轮换成功，新密钥版本: {new_key_version}")
+            # 执行密钥轮换的主要步骤
+            new_key_version = self._perform_key_rotation()
+            logger.info("密钥轮换成功，新密钥版本: %s", new_key_version)
             return new_key_version
 
         except OSError as e:
-            logger.error(f"配置文件或密钥文件操作失败: {str(e)}")
+            logger.error("配置文件或密钥文件操作失败: %s", str(e))
             raise ConfigError(f"密钥轮换失败: {str(e)}") from e
         except (json.JSONDecodeError, TypeError, ValueError) as e:
-            logger.error(f"配置数据处理失败: {str(e)}")
+            logger.error("配置数据处理失败: %s", str(e))
             raise ConfigError(f"密钥轮换失败: {str(e)}") from e
-        except Exception as e:
-            logger.error(f"密钥轮换失败: {str(e)}")
+        except (RuntimeError, AttributeError) as e:
+            logger.error("密钥轮换失败: %s", str(e))
             raise ConfigError(f"密钥轮换失败: {str(e)}") from e
+
+    def _perform_key_rotation(self) -> str:
+        """执行密钥轮换的核心逻辑"""
+        # 备份当前配置
+        backup_path = self.backup_config()
+        logger.info("密钥轮换前已备份配置: %s", backup_path)
+
+        # 加载当前配置
+        config = self._load_config()
+
+        # 解密所有连接配置
+        decrypted_connections = self._decrypt_all_connections(config)
+
+        # 生成新的加密密钥
+        self._generate_new_crypto_key()
+
+        # 更新密钥版本
+        new_key_version = self._update_key_version(config)
+
+        # 重新加密所有连接配置
+        self._re_encrypt_all_connections(config, decrypted_connections)
+
+        # 保存新的密钥文件
+        self._save_new_key_file()
+
+        # 保存更新后的配置
+        self._save_config(config, "rotate_key")
+
+        return new_key_version
+
+    def _decrypt_all_connections(
+        self, config: Dict[str, Any]
+    ) -> Dict[str, Dict[str, Any]]:
+        """解密所有连接配置"""
+        decrypted_connections = {}
+        for name, encrypted_config in config["connections"].items():
+            # 确保加密管理器已初始化
+            if self.crypto is None:
+                raise ConfigError("加密管理器未初始化，无法解密敏感信息")
+
+            # 解密连接配置
+            decrypted_config = {}
+            for key, encrypted_value in encrypted_config.items():
+                serialized_value = self.crypto.decrypt(encrypted_value)
+                decrypted_config[key] = self._deserialize_value(serialized_value)
+            decrypted_connections[name] = decrypted_config
+
+        return decrypted_connections
+
+    def _generate_new_crypto_key(self) -> None:
+        """生成新的加密密钥"""
+        new_crypto = CryptoManager()
+        self.crypto = new_crypto
+
+    def _update_key_version(self, config: Dict[str, Any]) -> str:
+        """更新密钥版本号"""
+        current_key_version = int(config.get("metadata", {}).get("key_version", "1"))
+        new_key_version = str(current_key_version + 1)
+        config["metadata"]["key_version"] = new_key_version
+        return new_key_version
+
+    def _re_encrypt_all_connections(
+        self, config: Dict[str, Any], decrypted_connections: Dict[str, Dict[str, Any]]
+    ) -> None:
+        """重新加密所有连接配置"""
+        # 确保加密管理器已初始化
+        if self.crypto is None:
+            raise ConfigError("加密管理器未初始化，无法重新加密连接配置")
+
+        re_encrypted_connections = {}
+        for name, decrypted_config in decrypted_connections.items():
+            encrypted_config = {}
+            for key, value in decrypted_config.items():
+                serialized_value = self._serialize_value(value)
+                encrypted_config[key] = self.crypto.encrypt(serialized_value)
+            re_encrypted_connections[name] = encrypted_config
+
+        config["connections"] = re_encrypted_connections
+
+    def _save_new_key_file(self) -> None:
+        """保存新的密钥文件"""
+        # 确保加密管理器已初始化
+        if self.crypto is None:
+            raise ConfigError("加密管理器未初始化，无法保存密钥文件")
+
+        key_file = self.config_dir / "encryption.key"
+        key_data = self.crypto.get_key_info()
+
+        # 先写入文件，然后设置安全权限
+        with open(key_file, "w", encoding="utf-8") as f:
+            f.write(tomli_w.dumps(key_data))
+
+        self._set_secure_file_permissions(key_file)
 
     def get_key_version(self) -> str:
         """
@@ -1295,31 +1393,14 @@ class ConfigManager:
             config = self._load_config()
             return config.get("metadata", {}).get("key_version", "1")
         except OSError as e:
-            logger.error(f"配置文件操作失败: {str(e)}")
+            logger.error(ERROR_CONFIG_OPERATION_FAILED, str(e))
             return "1"  # 默认返回版本1
         except (KeyError, TypeError) as e:
-            logger.error(f"配置数据结构错误: {str(e)}")
+            logger.error("配置数据结构错误: %s", str(e))
             return "1"  # 默认返回版本1
-        except Exception as e:
-            logger.error(f"获取密钥版本失败: {str(e)}")
+        except (RuntimeError, AttributeError) as e:
+            logger.error("获取密钥版本失败: %s", str(e))
             return "1"  # 默认返回版本1
-
-    def clear_sensitive_data(self):
-        """
-        清理内存中的敏感数据
-
-        Security Note:
-            - 清理加密管理器中的敏感数据
-            - 清理配置缓存
-            - 调用后需要重新初始化才能使用加密功能
-        """
-        if self.crypto is not None:
-            self.crypto._clear_sensitive_data()
-            self.crypto = None
-        # 清理配置缓存
-        self._config_cache = None
-        self._config_mtime = None
-        logger.debug("配置管理器敏感数据和缓存已清理")
 
     def _encrypt_connection_config(
         self, connection_config: Dict[str, Any]
@@ -1383,14 +1464,11 @@ class ConfigManager:
         2. 环境变量DB_CONNECTOR_TOOL_ENCRYPTION_KEY是全局的
         3. 虽然keyring的服务名和用户名与应用名相关，但库的可用性是全局的
         """
-        # 检查keyring库可用性
-        try:
-            import keyring
-
-            cls._keyring_available = True
+        # 检查keyring库可用性（使用模块级别的检查结果）
+        cls._keyring_available = keyring_available
+        if cls._keyring_available:
             logger.debug("keyring库可用")
-        except ImportError:
-            cls._keyring_available = False
+        else:
             logger.debug("keyring库不可用")
 
         # 检查环境变量密钥
