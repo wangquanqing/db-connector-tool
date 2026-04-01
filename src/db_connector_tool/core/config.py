@@ -1,26 +1,33 @@
-"""
-配置管理模块
+"""配置管理模块 (ConfigManager)
 
 使用 TOML 格式进行配置管理，提供数据库连接配置的加密存储和管理功能。
 支持配置文件的创建、加载、保存，以及连接配置的增删改查操作。
 
-特性:
-- 基于 TOML 格式的配置文件，易于阅读和编辑
-- 全字段加密：所有连接配置字段自动加密存储
-- 数据类型保持：序列化/反序列化机制保留原始数据类型
-- 版本兼容性检查：支持多版本配置格式
-- 自动备份功能：支持配置文件备份和恢复
+主要特性：
+    - 基于 TOML 格式的配置文件，易于阅读和编辑
+    - 全字段加密：所有连接配置字段自动加密存储
+    - 数据类型保持：序列化/反序列化机制保留原始数据类型
+    - 版本兼容性检查：支持多版本配置格式
+    - 自动备份功能：支持配置文件备份和恢复
 
-安全特性:
-- 使用加密管理器保护敏感信息
-- 密钥文件独立存储，增强安全性
-- 配置文件完整性验证
+安全特性：
+    - 使用加密管理器保护敏感信息
+    - 密钥文件独立存储，增强安全性
+    - 配置文件完整性验证
+    - 支持操作系统密钥环存储（keyring）
+    - 支持环境变量密钥配置
+    - 配置文件数字签名验证
 
-典型使用场景:
-- 管理多个数据库连接配置
-- 安全存储数据库凭证
-- 定期备份和恢复配置
-- 密钥轮换和安全审计
+使用示例：
+    >>> from db_connector_tool.core.config import ConfigManager
+    >>>
+    >>> # 创建配置管理器
+    >>> config_manager = ConfigManager("my_app", "database.toml")
+    >>>
+    >>> # 使用上下文管理器
+    >>> with ConfigManager("my_app") as config_manager:
+    ...     config_manager.add_config("test", {"host": "localhost", "port": 5432})
+    ...     config = config_manager.get_config("test")
 """
 
 import getpass
@@ -49,12 +56,12 @@ from .crypto import CryptoManager
 from .exceptions import ConfigError, CryptoError
 
 # 条件导入keyring库
-keyring_available = False
+_keyring_available = False
 _keyring = None  # 内部使用的模块引用
 try:
     import keyring
 
-    keyring_available = True
+    _keyring_available = True
     _keyring = keyring
 except ImportError:
     pass
@@ -67,22 +74,45 @@ _module_lock = threading.Lock()
 
 
 class ConfigManager:
-    """
-    配置管理器类
+    """配置管理器类 (Config Manager)
 
     管理数据库连接配置的加密存储，使用TOML格式配置文件。
     提供连接配置的增删改查功能，所有敏感信息都会自动加密。
-
     该类支持上下文管理器协议，可使用 `with` 语句自动管理敏感数据的清理。
 
-    Attributes:
-        app_name (str): 应用名称，用于确定配置目录
-        config_file (str): 配置文件名
-        config_dir (Path): 配置目录路径
-        config_path (Path): 完整配置文件路径
-        crypto (Optional[CryptoManager]): 加密管理器实例
+    主要功能：
+        - 连接配置的增删改查操作
+        - 配置文件的创建、加载、保存
+        - 全字段加密存储
+        - 配置版本管理和备份
+        - 密钥轮换和安全审计
+        - 配置文件数字签名验证
 
-    Example:
+    类属性：
+        OPERATION_ADD: 添加配置操作类型
+        OPERATION_REMOVE: 删除配置操作类型
+        OPERATION_UPDATE: 更新配置操作类型
+        OPERATION_ROTATE_KEY: 密钥轮换操作类型
+
+    安全特性：
+        - 使用加密管理器保护敏感信息
+        - 支持操作系统密钥环存储（keyring）
+        - 支持环境变量密钥配置
+        - 文件权限保护（Windows/Unix）
+        - 配置文件数字签名验证
+        - 审计日志记录
+
+    性能优化：
+        - 配置文件缓存机制
+        - 加密数据类型保持
+        - 自动版本号管理
+
+    异常处理：
+        - ConfigError: 配置相关操作失败时抛出
+        - CryptoError: 加密相关操作失败时抛出
+        - ValueError: 参数验证失败时抛出
+
+    使用示例：
         >>> # 基本使用
         >>> config_manager = ConfigManager("my_app", "database.toml")
         >>>
@@ -98,7 +128,7 @@ class ConfigManager:
     OPERATION_UPDATE = "update"
     OPERATION_ROTATE_KEY = "rotate_key"
 
-    env_key = None
+    _env_key = None
     # 类级别的依赖检查结果（全局依赖，与应用名无关）
     _env_key_available = None
     _dependencies_checked = False
@@ -108,8 +138,10 @@ class ConfigManager:
     def __init__(
         self, app_name: str = "db_connector_tool", config_file: str = "connections.toml"
     ) -> None:
-        """
-        初始化配置管理器
+        """初始化配置管理器
+
+        创建新的配置管理器实例，自动初始化加密系统和配置文件。
+        支持多种密钥存储方式（操作系统密钥环、环境变量、文件）。
 
         Args:
             app_name: 应用名称，用于确定配置目录
@@ -117,6 +149,17 @@ class ConfigManager:
 
         Raises:
             ConfigError: 当配置文件初始化失败时
+
+        Security:
+            - 优先使用操作系统密钥环存储加密密钥
+            - 其次尝试环境变量密钥
+            - 最后回退到文件存储（安全性较低）
+
+        Process:
+            1. 检查依赖项可用性（类级别，只执行一次）
+            2. 初始化加密管理器
+            3. 确保配置文件存在
+            4. 加载或创建默认配置
 
         Example:
             >>> # 基本初始化
@@ -157,7 +200,11 @@ class ConfigManager:
         self._ensure_config_exists()
 
     def __str__(self) -> str:
-        """返回配置管理器的用户友好字符串表示"""
+        """返回配置管理器的用户友好字符串表示
+
+        Returns:
+            str: 格式为 "ConfigManager('app_name', N connections)" 的字符串
+        """
         try:
             config_info = self.get_config_info()
             connection_count = config_info["connection_count"]
@@ -167,7 +214,11 @@ class ConfigManager:
             return f"ConfigManager('{self.app_name}', '{self.config_file}')"
 
     def __repr__(self) -> str:
-        """返回配置管理器的详细表示，用于调试"""
+        """返回配置管理器的详细表示，用于调试
+
+        Returns:
+            str: 包含完整配置信息的字符串，用于调试
+        """
         try:
             config_info = self.get_config_info()
             connection_count = config_info["connection_count"]
@@ -188,36 +239,39 @@ class ConfigManager:
             )
 
     def __enter__(self):
-        """
-        上下文管理器入口，返回自身实例
+        """上下文管理器入口，返回自身实例
 
         Returns:
             ConfigManager: 当前配置管理器实例
+
+        Note:
+            允许使用 with 语句来精确控制配置管理器的生命周期
         """
         return self
 
     def __exit__(
         self, exc_type: type | None, exc_val: Exception | None, exc_tb: Any | None
     ) -> None:
-        """
-        上下文管理器退出，自动清理敏感数据
+        """上下文管理器退出，自动清理敏感数据
 
         Args:
-            exc_type: 异常类型
-            exc_val: 异常值
-            exc_tb: 异常回溯
+            exc_type: 异常类型（如果有异常发生）
+            exc_val: 异常值（如果有异常发生）
+            exc_tb: 异常回溯（如果有异常发生）
+
+        Note:
+            无论是否发生异常，都会确保敏感数据被安全清理
         """
         self._clear_sensitive_data()
         logger.info("配置管理器上下文已退出")
 
     def close(self) -> None:
-        """
-        关闭配置管理器，清理敏感数据
+        """关闭配置管理器，清理敏感数据
 
         这是一个公开的API方法，用于手动清理敏感数据。
         当不使用上下文管理器时，应在使用完毕后调用此方法。
 
-        Security Note:
+        Security:
             - 清理加密管理器中的敏感数据
             - 清理配置缓存
             - 调用后需要重新初始化才能使用加密功能
@@ -231,13 +285,20 @@ class ConfigManager:
         logger.info("配置管理器已手动关闭")
 
     def _clear_sensitive_data(self) -> None:
-        """
-        清理内存中的敏感数据（内部方法）
+        """清理内存中的敏感数据（内部方法）
 
-        Security Note:
+        安全地清理加密管理器和配置缓存中的敏感信息。
+        调用后实例将无法继续使用加密解密功能。
+
+        Security:
             - 清理加密管理器中的敏感数据
             - 清理配置缓存
             - 调用后需要重新初始化才能使用加密功能
+
+        Note:
+            - 调用后需要重新创建实例才能继续使用
+            - 主要用于上下文管理器和析构函数
+            - 符合内存安全最佳实践
         """
         if self.crypto is not None:
             self.crypto.close()
@@ -248,15 +309,29 @@ class ConfigManager:
         logger.debug("配置管理器敏感数据和缓存已清理")
 
     @staticmethod
-    def handle_config_operation(operation_name: str) -> Callable:
-        """
-        配置操作异常处理装饰器
+    def _handle_config_operation(operation_name: str) -> Callable:
+        """配置操作异常处理装饰器
+
+        为配置操作提供统一的异常处理和错误日志记录。
+        捕获各种异常并转换为 ConfigError。
 
         Args:
             operation_name: 操作名称，用于错误消息
 
         Returns:
             Callable: 装饰器函数
+
+        Error Handling:
+            - OSError: 配置文件操作失败
+            - JSONDecodeError/TypeError/ValueError: 配置数据处理失败
+            - AttributeError/RuntimeError/MemoryError: 系统级错误
+            - Exception: 其他未知错误
+
+        Example:
+            >>> @_handle_config_operation("配置文件保存")
+            ... def _save_config(self, config):
+            ...     # 保存配置逻辑
+            ...     pass
         """
 
         def decorator(func: Callable) -> Callable:
@@ -282,30 +357,51 @@ class ConfigManager:
         return decorator
 
     def _ensure_config_exists(self) -> None:
-        """
-        确保配置文件存在，如果不存在则创建默认配置
+        """确保配置文件存在，如果不存在则创建默认配置
+
+        检查配置文件是否存在，如果不存在则创建默认配置结构。
+        同时初始化加密管理器。
 
         Raises:
             ConfigError: 当配置文件创建或初始化失败时
+
+        Process:
+            1. 加载或创建加密密钥
+            2. 检查配置文件是否存在
+            3. 如果不存在，创建默认配置
         """
         self._load_or_create_crypto_key_secure()
         if not self.config_path.exists():
             self._create_default_config()
         logger.debug("配置文件就绪: %s", self.config_path)
 
-    @handle_config_operation("安全密钥管理")
+    @_handle_config_operation("安全密钥管理")
     def _load_or_create_crypto_key_secure(self) -> None:
-        """
-        使用操作系统密钥存储服务加载或创建加密密钥
+        """使用操作系统密钥存储服务加载或创建加密密钥
 
         使用统一的密钥存储方案，仅使用1套keyring密钥：
         - 主加密密钥：用于加密连接配置和密钥文件
 
+        安全层次结构：
+            1. 操作系统密钥环（keyring）- 最安全
+            2. 环境变量 - 中等安全
+            3. 文件存储 - 基础安全（仅作为后备）
+
         Raises:
             ConfigError: 当密钥加载或创建失败时
+
+        Security:
+            - 优先使用操作系统密钥环存储加密密钥
+            - 密钥数据包含password和salt
+            - 自动处理密钥创建和加载
+
+        Process:
+            1. 尝试从keyring加载密钥
+            2. 如果keyring不可用，回退到文件方案
+            3. 如果密钥不存在，创建新密钥
         """
         # 尝试使用keyring库（如果可用）
-        if keyring_available and _keyring is not None:
+        if _keyring_available and _keyring is not None:
             service_name = self.app_name
             username = "master_key"
 
@@ -328,14 +424,24 @@ class ConfigManager:
             self._load_or_create_crypto_key()
 
     def _load_crypto_from_key_data(self, key_data: Dict[str, Any]) -> None:
-        """
-        从密钥数据加载加密管理器
+        """从密钥数据加载加密管理器
+
+        从包含password和salt的字典中恢复加密管理器实例。
 
         Args:
             key_data: 包含password和salt的密钥数据字典
 
         Raises:
             ConfigError: 当密钥数据无效时
+
+        Security:
+            - 验证密钥数据格式完整性
+            - 使用CryptoManager.from_saved_key恢复实例
+
+        Process:
+            1. 验证密钥数据包含必需的字段
+            2. 使用密钥数据创建CryptoManager实例
+            3. 记录加载成功日志
         """
         # 验证密钥数据格式
         if "password" not in key_data or "salt" not in key_data:
@@ -348,11 +454,21 @@ class ConfigManager:
         logger.debug("加密密钥加载成功")
 
     def _create_new_crypto_key(self) -> Dict[str, str]:
-        """
-        创建新的加密密钥
+        """创建新的加密密钥
+
+        创建新的CryptoManager实例并返回密钥信息。
 
         Returns:
             Dict[str, str]: 包含password和salt的密钥数据
+
+        Security:
+            - 使用密码学安全的随机数生成器
+            - 自动生成强密码和盐值
+
+        Process:
+            1. 创建新的CryptoManager实例
+            2. 获取密钥信息
+            3. 返回密钥数据字典
         """
         self.crypto = CryptoManager()
         key_data = self.crypto.get_key_info()
@@ -360,18 +476,29 @@ class ConfigManager:
         return key_data
 
     def _load_or_create_crypto_key(self) -> None:
-        """
-        加载或创建加密密钥（文件回退方案）
+        """加载或创建加密密钥（文件回退方案）
 
         当keyring不可用时，使用文件存储加密密钥。
         注意：此方案的安全性低于keyring，仅作为后备方案。
 
         Raises:
             ConfigError: 当密钥加载或创建失败时
+
+        Security:
+            - 优先使用环境变量中的密钥
+            - 其次从文件加载或创建
+            - 文件权限设置为仅所有者可读写
+
+        Process:
+            1. 检查环境变量密钥
+            2. 如果存在，使用环境变量密钥
+            3. 如果不存在，检查密钥文件
+            4. 如果密钥文件存在，加载密钥
+            5. 如果密钥文件不存在，创建新密钥文件
         """
-        if self.env_key:
+        if self._env_key:
             # 使用统一的密钥加载方法
-            self._load_crypto_from_key_data(json.loads(self.env_key))
+            self._load_crypto_from_key_data(json.loads(self._env_key))
             logger.debug("使用环境变量中的加密密钥")
         else:
             key_file = self.config_dir / "encryption.key"
@@ -386,7 +513,26 @@ class ConfigManager:
                 )
 
     def _load_existing_key(self, key_file: Path) -> None:
-        """加载现有的加密密钥文件"""
+        """加载现有的加密密钥文件
+
+        从指定的密钥文件加载加密密钥。
+
+        Args:
+            key_file: 密钥文件路径
+
+        Raises:
+            ConfigError: 当密钥加载失败时
+
+        Security:
+            - 设置文件权限为仅所有者可读写
+            - 使用TOML格式解析密钥数据
+
+        Process:
+            1. 设置文件安全权限
+            2. 读取密钥文件
+            3. 解析密钥数据
+            4. 加载加密管理器
+        """
         try:
             # 设置文件权限为仅所有者可读写
             self._set_secure_file_permissions(key_file)
@@ -401,7 +547,22 @@ class ConfigManager:
             self._handle_crypto_error(key_file, e)
 
     def _create_new_key(self, key_file: Path) -> None:
-        """创建新的加密密钥文件"""
+        """创建新的加密密钥文件
+
+        创建新的加密密钥并保存到指定文件。
+
+        Args:
+            key_file: 密钥文件路径
+
+        Security:
+            - 使用密码学安全的随机数生成器
+            - 文件权限设置为仅所有者可读写
+
+        Process:
+            1. 创建新的加密密钥
+            2. 写入密钥文件
+            3. 设置文件安全权限
+        """
         key_data = self._create_new_crypto_key()
 
         # 先写入文件，然后设置安全权限
@@ -491,7 +652,27 @@ class ConfigManager:
         logger.debug("Unix/Linux: 已设置密钥文件权限为600（仅所有者可读写）")
 
     def _handle_crypto_error(self, key_file: Path, crypto_error: CryptoError) -> None:
-        """处理加密错误：删除旧密钥并创建新的"""
+        """处理加密错误：删除旧密钥并创建新的
+
+        当解密现有密钥文件失败时，删除旧文件并创建新密钥。
+        这通常发生在密钥格式变更或密钥损坏时。
+
+        Args:
+            key_file: 密钥文件路径
+            crypto_error: 加密错误异常
+
+        Raises:
+            ConfigError: 当删除旧密钥文件失败时
+
+        Security:
+            - 删除损坏的密钥文件
+            - 创建新的加密密钥
+
+        Process:
+            1. 记录警告日志
+            2. 删除旧密钥文件
+            3. 创建新的密钥文件
+        """
         logger.warning("解密密钥文件失败: %s，将创建新的密钥文件", str(crypto_error))
         try:
             key_file.unlink()
@@ -505,11 +686,24 @@ class ConfigManager:
             ) from crypto_error
 
     def _create_default_config(self) -> None:
-        """
-        创建默认配置文件结构
+        """创建默认配置文件结构
+
+        创建包含默认配置结构的配置文件。
+        包括版本、应用名称、连接字典和元数据。
 
         Raises:
             ConfigError: 当默认配置创建失败时
+
+        Process:
+            1. 构建默认配置字典
+            2. 保存配置文件
+            3. 记录创建日志
+
+        Default Config Structure:
+            - version: 配置文件版本号
+            - app_name: 应用名称
+            - connections: 空连接字典
+            - metadata: 包含创建时间、修改时间、密钥版本等
         """
         default_config = {
             "version": "1.0.0",
@@ -527,7 +721,7 @@ class ConfigManager:
         self._save_config(default_config)
         logger.info("默认配置文件已创建: %s", self.config_path)
 
-    @handle_config_operation("配置文件保存")
+    @_handle_config_operation("配置文件保存")
     def _save_config(
         self, config: Dict[str, Any], operation: str = OPERATION_UPDATE
     ) -> None:
@@ -759,8 +953,10 @@ class ConfigManager:
             raise ConfigError(f"{field_name}必须是{expected_type.__name__}类型")
 
     def add_config(self, name: str, connection_config: Dict[str, Any]) -> None:
-        """
-        添加数据库连接配置
+        """添加数据库连接配置
+
+        添加新的数据库连接配置到配置文件中，所有字段会自动加密存储。
+        连接名称作为唯一标识符，不能重复。
 
         Args:
             name: 连接名称（唯一标识符）
@@ -770,9 +966,19 @@ class ConfigManager:
             ConfigError: 当连接已存在或添加失败时
             ValueError: 当连接名称为空或配置无效时
 
-        Security Note:
+        Security:
             - 所有配置字段都会自动加密存储
             - 连接名称作为唯一标识符，不能重复
+            - 配置变更会自动记录到审计日志
+
+        Process:
+            1. 验证连接名称和配置格式
+            2. 检查连接是否已存在
+            3. 确保加密管理器已初始化
+            4. 加密连接配置
+            5. 递增配置版本号
+            6. 保存配置文件
+            7. 记录操作日志
 
         Example:
             >>> config = {
@@ -810,14 +1016,21 @@ class ConfigManager:
             self._log_operation_success("添加", name)
 
     def _validate_connection_name(self, name: str) -> None:
-        """
-        验证连接名称是否有效
+        """验证连接名称是否有效
+
+        验证连接名称是否符合命名规范。
 
         Args:
             name: 连接名称
 
         Raises:
-            ValueError: 当连接名称为空或不是字符串时
+            ValueError: 当连接名称无效时
+
+        Validation Rules:
+            - 不能为空且必须是字符串
+            - 长度不能超过50个字符
+            - 只能包含字母、数字和下划线
+            - 不能使用保留字（default, test, backup）
         """
         if not name or not isinstance(name, str):
             raise ValueError("连接名称不能为空且必须是字符串")
@@ -835,14 +1048,19 @@ class ConfigManager:
             raise ValueError("连接名称不能使用保留字")
 
     def _validate_connection_config(self, connection_config: Dict[str, Any]) -> None:
-        """
-        验证连接配置字典是否有效
+        """验证连接配置字典是否有效
+
+        验证连接配置字典是否符合格式要求。
 
         Args:
             connection_config: 连接配置字典
 
         Raises:
-            ValueError: 当连接配置为空或不是字典时
+            ValueError: 当连接配置无效时
+
+        Validation Rules:
+            - 不能为空且必须是字典
+            - 所有键必须是字符串
         """
         if not connection_config or not isinstance(connection_config, dict):
             raise ValueError("连接配置不能为空且必须是字典")
@@ -852,7 +1070,7 @@ class ConfigManager:
             if not isinstance(key, str):
                 raise ValueError("连接配置的键必须是字符串")
 
-    @handle_config_operation("配置文件加载")
+    @_handle_config_operation("配置文件加载")
     def _load_config(self) -> Dict[str, Any]:
         """
         加载并验证配置文件
@@ -1043,6 +1261,35 @@ class ConfigManager:
         return json.dumps(value_info, ensure_ascii=False)
 
     def _deserialize_value(self, json_str: str) -> Any:
+        """反序列化值，恢复原始数据类型
+
+        将JSON字符串反序列化为原始值，根据类型信息进行类型转换。
+
+        Args:
+            json_str: JSON格式的序列化字符串
+
+        Returns:
+            Any: 反序列化后的原始值
+
+        Process:
+            1. 解析JSON字符串
+            2. 根据类型信息进行类型转换
+            3. 返回原始值
+
+        Supported Types:
+            - int: 整数
+            - bool: 布尔值
+            - float: 浮点数
+            - str: 字符串
+            - other: 其他类型直接返回
+
+        Example:
+            >>> deserialized = self._deserialize_value('{"type": "int", "value": 42}')
+            >>> print(deserialized)
+            42
+            >>> print(type(deserialized))
+            <class 'int'>
+        """
         try:
             value_info = json.loads(json_str)
 
@@ -1184,18 +1431,31 @@ class ConfigManager:
         logger.info("连接配置已%s: %s", operation, name)
 
     def remove_config(self, name: str) -> None:
-        """
-        删除连接配置
+        """删除连接配置
+
+        从配置文件中删除指定名称的连接配置。
+        删除操作不可逆，建议先备份配置文件。
 
         Args:
             name: 连接名称
 
         Raises:
             ConfigError: 当连接不存在或删除失败时
+            ValueError: 当连接名称无效时
 
-        Security Note:
+        Security:
             - 删除操作不可逆，建议先备份
             - 删除后加密数据将无法恢复
+            - 删除操作会记录到审计日志
+
+        Process:
+            1. 验证连接名称
+            2. 加载配置文件
+            3. 验证连接是否存在
+            4. 删除连接配置
+            5. 递增配置版本号
+            6. 保存配置文件
+            7. 记录操作日志
 
         Example:
             >>> config_manager.remove_config("postgres_db")
@@ -1214,8 +1474,9 @@ class ConfigManager:
         self._log_operation_success("删除", name)
 
     def _ensure_connection_exists(self, config: Dict[str, Any], name: str) -> None:
-        """
-        确保连接配置存在
+        """确保连接配置存在
+
+        验证指定名称的连接配置是否存在于配置中。
 
         Args:
             config: 配置字典
@@ -1223,13 +1484,19 @@ class ConfigManager:
 
         Raises:
             ConfigError: 当连接不存在时
+
+        Process:
+            1. 检查连接名称是否在配置中
+            2. 如果不存在，抛出ConfigError
         """
         if name not in config["connections"]:
             raise ConfigError(f"连接配置不存在: {name}")
 
     def update_config(self, name: str, connection_config: Dict[str, Any]) -> None:
-        """
-        更新连接配置
+        """更新连接配置
+
+        更新指定名称的连接配置，替换原有的配置内容。
+        所有字段会重新加密，版本号自动递增。
 
         Args:
             name: 连接名称
@@ -1237,6 +1504,12 @@ class ConfigManager:
 
         Raises:
             ConfigError: 当连接不存在或更新失败时
+            ValueError: 当连接名称或配置无效时
+
+        Security:
+            - 更新操作会重新加密所有配置字段
+            - 更新操作会记录到审计日志
+            - 建议先备份再进行更新
 
         Process:
             1. 验证连接名称和配置
@@ -1276,8 +1549,10 @@ class ConfigManager:
             self._log_operation_success("更新", name)
 
     def get_config(self, name: str) -> Dict[str, Any]:
-        """
-        获取数据库连接配置（自动解密）
+        """获取数据库连接配置（自动解密）
+
+        获取指定连接名称的配置，自动解密所有字段。
+        返回的配置包含原始连接参数，注意敏感信息在内存中为明文状态。
 
         Args:
             name: 连接名称
@@ -1287,10 +1562,20 @@ class ConfigManager:
 
         Raises:
             ConfigError: 当连接不存在或获取失败时
+            ValueError: 当连接名称无效时
 
-        Security Note:
+        Security:
             - 返回的解密配置包含敏感信息，使用后应及时清理
             - 配置数据在内存中为明文状态
+            - 建议使用上下文管理器自动管理敏感数据
+
+        Process:
+            1. 验证连接名称
+            2. 加载配置文件
+            3. 验证连接是否存在
+            4. 确保加密管理器已初始化
+            5. 解密连接配置
+            6. 返回原始配置
 
         Example:
             >>> config = config_manager.get_config("postgres_db")
@@ -1317,14 +1602,21 @@ class ConfigManager:
         return decrypted_config
 
     def list_configs(self) -> List[str]:
-        """
-        列出所有可用的连接名称
+        """列出所有可用的连接名称
+
+        获取配置文件中所有连接配置的名称列表。
+        不会解密任何敏感数据，仅返回连接名称。
 
         Returns:
             List[str]: 连接名称列表，按配置文件中的顺序排列
 
         Raises:
             ConfigError: 当列出连接失败时
+
+        Process:
+            1. 加载配置文件
+            2. 提取所有连接名称
+            3. 返回名称列表
 
         Example:
             >>> connections = config_manager.list_configs()
@@ -1335,11 +1627,20 @@ class ConfigManager:
         return list(config["connections"].keys())
 
     def get_config_info(self) -> Dict[str, Any]:
-        """
-        获取配置文件的基本信息
+        """获取配置文件的基本信息
+
+        获取配置文件的元数据信息，不包含敏感数据。
 
         Returns:
             Dict[str, Any]: 配置文件信息字典，包含版本、应用名称、连接数量等信息
+
+        Info Fields:
+            - version: 配置文件版本号
+            - app_name: 应用名称
+            - connection_count: 连接数量
+            - created: 创建时间
+            - last_modified: 最后修改时间
+            - config_file: 配置文件路径
 
         Example:
             >>> info = config_manager.get_config_info()
@@ -1359,11 +1660,16 @@ class ConfigManager:
         }
 
     def get_key_version(self) -> str:
-        """
-        获取当前密钥版本
+        """获取当前密钥版本
+
+        获取配置文件中记录的加密密钥版本号。
 
         Returns:
             str: 当前密钥版本号
+
+        Security:
+            - 返回密钥版本号用于审计和追踪
+            - 版本号在密钥轮换时自动递增
 
         Example:
             >>> version = config_manager.get_key_version()
@@ -1374,11 +1680,22 @@ class ConfigManager:
         return config.get("metadata", {}).get("key_version", "1")
 
     def get_audit_log(self) -> List[Dict[str, Any]]:
-        """
-        获取配置变更审计日志
+        """获取配置变更审计日志
+
+        获取配置文件中记录的所有配置变更操作日志。
 
         Returns:
             List[Dict[str, Any]]: 审计日志列表
+
+        Audit Log Entry Fields:
+            - timestamp: 操作时间戳
+            - operation: 操作类型（add/remove/update/rotate_key）
+            - key_version: 密钥版本号
+            - connection_count: 连接数量
+
+        Security:
+            - 审计日志用于安全审计和合规检查
+            - 保留最近100条记录
 
         Example:
             >>> audit_log = config_manager.get_audit_log()
@@ -1388,10 +1705,12 @@ class ConfigManager:
         config = self._load_config()
         return config.get("metadata", {}).get("audit_log", [])
 
-    @handle_config_operation("配置文件备份")
+    @_handle_config_operation("配置文件备份")
     def backup_config(self, backup_path: Path | None = None) -> Path:
-        """
-        备份配置文件
+        """备份配置文件
+
+        创建配置文件的备份副本，可指定备份路径或自动生成带时间戳的路径。
+        备份文件包含加密数据，应妥善保管。
 
         Args:
             backup_path: 备份文件路径，如果为None则自动生成带时间戳的备份文件
@@ -1402,9 +1721,15 @@ class ConfigManager:
         Raises:
             ConfigError: 当备份失败时
 
-        Security Note:
+        Security:
             - 备份文件包含加密数据，应妥善保管
             - 建议定期备份重要配置
+            - 备份文件权限应设置为仅所有者可读写
+
+        Process:
+            1. 确定备份路径（自动生成或使用指定路径）
+            2. 复制配置文件到备份位置
+            3. 返回备份文件路径
 
         Example:
             >>> # 自动生成备份路径
@@ -1424,10 +1749,12 @@ class ConfigManager:
         logger.debug("配置文件已备份: %s", backup_path)
         return backup_path
 
-    @handle_config_operation("加密密钥轮换")
+    @_handle_config_operation("加密密钥轮换")
     def rotate_encryption_key(self) -> str:
-        """
-        轮换加密密钥
+        """轮换加密密钥
+
+        生成新的加密密钥并重新加密所有连接配置。
+        操作前会自动备份配置文件，密钥版本号自动递增。
 
         Returns:
             str: 新的密钥版本号
@@ -1435,10 +1762,12 @@ class ConfigManager:
         Raises:
             ConfigError: 当密钥轮换失败时
 
-        Security Note:
+        Security:
             - 密钥轮换会重新加密所有连接配置
             - 操作前会自动备份配置文件
             - 密钥轮换是不可逆操作
+            - 新密钥按照安全层次结构存储（keyring > 环境变量 > 文件）
+            - 密钥版本号递增记录
 
         Process:
             1. 备份当前配置文件
@@ -1460,7 +1789,32 @@ class ConfigManager:
         return new_key_version
 
     def _perform_key_rotation(self) -> str:
-        """执行密钥轮换的核心逻辑"""
+        """执行密钥轮换的核心逻辑
+
+        执行完整的密钥轮换流程，包括备份、解密、生成新密钥、重新加密。
+
+        Returns:
+            str: 新的密钥版本号
+
+        Raises:
+            ConfigError: 当密钥轮换失败时
+
+        Security:
+            - 自动备份配置文件
+            - 解密所有连接配置
+            - 生成新的加密密钥
+            - 重新加密所有连接配置
+
+        Process:
+            1. 备份当前配置
+            2. 加载当前配置
+            3. 解密所有连接配置
+            4. 生成新的加密密钥
+            5. 更新密钥版本号
+            6. 重新加密所有连接配置
+            7. 保存新的密钥文件
+            8. 保存更新后的配置
+        """
         # 备份当前配置
         backup_path = self.backup_config()
         logger.debug("密钥轮换前已备份配置: %s", backup_path)
@@ -1494,7 +1848,25 @@ class ConfigManager:
     def _decrypt_all_connections(
         self, config: Dict[str, Any]
     ) -> Dict[str, Dict[str, Any]]:
-        """解密所有连接配置"""
+        """解密所有连接配置
+
+        解密配置文件中所有连接配置的加密数据。
+
+        Args:
+            config: 配置字典
+
+        Returns:
+            Dict[str, Dict[str, Any]]: 解密后的连接配置字典
+
+        Security:
+            - 使用当前加密密钥解密所有配置
+            - 返回的解密数据包含敏感信息
+
+        Process:
+            1. 遍历所有连接配置
+            2. 解密每个连接的配置
+            3. 返回解密后的配置字典
+        """
         decrypted_connections = {}
         for name, encrypted_config in config["connections"].items():
             # 使用统一的解密方法
@@ -1504,7 +1876,22 @@ class ConfigManager:
         return decrypted_connections
 
     def _update_key_version(self, config: Dict[str, Any]) -> str:
-        """更新密钥版本号"""
+        """更新密钥版本号
+
+        递增配置中的密钥版本号。
+
+        Args:
+            config: 配置字典
+
+        Returns:
+            str: 新的密钥版本号
+
+        Process:
+            1. 获取当前密钥版本号
+            2. 递增版本号
+            3. 更新配置中的版本号
+            4. 返回新版本号
+        """
         current_key_version = int(config.get("metadata", {}).get("key_version", "1"))
         new_key_version = str(current_key_version + 1)
         config["metadata"]["key_version"] = new_key_version
@@ -1513,7 +1900,23 @@ class ConfigManager:
     def _re_encrypt_all_connections(
         self, config: Dict[str, Any], decrypted_connections: Dict[str, Dict[str, Any]]
     ) -> None:
-        """重新加密所有连接配置"""
+        """重新加密所有连接配置
+
+        使用新的加密密钥重新加密所有连接配置。
+
+        Args:
+            config: 配置字典
+            decrypted_connections: 解密后的连接配置字典
+
+        Security:
+            - 使用新的加密密钥加密所有配置
+            - 更新配置中的连接数据
+
+        Process:
+            1. 遍历所有解密后的连接配置
+            2. 使用新密钥加密每个配置
+            3. 更新配置字典
+        """
         re_encrypted_connections = {}
         for name, decrypted_config in decrypted_connections.items():
             # 使用统一的加密方法
@@ -1532,7 +1935,7 @@ class ConfigManager:
         3. 文件存储 - 基础安全（仅作为后备）
         """
         # 1. 优先尝试保存到操作系统密钥环
-        if keyring_available and _keyring is not None:
+        if _keyring_available and _keyring is not None:
             service_name = self.app_name
             username = "master_key"
 
@@ -1575,15 +1978,15 @@ class ConfigManager:
         3. 虽然keyring的服务名和用户名与应用名相关，但库的可用性是全局的
         """
         # 检查环境变量密钥
-        cls.env_key = os.environ.get("DB_CONNECTOR_TOOL_ENCRYPTION_KEY")
-        cls._env_key_available = bool(cls.env_key)
+        cls._env_key = os.environ.get("DB_CONNECTOR_TOOL_ENCRYPTION_KEY")
+        cls._env_key_available = bool(cls._env_key)
         if cls._env_key_available:
             logger.debug("环境变量中的加密密钥可用")
         else:
             logger.debug("环境变量中无加密密钥")
 
         # 检查是否有可用的密钥存储
-        if not keyring_available and not cls._env_key_available:
+        if not _keyring_available and not cls._env_key_available:
             logger.warning(
                 "警告: 未找到安全的密钥存储方案。\n"
                 "建议: 1. 安装keyring库 (pip install keyring)\n"

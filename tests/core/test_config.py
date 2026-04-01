@@ -1,6 +1,7 @@
 import os
 import tempfile
 import unittest
+from pathlib import Path
 
 from src.db_connector_tool.core.config import ConfigManager
 from src.db_connector_tool.core.exceptions import ConfigError
@@ -247,22 +248,22 @@ class TestConfigManager(unittest.TestCase):
         """测试无效的连接名称"""
         with ConfigManager(self.app_name, self.config_file) as config_manager:
             # 测试空连接名称
-            with self.assertRaises(ConfigError):
+            with self.assertRaises(ValueError):
                 config_manager.add_config("", {"host": "localhost"})
 
             # 测试非字符串连接名称
-            with self.assertRaises(ConfigError):
+            with self.assertRaises(ValueError):
                 config_manager.add_config(123, {"host": "localhost"})  # type: ignore
 
     def test_invalid_connection_config(self) -> None:
         """测试无效的连接配置"""
         with ConfigManager(self.app_name, self.config_file) as config_manager:
             # 测试空配置
-            with self.assertRaises(ConfigError):
+            with self.assertRaises(ValueError):
                 config_manager.add_config("test_db", {})
 
             # 测试非字典配置
-            with self.assertRaises(ConfigError):
+            with self.assertRaises(ValueError):
                 config_manager.add_config("test_db", "not a dict")  # type: ignore
 
     def test_nonexistent_connection(self) -> None:
@@ -279,6 +280,315 @@ class TestConfigManager(unittest.TestCase):
             # 测试删除不存在的连接
             with self.assertRaises(ConfigError):
                 config_manager.remove_config("nonexistent")
+
+
+class TestConfigManagerAdvanced(unittest.TestCase):
+    """测试 ConfigManager 的高级功能和内部方法"""
+
+    def setUp(self) -> None:
+        """设置测试环境"""
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.app_name = f"test_app_advanced_{id(self)}"
+        self.config_file = "test_connections.toml"
+        self.original_env = os.environ.copy()
+
+    def tearDown(self) -> None:
+        """清理测试环境"""
+        os.environ.clear()
+        os.environ.update(self.original_env)
+        self.temp_dir.cleanup()
+
+    def test_str_representation(self) -> None:
+        """测试 __str__ 方法"""
+        with ConfigManager(self.app_name, self.config_file) as config_manager:
+            str_repr = str(config_manager)
+            self.assertIn("ConfigManager", str_repr)
+            self.assertIn(self.app_name, str_repr)
+
+    def test_repr_representation(self) -> None:
+        """测试 __repr__ 方法"""
+        with ConfigManager(self.app_name, self.config_file) as config_manager:
+            repr_repr = repr(config_manager)
+            self.assertIn("ConfigManager", repr_repr)
+            self.assertIn(self.app_name, repr_repr)
+            self.assertIn(self.config_file, repr_repr)
+
+    def test_close_method(self) -> None:
+        """测试 close 方法"""
+        config_manager = ConfigManager(self.app_name, self.config_file)
+        self.assertIsNotNone(config_manager.crypto)
+        config_manager.close()
+        self.assertIsNone(config_manager.crypto)
+
+    def test_validate_connection_name_length(self) -> None:
+        """测试连接名称长度验证"""
+        with ConfigManager(self.app_name, self.config_file) as config_manager:
+            # 测试过长的连接名称
+            long_name = "a" * 51
+            with self.assertRaises(ValueError):
+                config_manager.add_config(long_name, {"host": "localhost"})
+
+    def test_validate_connection_name_characters(self) -> None:
+        """测试连接名称字符验证"""
+        with ConfigManager(self.app_name, self.config_file) as config_manager:
+            # 测试包含特殊字符的连接名称
+            with self.assertRaises(ValueError):
+                config_manager.add_config("test-name", {"host": "localhost"})
+
+    def test_validate_connection_name_reserved(self) -> None:
+        """测试连接名称保留字验证"""
+        with ConfigManager(self.app_name, self.config_file) as config_manager:
+            # 测试保留字
+            reserved_names = ["default", "test", "backup"]
+            for name in reserved_names:
+                with self.assertRaises(ValueError):
+                    config_manager.add_config(name, {"host": "localhost"})
+
+    def test_validate_connection_config_keys(self) -> None:
+        """测试连接配置键验证"""
+        with ConfigManager(self.app_name, self.config_file) as config_manager:
+            # 测试非字符串键
+            invalid_config = {123: "value"}
+            with self.assertRaises(ValueError):
+                config_manager.add_config("test_db", invalid_config)  # type: ignore
+
+    def test_serialize_deserialize_values(self) -> None:
+        """测试值的序列化和反序列化"""
+        with ConfigManager(self.app_name, self.config_file) as config_manager:
+            # 测试各种数据类型
+            test_values = [
+                42,
+                3.14,
+                True,
+                False,
+                "string",
+                ["list", "of", "strings"],
+                {"key": "value"},
+                None,
+            ]
+
+            for value in test_values:
+                serialized = config_manager._serialize_value(value)
+                self.assertIsInstance(serialized, str)
+                deserialized = config_manager._deserialize_value(serialized)
+                self.assertEqual(deserialized, value)
+
+    def test_deserialize_invalid_json(self) -> None:
+        """测试反序列化无效的 JSON"""
+        with ConfigManager(self.app_name, self.config_file) as config_manager:
+            invalid_json = "not a valid json"
+            result = config_manager._deserialize_value(invalid_json)
+            self.assertEqual(result, invalid_json)
+
+    def test_is_valid_version_format(self) -> None:
+        """测试版本号格式验证"""
+        with ConfigManager(self.app_name, self.config_file) as config_manager:
+            # 有效版本号
+            self.assertTrue(config_manager._is_valid_version_format("1.0.0"))
+            self.assertTrue(config_manager._is_valid_version_format("0.1.2"))
+            self.assertTrue(config_manager._is_valid_version_format("99.99.99"))
+
+            # 无效版本号
+            self.assertFalse(config_manager._is_valid_version_format("1.0"))
+            self.assertFalse(config_manager._is_valid_version_format("1.0.0.0"))
+            self.assertFalse(config_manager._is_valid_version_format("v1.0.0"))
+            self.assertFalse(config_manager._is_valid_version_format("1.0.a"))
+            self.assertFalse(config_manager._is_valid_version_format("01.0.0"))
+
+    def test_parse_version_parts(self) -> None:
+        """测试解析版本号各部分"""
+        with ConfigManager(self.app_name, self.config_file) as config_manager:
+            major, minor, patch = config_manager._parse_version_parts("1.2.3")
+            self.assertEqual(major, 1)
+            self.assertEqual(minor, 2)
+            self.assertEqual(patch, 3)
+
+    def test_increment_version_parts(self) -> None:
+        """测试递增版本号"""
+        with ConfigManager(self.app_name, self.config_file) as config_manager:
+            # 普通递增
+            major, minor, patch = config_manager._increment_version_parts(1, 0, 0)
+            self.assertEqual((major, minor, patch), (1, 0, 1))
+
+            # 进位测试
+            major, minor, patch = config_manager._increment_version_parts(1, 0, 9)
+            self.assertEqual((major, minor, patch), (1, 1, 0))
+
+            major, minor, patch = config_manager._increment_version_parts(1, 9, 9)
+            self.assertEqual((major, minor, patch), (2, 0, 0))
+
+    def test_increment_config_version(self) -> None:
+        """测试递增配置版本号"""
+        with ConfigManager(self.app_name, self.config_file) as config_manager:
+            config = config_manager._load_config()
+            original_version = config["version"]
+
+            config_manager._increment_config_version(config)
+            new_version = config["version"]
+
+            self.assertNotEqual(original_version, new_version)
+
+    def test_backup_config_with_custom_path(self) -> None:
+        """测试使用自定义路径备份配置"""
+        with ConfigManager(self.app_name, self.config_file) as config_manager:
+            # 添加一些配置
+            config_manager.add_config("test_db", {"host": "localhost"})
+
+            # 使用自定义路径备份
+            custom_backup = Path(self.temp_dir.name) / "custom_backup.toml"
+            backup_path = config_manager.backup_config(custom_backup)
+
+            self.assertTrue(backup_path.exists())
+            self.assertEqual(backup_path, custom_backup)
+
+    def test_get_audit_log(self) -> None:
+        """测试获取审计日志"""
+        with ConfigManager(self.app_name, self.config_file) as config_manager:
+            # 先获取初始审计日志长度
+            initial_len = len(config_manager.get_audit_log())
+
+            # 执行一些操作
+            config_manager.add_config("test_db", {"host": "localhost"})
+            config_manager.update_config("test_db", {"host": "newhost"})
+            config_manager.remove_config("test_db")
+
+            # 获取审计日志
+            audit_log = config_manager.get_audit_log()
+
+            self.assertIsInstance(audit_log, list)
+            self.assertEqual(len(audit_log), initial_len + 3)
+
+            # 验证最近的操作类型
+            self.assertEqual(audit_log[-3]["operation"], "add")
+            self.assertEqual(audit_log[-2]["operation"], "update")
+            self.assertEqual(audit_log[-1]["operation"], "remove")
+
+    def test_verify_config_signature_no_signature(self) -> None:
+        """测试验证没有签名的配置文件"""
+        with ConfigManager(self.app_name, self.config_file) as config_manager:
+            # 加载配置
+            config = config_manager._load_config()
+
+            # 移除签名
+            config["metadata"]["signature"] = ""
+
+            # 验证签名
+            result = config_manager._verify_config_signature(config)
+            self.assertTrue(result)
+
+    def test_verify_config_signature_crypto_none(self) -> None:
+        """测试加密管理器未初始化时的签名验证"""
+        config_manager = ConfigManager(self.app_name, self.config_file)
+
+        # 加载配置
+        config = config_manager._load_config()
+
+        # 清理加密管理器
+        config_manager.close()
+
+        # 验证签名（crypto 为 None 时）
+        result = config_manager._verify_config_signature(config)
+        self.assertTrue(result)
+
+        config_manager.close()
+
+    def test_increment_config_version_invalid_format(self) -> None:
+        """测试递增无效格式的版本号"""
+        with ConfigManager(self.app_name, self.config_file) as config_manager:
+            config = config_manager._load_config()
+
+            # 设置无效的版本号格式
+            config["version"] = "invalid.version"
+
+            # 递增版本号（应该重置为 1.0.0）
+            config_manager._increment_config_version(config)
+
+            self.assertEqual(config["version"], "1.0.0")
+
+    def test_increment_config_version_exceptions(self) -> None:
+        """测试版本号递增时的异常处理"""
+        with ConfigManager(self.app_name, self.config_file) as config_manager:
+            config = config_manager._load_config()
+
+            # 设置会导致异常的版本号
+            config["version"] = None  # type: ignore
+
+            # 这应该不会抛出异常，只是记录警告
+            config_manager._increment_config_version(config)
+
+    def test_config_cache(self) -> None:
+        """测试配置缓存机制"""
+        with ConfigManager(self.app_name, self.config_file) as config_manager:
+            # 添加一个配置
+            config_manager.add_config("test_db", {"host": "localhost"})
+
+            # 第一次加载，会从文件读取
+            config1 = config_manager._load_config()
+
+            # 第二次加载，应该使用缓存
+            config2 = config_manager._load_config()
+
+            self.assertEqual(config1, config2)
+
+    def test_ensure_crypto_initialized(self) -> None:
+        """测试确保加密管理器已初始化"""
+        config_manager = ConfigManager(self.app_name, self.config_file)
+
+        # 加密管理器应该已经初始化
+        self.assertIsNotNone(config_manager.crypto)
+
+        # 清理后再次检查
+        config_manager.close()
+        self.assertIsNone(config_manager.crypto)
+
+        # 尝试确保初始化（应该抛出异常）
+        with self.assertRaises(ConfigError):
+            config_manager._ensure_crypto_initialized()
+
+        config_manager.close()
+
+    def test_validate_config_missing_fields(self) -> None:
+        """测试验证缺少必需字段的配置"""
+        with ConfigManager(self.app_name, self.config_file) as config_manager:
+            # 创建缺少必需字段的配置
+            invalid_config = {
+                "version": "1.0.0",
+                "app_name": "test",
+                # 缺少 connections 和 metadata
+            }
+
+            with self.assertRaises(ConfigError):
+                config_manager._validate_config(invalid_config)
+
+    def test_validate_config_invalid_key_version(self) -> None:
+        """测试验证无效的密钥版本"""
+        with ConfigManager(self.app_name, self.config_file) as config_manager:
+            config = config_manager._load_config()
+
+            # 设置无效的密钥版本
+            config["metadata"]["key_version"] = "invalid"
+
+            with self.assertRaises(ConfigError):
+                config_manager._validate_config(config)
+
+    def test_validate_config_invalid_audit_log(self) -> None:
+        """测试验证无效的审计日志"""
+        with ConfigManager(self.app_name, self.config_file) as config_manager:
+            config = config_manager._load_config()
+
+            # 设置无效的审计日志类型
+            config["metadata"]["audit_log"] = "not a list"  # type: ignore
+
+            with self.assertRaises(ConfigError):
+                config_manager._validate_config(config)
+
+    def test_is_valid_version_format_edge_cases(self) -> None:
+        """测试版本号格式验证的边界情况"""
+        with ConfigManager(self.app_name, self.config_file) as config_manager:
+            # 测试 None 和非字符串
+            self.assertFalse(config_manager._is_valid_version_format(None))  # type: ignore
+            self.assertFalse(config_manager._is_valid_version_format(123))  # type: ignore
+            self.assertFalse(config_manager._is_valid_version_format(""))
 
 
 if __name__ == "__main__":

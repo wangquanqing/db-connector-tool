@@ -789,18 +789,18 @@ class TestCryptoManagerEdgeCases(unittest.TestCase):
         """测试 Fernet 实例创建失败时的异常处理"""
         # 创建一个正常的实例
         crypto = CryptoManager()
-        
+
         # 模拟 base64.urlsafe_b64encode 失败
-        with mock.patch('base64.urlsafe_b64encode') as mock_b64encode:
+        with mock.patch("base64.urlsafe_b64encode") as mock_b64encode:
             mock_b64encode.side_effect = Exception("Base64 encoding failure")
-            
+
             try:
                 # 调用 _create_fernet_instance 方法
                 crypto._create_fernet_instance()
                 self.fail("应该抛出 CryptoError")
             except CryptoError as e:
                 self.assertIn("加密密钥派生失败", str(e))
-        
+
         crypto.close()
 
     def test_encrypt_general_exception(self):
