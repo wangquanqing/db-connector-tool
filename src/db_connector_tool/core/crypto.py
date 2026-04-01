@@ -212,7 +212,7 @@ class CryptoManager:
 
             self.fernet = self._create_fernet_instance()
 
-            logger.debug(
+            logger.info(
                 "加密管理器初始化成功，盐值长度: %s, 密码长度: %s, 迭代次数: %s",
                 len(self.salt),
                 len(self.password),
@@ -267,7 +267,7 @@ class CryptoManager:
             无论是否发生异常，都会确保敏感数据被安全清理
         """
         self._clear_sensitive_data()
-        logger.debug("上下文管理器退出，敏感数据已安全清理")
+        logger.info("加密管理器上下文已退出")
 
     def close(self):
         """手动关闭加密管理器，清理敏感数据
