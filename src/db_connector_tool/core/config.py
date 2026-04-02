@@ -56,12 +56,12 @@ from .crypto import CryptoManager
 from .exceptions import ConfigError, CryptoError
 
 # 条件导入keyring库
-_keyring_available = False
-_keyring = None  # 内部使用的模块引用
+_keyring_available = False  # pylint: disable=invalid-name
+_keyring = None  # 内部使用的模块引用  # pylint: disable=invalid-name
 try:
     import keyring
 
-    _keyring_available = True
+    _keyring_available = True  # pylint: disable=invalid-name
     _keyring = keyring
 except ImportError:
     pass
