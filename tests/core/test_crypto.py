@@ -4,14 +4,14 @@
 密钥持久化和上下文管理器等。
 
 测试设计原则：
-    - 每个测试方法独立，不依赖执行顺序
-    - 使用 setUp 和 tearDown 管理资源
-    - 敏感数据在测试后清理
-    - 异常测试使用 assertRaises
+- 每个测试方法独立，不依赖执行顺序
+- 使用 setUp 和 tearDown 管理资源
+- 敏感数据在测试后清理
+- 异常测试使用 assertRaises
 
 运行测试：
-    >>> python -m unittest tests.core.test_crypto
-    >>> python -m unittest tests.core.test_crypto.TestCryptoManager.test_encrypt_decrypt
+>>> python -m unittest tests.core.test_crypto
+>>> python -m unittest tests.core.test_crypto.TestCryptoManager.test_encrypt_decrypt
 """
 
 import base64
@@ -48,8 +48,6 @@ class TestCryptoManager(unittest.TestCase):
                 self.crypto.close()
             except Exception:
                 pass
-
-    # ==================== 初始化测试 ====================
 
     def test_default_initialization(self):
         """测试默认初始化
@@ -115,11 +113,9 @@ class TestCryptoManager(unittest.TestCase):
 
         验证使用低于推荐值的迭代次数时会发出警告。
         """
-        # 使用低迭代次数应该能成功，但会记录警告
         low_iterations = 50000  # 低于 MIN_ITERATIONS
         strong_password = "My$trongP@ssw0rd123!"
 
-        # 应该能成功创建，但会记录警告
         crypto = CryptoManager(password=strong_password, iterations=low_iterations)
 
         self.assertEqual(crypto.iterations, low_iterations)
@@ -133,19 +129,15 @@ class TestCryptoManager(unittest.TestCase):
         weak_password = "weak"
         salt = b"custom_salt_16by"
 
-        # 不跳过验证应该失败
         with self.assertRaises(ValueError):
             CryptoManager(password=weak_password, salt=salt)
 
-        # 跳过验证应该成功
         crypto = CryptoManager(
             password=weak_password, salt=salt, skip_password_validation=True
         )
 
         self.assertEqual(crypto.password, weak_password)
         crypto.close()
-
-    # ==================== 加密解密测试 ====================
 
     def test_encrypt_decrypt_string(self):
         """测试字符串加密解密
@@ -261,8 +253,6 @@ class TestCryptoManager(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.crypto.encrypt_bytes("string")  # type: ignore
 
-    # ==================== 密码管理测试 ====================
-
     def test_validate_password_strength(self):
         """测试密码强度验证
 
@@ -348,8 +338,6 @@ class TestCryptoManager(unittest.TestCase):
         self.crypto.change_password(weak_password, validate_strength=False)
         self.assertEqual(self.crypto.password, weak_password)
 
-    # ==================== 密钥持久化测试 ====================
-
     def test_get_key_info(self):
         """测试获取密钥信息
 
@@ -431,8 +419,6 @@ class TestCryptoManager(unittest.TestCase):
         self.assertEqual(info["iterations"], self.crypto.iterations)
         self.assertTrue(info["is_initialized"])
 
-    # ==================== 上下文管理器测试 ====================
-
     def test_context_manager(self):
         """测试上下文管理器
 
@@ -469,8 +455,6 @@ class TestCryptoManager(unittest.TestCase):
 
         # 再次关闭应该不会出错
         crypto.close()
-
-    # ==================== 工具方法测试 ====================
 
     def test_is_initialized(self):
         """测试初始化状态检查
@@ -521,8 +505,6 @@ class TestCryptoManager(unittest.TestCase):
         self.assertIn("status=", repr_str)
         self.assertIn("salt_length=", repr_str)
 
-    # ==================== 类方法测试 ====================
-
     def test_create_secure_instance(self):
         """测试创建安全实例
 
@@ -548,8 +530,6 @@ class TestCryptoManager(unittest.TestCase):
             CryptoManager.create_secure_instance("weak")
 
         self.assertIn("密码强度不足", str(context.exception))
-
-    # ==================== 边界条件测试 ====================
 
     def test_large_data_encryption(self):
         """测试大数据加密
@@ -606,8 +586,6 @@ class TestCryptoManagerEdgeCases(unittest.TestCase):
         crypto.close()  # 第三次调用不应该出错
 
         self.assertFalse(crypto.is_initialized())
-
-    # ==================== 覆盖率补充测试 ====================
 
     def test_clear_sensitive_data_without_fernet(self):
         """测试清理敏感数据（无 fernet 属性）

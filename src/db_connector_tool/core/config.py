@@ -1,33 +1,25 @@
 """配置管理模块 (ConfigManager)
 
-使用 TOML 格式进行配置管理，提供数据库连接配置的加密存储和管理功能。
+使用 TOML 格式进行配置管理，提供数据库连接配置的加密存储和管理功能，
 支持配置文件的创建、加载、保存，以及连接配置的增删改查操作。
 
 主要特性：
-    - 基于 TOML 格式的配置文件，易于阅读和编辑
-    - 全字段加密：所有连接配置字段自动加密存储
-    - 数据类型保持：序列化/反序列化机制保留原始数据类型
-    - 版本兼容性检查：支持多版本配置格式
-    - 自动备份功能：支持配置文件备份和恢复
-
-安全特性：
-    - 使用加密管理器保护敏感信息
-    - 密钥文件独立存储，增强安全性
-    - 配置文件完整性验证
-    - 支持操作系统密钥环存储（keyring）
-    - 支持环境变量密钥配置
-    - 配置文件数字签名验证
+- 基于 TOML 格式的配置文件，易于阅读和编辑
+- 全字段加密：所有连接配置字段自动加密存储
+- 数据类型保持：序列化/反序列化机制保留原始数据类型
+- 版本兼容性检查：支持多版本配置格式
+- 自动备份功能：支持配置文件备份和恢复
 
 使用示例：
-    >>> from db_connector_tool.core.config import ConfigManager
-    >>>
-    >>> # 创建配置管理器
-    >>> config_manager = ConfigManager("my_app", "database.toml")
-    >>>
-    >>> # 使用上下文管理器
-    >>> with ConfigManager("my_app") as config_manager:
-    ...     config_manager.add_config("test", {"host": "localhost", "port": 5432})
-    ...     config = config_manager.get_config("test")
+>>> from db_connector_tool.core.config import ConfigManager
+>>>
+>>> # 创建配置管理器
+>>> config_manager = ConfigManager("my_app", "database.toml")
+>>>
+>>> # 使用上下文管理器
+>>> with ConfigManager("my_app") as config_manager:
+...     config_manager.add_config("test", {"host": "localhost", "port": 5432})
+...     config = config_manager.get_config("test")
 """
 
 import getpass
@@ -76,50 +68,37 @@ _module_lock = threading.Lock()
 class ConfigManager:
     """配置管理器类 (Config Manager)
 
-    管理数据库连接配置的加密存储，使用TOML格式配置文件。
-    提供连接配置的增删改查功能，所有敏感信息都会自动加密。
-    该类支持上下文管理器协议，可使用 `with` 语句自动管理敏感数据的清理。
+    管理数据库连接配置的加密存储，使用TOML格式配置文件，
+    提供连接配置的增删改查功能，所有敏感信息都会自动加密，
+    支持上下文管理器协议，可使用 `with` 语句自动管理敏感数据的清理。
 
     主要功能：
-        - 连接配置的增删改查操作
-        - 配置文件的创建、加载、保存
-        - 全字段加密存储
-        - 配置版本管理和备份
-        - 密钥轮换和安全审计
-        - 配置文件数字签名验证
+    - 连接配置的增删改查操作
+    - 配置文件的创建、加载、保存
+    - 全字段加密存储
+    - 配置版本管理和备份
+    - 密钥轮换和安全审计
+    - 配置文件数字签名验证
 
     类属性：
-        OPERATION_ADD: 添加配置操作类型
-        OPERATION_REMOVE: 删除配置操作类型
-        OPERATION_UPDATE: 更新配置操作类型
-        OPERATION_ROTATE_KEY: 密钥轮换操作类型
-
-    安全特性：
-        - 使用加密管理器保护敏感信息
-        - 支持操作系统密钥环存储（keyring）
-        - 支持环境变量密钥配置
-        - 文件权限保护（Windows/Unix）
-        - 配置文件数字签名验证
-        - 审计日志记录
-
-    性能优化：
-        - 配置文件缓存机制
-        - 加密数据类型保持
-        - 自动版本号管理
+    - OPERATION_ADD: 添加配置操作类型
+    - OPERATION_REMOVE: 删除配置操作类型
+    - OPERATION_UPDATE: 更新配置操作类型
+    - OPERATION_ROTATE_KEY: 密钥轮换操作类型
 
     异常处理：
-        - ConfigError: 配置相关操作失败时抛出
-        - CryptoError: 加密相关操作失败时抛出
-        - ValueError: 参数验证失败时抛出
+    - ConfigError: 配置相关操作失败
+    - CryptoError: 加密相关操作失败
+    - ValueError: 参数验证失败
 
     使用示例：
-        >>> # 基本使用
-        >>> config_manager = ConfigManager("my_app", "database.toml")
-        >>>
-        >>> # 使用上下文管理器
-        >>> with ConfigManager("my_app") as config_manager:
-        ...     config_manager.add_config("test", {"host": "localhost", "port": 5432})
-        ...     config = config_manager.get_config("test")
+    >>> # 基本使用
+    >>> config_manager = ConfigManager("my_app", "database.toml")
+    >>>
+    >>> # 使用上下文管理器
+    >>> with ConfigManager("my_app") as config_manager:
+    ...     config_manager.add_config("test", {"host": "localhost", "port": 5432})
+    ...     config = config_manager.get_config("test")
     """
 
     # 操作类型常量
@@ -140,7 +119,7 @@ class ConfigManager:
     ) -> None:
         """初始化配置管理器
 
-        创建新的配置管理器实例，自动初始化加密系统和配置文件。
+        创建新的配置管理器实例，自动初始化加密系统和配置文件，
         支持多种密钥存储方式（操作系统密钥环、环境变量、文件）。
 
         Args:
@@ -148,18 +127,7 @@ class ConfigManager:
             config_file: 配置文件名，默认为"connections.toml"
 
         Raises:
-            ConfigError: 当配置文件初始化失败时
-
-        Security:
-            - 优先使用操作系统密钥环存储加密密钥
-            - 其次尝试环境变量密钥
-            - 最后回退到文件存储（安全性较低）
-
-        Process:
-            1. 检查依赖项可用性（类级别，只执行一次）
-            2. 初始化加密管理器
-            3. 确保配置文件存在
-            4. 加载或创建默认配置
+            ConfigError: 配置文件初始化失败
 
         Example:
             >>> # 基本初始化
@@ -175,9 +143,7 @@ class ConfigManager:
         self.config_dir = PathHelper.get_user_config_dir(app_name)
         self.config_path = self.config_dir / config_file
         self.crypto: Optional[CryptoManager] = None
-        # 配置缓存
         self._config_cache: Optional[Dict[str, Any]] = None
-        # 配置文件最后修改时间
         self._config_mtime: Optional[float] = None
 
         # 检查依赖可用性（类级别，只执行一次，线程安全）
@@ -269,7 +235,7 @@ class ConfigManager:
         """关闭配置管理器，清理敏感数据
 
         这是一个公开的API方法，用于手动清理敏感数据。
-        当不使用上下文管理器时，应在使用完毕后调用此方法。
+        不使用上下文管理器时，应在使用完毕后调用此方法。
 
         Security:
             - 清理加密管理器中的敏感数据
@@ -363,7 +329,7 @@ class ConfigManager:
         同时初始化加密管理器。
 
         Raises:
-            ConfigError: 当配置文件创建或初始化失败时
+            ConfigError: 配置文件创建或初始化失败
 
         Process:
             1. 加载或创建加密密钥
@@ -388,7 +354,7 @@ class ConfigManager:
             3. 文件存储 - 基础安全（仅作为后备）
 
         Raises:
-            ConfigError: 当密钥加载或创建失败时
+            ConfigError: 密钥加载或创建失败
 
         Security:
             - 优先使用操作系统密钥环存储加密密钥
@@ -432,7 +398,7 @@ class ConfigManager:
             key_data: 包含password和salt的密钥数据字典
 
         Raises:
-            ConfigError: 当密钥数据无效时
+            ConfigError: 密钥数据无效
 
         Security:
             - 验证密钥数据格式完整性
@@ -478,11 +444,11 @@ class ConfigManager:
     def _load_or_create_crypto_key(self) -> None:
         """加载或创建加密密钥（文件回退方案）
 
-        当keyring不可用时，使用文件存储加密密钥。
+        keyring不可用时，使用文件存储加密密钥。
         注意：此方案的安全性低于keyring，仅作为后备方案。
 
         Raises:
-            ConfigError: 当密钥加载或创建失败时
+            ConfigError: 密钥加载或创建失败
 
         Security:
             - 优先使用环境变量中的密钥
@@ -521,7 +487,7 @@ class ConfigManager:
             key_file: 密钥文件路径
 
         Raises:
-            ConfigError: 当密钥加载失败时
+            ConfigError: 密钥加载失败
 
         Security:
             - 设置文件权限为仅所有者可读写
@@ -585,7 +551,7 @@ class ConfigManager:
             file_path: 文件路径
 
         Raises:
-            ConfigError: 当权限设置失败时
+            ConfigError: 权限设置失败
         """
         try:
             system = platform.system().lower()
@@ -654,7 +620,7 @@ class ConfigManager:
     def _handle_crypto_error(self, key_file: Path, crypto_error: CryptoError) -> None:
         """处理加密错误：删除旧密钥并创建新的
 
-        当解密现有密钥文件失败时，删除旧文件并创建新密钥。
+        解密现有密钥文件失败时，删除旧文件并创建新密钥。
         这通常发生在密钥格式变更或密钥损坏时。
 
         Args:
@@ -662,7 +628,7 @@ class ConfigManager:
             crypto_error: 加密错误异常
 
         Raises:
-            ConfigError: 当删除旧密钥文件失败时
+            ConfigError: 删除旧密钥文件失败
 
         Security:
             - 删除损坏的密钥文件
@@ -692,7 +658,7 @@ class ConfigManager:
         包括版本、应用名称、连接字典和元数据。
 
         Raises:
-            ConfigError: 当默认配置创建失败时
+            ConfigError: 默认配置创建失败
 
         Process:
             1. 构建默认配置字典
@@ -733,7 +699,7 @@ class ConfigManager:
             operation: 操作类型（update, add, remove, rotate_key）
 
         Raises:
-            ConfigError: 当配置文件保存失败时
+            ConfigError: 配置文件保存失败
 
         Process:
             1. 更新最后修改时间
@@ -841,7 +807,7 @@ class ConfigManager:
             config: 要验证的配置字典
 
         Raises:
-            ConfigError: 当配置结构无效时
+            ConfigError: 配置结构无效
 
         Validation Rules:
             - 必须包含 version, app_name, connections, metadata 字段
@@ -891,7 +857,7 @@ class ConfigManager:
             context: 上下文描述，用于错误消息
 
         Raises:
-            ConfigError: 当缺少必需字段时
+            ConfigError: 缺少必需字段
         """
         for field in required_fields:
             if field not in data:
@@ -947,7 +913,7 @@ class ConfigManager:
             field_name: 字段名称，用于错误消息
 
         Raises:
-            ConfigError: 当类型不匹配时
+            ConfigError: 类型不匹配
         """
         if not isinstance(value, expected_type):
             raise ConfigError(f"{field_name}必须是{expected_type.__name__}类型")
@@ -955,7 +921,7 @@ class ConfigManager:
     def add_config(self, name: str, connection_config: Dict[str, Any]) -> None:
         """添加数据库连接配置
 
-        添加新的数据库连接配置到配置文件中，所有字段会自动加密存储。
+        添加新的数据库连接配置到配置文件中，所有字段会自动加密存储，
         连接名称作为唯一标识符，不能重复。
 
         Args:
@@ -963,22 +929,8 @@ class ConfigManager:
             connection_config: 连接配置字典，包含数据库连接所需的参数
 
         Raises:
-            ConfigError: 当连接已存在或添加失败时
-            ValueError: 当连接名称为空或配置无效时
-
-        Security:
-            - 所有配置字段都会自动加密存储
-            - 连接名称作为唯一标识符，不能重复
-            - 配置变更会自动记录到审计日志
-
-        Process:
-            1. 验证连接名称和配置格式
-            2. 检查连接是否已存在
-            3. 确保加密管理器已初始化
-            4. 加密连接配置
-            5. 递增配置版本号
-            6. 保存配置文件
-            7. 记录操作日志
+            ConfigError: 连接已存在或添加失败
+            ValueError: 连接名称为空或配置无效
 
         Example:
             >>> config = {
@@ -1024,7 +976,7 @@ class ConfigManager:
             name: 连接名称
 
         Raises:
-            ValueError: 当连接名称无效时
+            ValueError: 连接名称无效
 
         Validation Rules:
             - 不能为空且必须是字符串
@@ -1056,7 +1008,7 @@ class ConfigManager:
             connection_config: 连接配置字典
 
         Raises:
-            ValueError: 当连接配置无效时
+            ValueError: 连接配置无效
 
         Validation Rules:
             - 不能为空且必须是字典
@@ -1079,7 +1031,7 @@ class ConfigManager:
             Dict[str, Any]: 配置字典
 
         Raises:
-            ConfigError: 当配置文件格式无效或版本不支持时
+            ConfigError: 配置文件格式无效或版本不支持
 
         Process:
             1. 检查配置文件最后修改时间
@@ -1125,7 +1077,7 @@ class ConfigManager:
             bool: 签名是否有效
 
         Raises:
-            ConfigError: 当签名验证失败时
+            ConfigError: 签名验证失败
         """
         try:
             signature = config.get("metadata", {}).get("signature", "")
@@ -1191,7 +1143,7 @@ class ConfigManager:
         确保加密管理器已初始化
 
         Raises:
-            ConfigError: 当加密管理器未初始化时
+            ConfigError: 加密管理器未初始化
         """
         if self.crypto is None:
             raise ConfigError("加密管理器未初始化，无法处理敏感信息")
@@ -1319,7 +1271,7 @@ class ConfigManager:
             config: 配置字典
 
         Raises:
-            ConfigError: 当版本号递增导致主版本号发生不合理变化时
+            ConfigError: 版本号递增导致主版本号发生不合理变化
 
         Process:
             1. 解析当前版本号（格式：x.y.z）
@@ -1388,7 +1340,7 @@ class ConfigManager:
             tuple[int, int, int]: (主版本号, 次版本号, 修订号)
 
         Raises:
-            ValueError: 当版本号格式无效时
+            ValueError: 版本号格式无效
         """
         version_parts = version.split(".")
         return int(version_parts[0]), int(version_parts[1]), int(version_parts[2])
@@ -1440,8 +1392,8 @@ class ConfigManager:
             name: 连接名称
 
         Raises:
-            ConfigError: 当连接不存在或删除失败时
-            ValueError: 当连接名称无效时
+            ConfigError: 连接不存在或删除失败
+            ValueError: 连接名称无效
 
         Security:
             - 删除操作不可逆，建议先备份
@@ -1483,7 +1435,7 @@ class ConfigManager:
             name: 连接名称
 
         Raises:
-            ConfigError: 当连接不存在时
+            ConfigError: 连接不存在
 
         Process:
             1. 检查连接名称是否在配置中
@@ -1503,8 +1455,8 @@ class ConfigManager:
             connection_config: 新的连接配置字典，包含更新后的连接参数
 
         Raises:
-            ConfigError: 当连接不存在或更新失败时
-            ValueError: 当连接名称或配置无效时
+            ConfigError: 连接不存在或更新失败
+            ValueError: 连接名称或配置无效
 
         Security:
             - 更新操作会重新加密所有配置字段
@@ -1561,8 +1513,8 @@ class ConfigManager:
             Dict[str, Any]: 解密后的连接配置字典，包含原始连接参数
 
         Raises:
-            ConfigError: 当连接不存在或获取失败时
-            ValueError: 当连接名称无效时
+            ConfigError: 连接不存在或获取失败
+            ValueError: 连接名称无效
 
         Security:
             - 返回的解密配置包含敏感信息，使用后应及时清理
@@ -1611,7 +1563,7 @@ class ConfigManager:
             List[str]: 连接名称列表，按配置文件中的顺序排列
 
         Raises:
-            ConfigError: 当列出连接失败时
+            ConfigError: 列出连接失败
 
         Process:
             1. 加载配置文件
@@ -1719,7 +1671,7 @@ class ConfigManager:
             Path: 备份文件路径
 
         Raises:
-            ConfigError: 当备份失败时
+            ConfigError: 备份失败
 
         Security:
             - 备份文件包含加密数据，应妥善保管
@@ -1760,7 +1712,7 @@ class ConfigManager:
             str: 新的密钥版本号
 
         Raises:
-            ConfigError: 当密钥轮换失败时
+            ConfigError: 密钥轮换失败
 
         Security:
             - 密钥轮换会重新加密所有连接配置
@@ -1797,7 +1749,7 @@ class ConfigManager:
             str: 新的密钥版本号
 
         Raises:
-            ConfigError: 当密钥轮换失败时
+            ConfigError: 密钥轮换失败
 
         Security:
             - 自动备份配置文件
