@@ -232,6 +232,56 @@ class TestSQLAlchemyDriver(unittest.TestCase):
         driver.disconnect()
         driver.disconnect()
 
+    def test_str_representation(self) -> None:
+        """测试 __str__ 方法"""
+        driver = SQLAlchemyDriver(self.base_config)
+        str_repr = str(driver)
+        self.assertIn("SQLAlchemyDriver", str_repr)
+        self.assertIn("sqlite", str_repr)
+        self.assertIn("connected: False", str_repr)
+
+    def test_repr_representation(self) -> None:
+        """测试 __repr__ 方法"""
+        driver = SQLAlchemyDriver(self.base_config)
+        repr_repr = repr(driver)
+        self.assertIn("SQLAlchemyDriver", repr_repr)
+        self.assertIn("type='sqlite'", repr_repr)
+        self.assertIn("database=':memory:'", repr_repr)
+        self.assertIn("connected=False", repr_repr)
+
+    def test_str_with_connection(self) -> None:
+        """测试有连接时的 __str__ 方法"""
+        config = {
+            "type": "mysql",
+            "host": "localhost",
+            "port": 3306,
+            "database": "test_db",
+            "username": "user",
+            "password": "password",
+        }
+        driver = SQLAlchemyDriver(config)
+        driver.engine = MagicMock()
+        str_repr = str(driver)
+        self.assertIn("mysql", str_repr)
+        self.assertIn("connected: True", str_repr)
+
+    def test_repr_with_mysql_config(self) -> None:
+        """测试 MySQL 配置的 __repr__ 方法"""
+        config = {
+            "type": "mysql",
+            "host": "localhost",
+            "port": 3306,
+            "database": "test_db",
+            "username": "user",
+            "password": "password",
+        }
+        driver = SQLAlchemyDriver(config)
+        repr_repr = repr(driver)
+        self.assertIn("type='mysql'", repr_repr)
+        self.assertIn("host='localhost'", repr_repr)
+        self.assertIn("port='3306'", repr_repr)
+        self.assertIn("database='test_db'", repr_repr)
+
 
 class TestSQLAlchemyDriverAdvanced(unittest.TestCase):
     """测试 SQLAlchemyDriver 的高级功能"""

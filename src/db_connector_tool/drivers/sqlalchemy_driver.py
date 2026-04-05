@@ -102,7 +102,7 @@ def parse_kingbase_version(self, connection: Any) -> Tuple[int, ...]:
     return tuple(int(x) for x in m.group(1, 2, 3) if x is not None)
 
 
-# 为 PostgreSQL 方言设置版本解析方法
+# 为 PostgreSQL 方言设置自定义版本解析方法，用于支持 Kingbase 数据库
 # pylint: disable=protected-access
 PGDialect._get_server_version_info = parse_kingbase_version
 
@@ -270,6 +270,35 @@ class SQLAlchemyDriver:
         self.session = None
         self._validate_config()
 
+    def __str__(self) -> str:
+        """返回 SQLAlchemyDriver 的用户友好字符串表示
+
+        Returns:
+            格式为 "SQLAlchemyDriver('database_type', connected: True/False)" 的字符串
+        """
+        db_type = self.config.get("type", "unknown")
+        is_connected = self.engine is not None
+        return f"SQLAlchemyDriver('{db_type}', connected: {is_connected})"
+
+    def __repr__(self) -> str:
+        """返回 SQLAlchemyDriver 的详细表示，用于调试
+
+        Returns:
+            包含完整配置信息的字符串，用于调试
+        """
+        db_type = self.config.get("type", "unknown")
+        host = self.config.get("host", "N/A")
+        port = self.config.get("port", "N/A")
+        database = self.config.get("database", "N/A")
+        is_connected = self.engine is not None
+        return (
+            f"SQLAlchemyDriver(type='{db_type}', "
+            f"host='{host}', "
+            f"port='{port}', "
+            f"database='{database}', "
+            f"connected={is_connected})"
+        )
+
     def __enter__(self) -> "SQLAlchemyDriver":
         """上下文管理器入口
 
@@ -311,10 +340,21 @@ class SQLAlchemyDriver:
     def _validate_config(self) -> None:
         """验证数据库连接配置
 
-        检查配置字典中是否包含所有必需的参数，以及数据库类型是否受支持。
+        检查配置字典中是否包含所有必需的参数，以及数据库类型是否受支持，
+        确保配置的完整性和有效性，为后续的连接建立做好准备。
 
         Raises:
             DriverError: 当配置无效时抛出，包含具体的错误信息
+
+        Process:
+            1. 验证数据库类型是否在支持列表中
+            2. 检查配置中是否包含所有必需参数
+            3. 验证必需参数是否非空
+
+        Note:
+            - 不区分数据库类型的大小写
+            - 必需参数列表根据数据库类型从 DB_CONFIGS 中获取
+            - 空字符串或 None 值都被视为无效参数
         """
 
         db_type = self.config.get("type", "").lower()
@@ -337,13 +377,26 @@ class SQLAlchemyDriver:
         """构建数据库连接URL
 
         根据配置信息构建 SQLAlchemy 格式的数据库连接URL，
-        对于包含特殊字符的密码、用户名和主机名，会进行URL编码处理。
+        对于包含特殊字符的密码、用户名和主机名，会进行URL编码处理，
+        确保连接URL的正确性和安全性。
 
         Returns:
             str: SQLAlchemy 格式的数据库连接URL
 
         Raises:
             DriverError: 当构建URL过程中发生错误时
+
+        Process:
+            1. 获取对应数据库类型的URL模板
+            2. 设置默认端口（如未配置）
+            3. 对用户名、密码、主机名进行URL编码
+            4. 使用配置参数格式化URL模板
+
+        Note:
+            - 使用 urllib.parse.quote_plus 进行URL编码
+            - 支持特殊字符如 @、:、/、空格等的正确编码
+            - IPv6 地址会被正确编码
+            - 端口使用数据库类型的默认值（如未指定）
         """
 
         db_type = self.config["type"].lower()
@@ -395,14 +448,14 @@ class SQLAlchemyDriver:
 
             connection_url = self._build_connection_url()
 
-            # 配置连接池参数
+            # 配置连接池参数（基于生产环境最佳实践）
             pool_config = {
-                "pool_size": 5,  # 连接池大小
-                "max_overflow": 10,  # 最大溢出连接数
-                "pool_timeout": 30,  # 连接超时时间（秒）
-                "pool_pre_ping": True,  # 连接前ping测试
-                "pool_recycle": 3600,  # 连接回收时间（秒）
-                "echo": False,  # 关闭SQL日志
+                "pool_size": 5,  # 连接池常驻连接数，保持适度的并发能力
+                "max_overflow": 10,  # 最大溢出连接数，应对突发流量
+                "pool_timeout": 30,  # 获取连接超时时间（秒），避免长时间阻塞
+                "pool_pre_ping": True,  # 连接前ping测试，自动检测失效连接
+                "pool_recycle": 3600,  # 连接回收时间（秒），防止长时间闲置连接失效
+                "echo": False,  # 关闭SQL日志，生产环境建议关闭
             }
 
             self.engine = create_engine(connection_url, **pool_config)
@@ -501,15 +554,29 @@ class SQLAlchemyDriver:
         """执行连接测试
 
         执行简单的查询来验证数据库连接是否正常工作，
-        对于不同类型的数据库使用相应的测试查询。
+        对于不同类型的数据库使用相应的测试查询，
+        确保数据库引擎和连接池正常工作。
 
         Returns:
             bool: 连接测试是否成功
 
         Note:
-            - Oracle 数据库使用特殊的测试查询
-            - 其他数据库使用标准测试查询
+            - Oracle 数据库使用特殊的测试查询 "SELECT 1 FROM DUAL"
+            - 其他数据库使用标准测试查询 "SELECT 1"
             - 测试失败会记录警告日志但不抛出异常
+            - 测试成功后会立即释放连接，不占用连接池资源
+
+        Process:
+            1. 检查数据库引擎是否已初始化
+            2. 根据数据库类型选择合适的测试查询
+            3. 建立临时连接并执行查询
+            4. 获取查询结果验证连接有效性
+            5. 释放临时连接
+
+        Security:
+            - 测试查询不涉及任何用户数据
+            - 使用参数化查询的方式执行（虽然此查询不需要参数）
+            - 连接用完即释放，避免资源泄漏
         """
         if self.engine is None:
             logger.warning("连接测试失败: 数据库引擎未初始化")
@@ -561,21 +628,68 @@ class SQLAlchemyDriver:
         columns = result.keys()
         return [dict(zip(columns, row)) for row in result.fetchall()]
 
+    def execute_command(self, command: str) -> int:
+        """执行SQL命令（INSERT/UPDATE/DELETE等）
+
+        执行SQL命令，如INSERT、UPDATE、DELETE等，
+        返回受影响的行数。
+
+        Args:
+            command: SQL命令语句
+
+        Returns:
+            int: 受影响的行数
+
+        Raises:
+            QueryError: 当命令执行失败时
+
+        Example:
+            >>> # 更新操作
+            >>> affected = driver.execute_command(
+            ...     "UPDATE users SET status = 'active' WHERE id = 1"
+            ... )
+            >>> print(f"更新了 {affected} 行")
+
+            >>> # 插入操作
+            >>> affected = driver.execute_command(
+            ...     "INSERT INTO users (name, email) VALUES ('John', 'john@example.com')"
+            ... )
+            >>> print(f"插入了 {affected} 行")
+        """
+        return self._execute_sql(command, commit=True)
+
     def _execute_sql(
         self, sql: str, parameters: Dict[str, Any] | None = None, commit: bool = False
     ) -> Any:
         """执行SQL语句（内部方法）
 
+        统一的SQL执行方法，处理查询和命令两种场景，
+        支持参数化查询，自动验证SQL安全性，确保数据库操作的可靠性。
+
         Args:
-            sql: SQL语句
-            parameters: SQL参数字典
-            commit: 是否提交事务
+            sql: SQL语句字符串
+            parameters: SQL参数字典，用于参数化查询，防止SQL注入
+            commit: 是否提交事务，True用于INSERT/UPDATE/DELETE等命令
 
         Returns:
             Any: 执行结果
+                - 当 commit=False 时返回 ResultProxy 对象
+                - 当 commit=True 时返回受影响的行数
 
         Raises:
-            QueryError: 当执行失败时
+            QueryError: 当SQL执行失败时抛出，包含具体的错误信息
+
+        Process:
+            1. 确保数据库连接已建立
+            2. 验证SQL语句的安全性
+            3. 执行SQL语句（带参数或不带参数）
+            4. 根据commit标志决定是否提交事务
+            5. 返回相应的执行结果
+
+        Note:
+            - 这是内部方法，不建议直接调用
+            - 外部调用应使用 execute_query() 或 execute_command()
+            - 参数化查询使用 :name 格式的占位符
         """
         try:
             if not self.engine:
@@ -605,20 +719,36 @@ class SQLAlchemyDriver:
     def _validate_sql_query(self, query: str) -> None:
         """验证SQL查询语句，防止SQL注入攻击
 
-        对SQL查询语句进行安全验证，检测潜在的SQL注入攻击，
-        确保查询语句符合安全标准。
+        对SQL查询语句进行多层安全验证，检测潜在的SQL注入攻击模式，
+        使用白名单和黑名单结合的策略，确保查询语句符合安全标准。
 
         Args:
-            query: SQL查询语句
+            query: SQL查询语句字符串
 
         Raises:
             ValueError: 当查询语句包含潜在的注入攻击代码时
 
         Security:
-            - 检查查询长度限制
-            - 检测危险的SQL关键字组合
-            - 验证合法的DDL和DML操作
+            - 检查查询长度限制（最大10000字符）
+            - 检测危险的SQL关键字组合（DROP、TRUNCATE、GRANT等）
+            - 验证合法的DDL和DML操作（白名单机制）
             - 检测可疑的SQL注释模式
+            - 检测经典SQL注入模式（布尔盲注、UNION注入、时间盲注等）
+            - 检测系统命令执行和文件操作相关的危险模式
+
+        Process:
+            1. 检查查询语句长度是否超过限制
+            2. 验证是否为合法的DDL操作（白名单）
+            3. 验证是否为合法的DML操作（白名单）
+            4. 检测危险模式（黑名单）
+            5. 检测可疑的注释模式
+            6. 记录合法操作的日志
+
+        Note:
+            - 白名单优先：合法的DDL/DML操作会被允许
+            - 黑名单兜底：危险操作会被拦截
+            - 即使通过验证，仍建议使用参数化查询
+            - 查询长度限制可以防止大规模注入攻击
         """
 
         # 检查查询长度
@@ -699,36 +829,6 @@ class SQLAlchemyDriver:
             logger.debug("允许合法的DDL操作: %s...", query[:100])
         elif is_safe_dml:
             logger.debug("允许合法的DML操作: %s...", query[:100])
-
-    def execute_command(self, command: str) -> int:
-        """执行SQL命令（INSERT/UPDATE/DELETE等）
-
-        执行SQL命令，如INSERT、UPDATE、DELETE等，
-        返回受影响的行数。
-
-        Args:
-            command: SQL命令语句
-
-        Returns:
-            int: 受影响的行数
-
-        Raises:
-            QueryError: 当命令执行失败时
-
-        Example:
-            >>> # 更新操作
-            >>> affected = driver.execute_command(
-            ...     "UPDATE users SET status = 'active' WHERE id = 1"
-            ... )
-            >>> print(f"更新了 {affected} 行")
-
-            >>> # 插入操作
-            >>> affected = driver.execute_command(
-            ...     "INSERT INTO users (name, email) VALUES ('John', 'john@example.com')"
-            ... )
-            >>> print(f"插入了 {affected} 行")
-        """
-        return self._execute_sql(command, commit=True)
 
     def get_tables(self) -> List[str]:
         """获取数据库中的所有表名
