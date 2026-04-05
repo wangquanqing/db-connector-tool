@@ -51,11 +51,8 @@ all = [
   "python-dateutil>=2.8.0,<3",
 ]
 dev = [
-  "pytest>=7.0.0",
-  "pytest-cov>=4.0.0",
-  "black>=23.0.0",
-  "isort>=5.12.0",
-  "pyright>=1.0.0",
+  "pylint>=4.0.0",
+  "coverage>=7.0.0",
 ]
 
 [project.urls]
@@ -75,10 +72,10 @@ path = "src/db_connector_tool/__about__.py"
 
 [tool.hatch.envs.types]
 extra-dependencies = [
-  "mypy>=1.0.0",
+  "pyright>=1.1.0",
 ]
 [tool.hatch.envs.types.scripts]
-check = "mypy --install-types --non-interactive {args:src/db_connector_tool tests}"
+check = "pyright {args:src/db_connector_tool tests}"
 
 [tool.coverage.run]
 source = ["src/db_connector_tool"]
