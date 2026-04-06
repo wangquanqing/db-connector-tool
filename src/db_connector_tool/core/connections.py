@@ -19,6 +19,7 @@
 - 提供简洁易用的用户接口
 """
 
+import re
 import threading
 import time
 from typing import Any, Dict, List, Set
@@ -26,29 +27,12 @@ from typing import Any, Dict, List, Set
 from ..drivers.sqlalchemy_driver import SQLAlchemyDriver
 from ..utils.logging_utils import get_logger
 from .config import ConfigManager
-from .exceptions import ConfigError, ConnectionError, DatabaseError
+from .exceptions import ConfigError
+from .exceptions import ConnectionError as DBConnectionError
+from .exceptions import DatabaseError
 
 # 获取模块级别的日志记录器
 logger = get_logger(__name__)
-
-# 错误消息常量
-CONNECTION_NOT_FOUND_MSG = "连接配置不存在: {}"
-CONNECTION_ALREADY_EXISTS_MSG = "连接配置已存在: {}"
-
-# 支持的数据库类型
-SUPPORTED_DATABASE_TYPES: Set[str] = {
-    "oracle",
-    "postgresql",
-    "mysql",
-    "mssql",
-    "sqlite",
-    "gbasedbt",
-}
-
-# 默认配置参数
-DEFAULT_MAX_IDLE_TIME = 300  # 5分钟
-DEFAULT_CONNECTION_TIMEOUT = 30  # 30秒连接超时
-DEFAULT_POOL_RECYCLE = 3600  # 1小时连接回收
 
 
 class ConnectionInfo:
@@ -128,7 +112,11 @@ class ConnectionInfo:
         created_str = time.strftime(
             "%Y-%m-%d %H:%M:%S", time.localtime(self.created_at)
         )
-        last_query_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(self.last_query_time)) if self.last_query_time else "N/A"
+        last_query_str = (
+            time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(self.last_query_time))
+            if self.last_query_time
+            else "N/A"
+        )
         return (
             f"ConnectionInfo(use_count={self.use_count}, "
             f"last_used={last_used_str}, created_at={created_str}, "
@@ -167,6 +155,25 @@ class DatabaseManager:
         >>> results = db_manager.execute_query("mysql_db", "SELECT * FROM users")
     """
 
+    # 错误消息常量
+    CONNECTION_NOT_FOUND_MSG = "连接配置不存在: {}"
+    CONNECTION_ALREADY_EXISTS_MSG = "连接配置已存在: {}"
+
+    # 支持的数据库类型
+    SUPPORTED_DATABASE_TYPES: Set[str] = {
+        "oracle",
+        "postgresql",
+        "mysql",
+        "mssql",
+        "sqlite",
+        "gbasedbt",
+    }
+
+    # 默认配置参数
+    DEFAULT_MAX_IDLE_TIME = 300  # 5分钟
+    DEFAULT_CONNECTION_TIMEOUT = 30  # 30秒连接超时
+    DEFAULT_POOL_RECYCLE = 3600  # 1小时连接回收
+
     def __init__(
         self, app_name: str = "db_connector_tool", config_file: str = "connections.toml"
     ) -> None:
@@ -201,10 +208,10 @@ class DatabaseManager:
                 "start_time": time.time(),
                 "last_cleanup_time": time.time(),
             }
-            logger.info(f"数据库管理器初始化成功: {app_name}")
+            logger.info("数据库管理器初始化成功: %s", app_name)
         except Exception as e:
-            logger.error(f"初始化数据库管理器失败: {str(e)}")
-            raise ConfigError(f"数据库管理器初始化失败: {str(e)}")
+            logger.error("初始化数据库管理器失败: %s", str(e))
+            raise ConfigError(f"数据库管理器初始化失败: {str(e)}") from e
 
     def add_connection(self, name: str, connection_config: Dict[str, Any]) -> None:
         """
@@ -235,18 +242,19 @@ class DatabaseManager:
             ... }
             >>> db_manager.add_connection("mysql_db", config)
         """
+
         def _add_connection():
             # 检查连接是否已存在
             existing_connections = self.list_connections()
             if name in existing_connections:
-                raise ConfigError(CONNECTION_ALREADY_EXISTS_MSG.format(name))
+                raise ConfigError(self.CONNECTION_ALREADY_EXISTS_MSG.format(name))
 
             # 简化配置验证
             self._validate_basic_config(connection_config)
 
             # 保存到配置管理器
-            self.config_manager.add_connection(name, connection_config)
-            logger.info(f"数据库连接配置已创建: {name}")
+            self.config_manager.add_config(name, connection_config)
+            logger.info("数据库连接配置已创建: %s", name)
 
         with self._lock:
             self._safe_operation("数据库连接配置创建", name, _add_connection)
@@ -278,8 +286,8 @@ class DatabaseManager:
 
         # 验证数据库类型
         db_type = config.get("type", "").lower()
-        if db_type not in SUPPORTED_DATABASE_TYPES:
-            supported_types = ", ".join(sorted(SUPPORTED_DATABASE_TYPES))
+        if db_type not in self.SUPPORTED_DATABASE_TYPES:
+            supported_types = ", ".join(sorted(self.SUPPORTED_DATABASE_TYPES))
             raise ConfigError(
                 f"不支持的数据库类型: {db_type}，支持的类型: {supported_types}"
             )
@@ -287,19 +295,28 @@ class DatabaseManager:
         # 字符串参数验证函数
         def validate_string_param(param_name, value, max_length=100):
             if not isinstance(value, str):
-                logger.warning(f"{param_name}类型无效: {type(value).__name__}")
+                logger.warning("%s类型无效: %s", param_name, type(value).__name__)
                 raise ConfigError(f"{param_name}必须是字符串类型")
             if len(value) > max_length:
-                logger.warning(f"{param_name}长度超过限制: {len(value)} > {max_length}")
+                logger.warning(
+                    "%s长度超过限制: %s > %s", param_name, len(value), max_length
+                )
                 raise ConfigError(f"{param_name}长度不能超过{max_length}个字符")
             # 检查特殊字符，防止注入攻击
-            import re
-            if re.search(r'[;\\\'\"\"]', value):
-                logger.warning(f"{param_name}包含潜在的恶意字符: {value}")
+            if re.search(r"[;\\\'\"]", value):
+                logger.warning("%s包含潜在的恶意字符: %s", param_name, value)
                 raise ConfigError(f"{param_name}包含不允许的特殊字符")
 
         # 验证字符串参数
-        string_params = ["username", "password", "host", "database", "service_name", "sid", "server"]
+        string_params = [
+            "username",
+            "password",
+            "host",
+            "database",
+            "service_name",
+            "sid",
+            "server",
+        ]
         for param in string_params:
             if param in config:
                 validate_string_param(param, config[param])
@@ -341,18 +358,14 @@ class DatabaseManager:
         if db_type == "oracle":
             if "service_name" not in config and "sid" not in config:
                 raise ConfigError("Oracle数据库必须提供service_name或sid")
-        elif db_type == "postgresql":
-            if "database" not in config:
-                raise ConfigError("PostgreSQL数据库必须提供database参数")
-        elif db_type == "mysql":
-            if "database" not in config:
-                raise ConfigError("MySQL数据库必须提供database参数")
-        elif db_type == "mssql":
-            if "database" not in config:
-                raise ConfigError("SQL Server数据库必须提供database参数")
-        elif db_type == "gbasedbt":
-            if "database" not in config:
-                raise ConfigError("GBase数据库必须提供database参数")
+        elif db_type == "postgresql" and "database" not in config:
+            raise ConfigError("PostgreSQL数据库必须提供database参数")
+        elif db_type == "mysql" and "database" not in config:
+            raise ConfigError("MySQL数据库必须提供database参数")
+        elif db_type == "mssql" and "database" not in config:
+            raise ConfigError("SQL Server数据库必须提供database参数")
+        elif db_type == "gbasedbt" and "database" not in config:
+            raise ConfigError("GBase数据库必须提供database参数")
 
     def _apply_default_config(self, config: Dict[str, Any]) -> None:
         """
@@ -399,6 +412,7 @@ class DatabaseManager:
         Example:
             >>> db_manager.remove_connection("mysql_db")
         """
+
         def _remove_connection():
             # 检查连接是否存在
             self._validate_connection_exists(name)
@@ -407,8 +421,8 @@ class DatabaseManager:
             self._cleanup_connection(name)
 
             # 删除配置
-            self.config_manager.remove_connection(name)
-            logger.info(f"连接配置已删除: {name}")
+            self.config_manager.remove_config(name)
+            logger.info("连接配置已删除: %s", name)
 
         with self._lock:
             self._safe_operation("连接配置删除", name, _remove_connection)
@@ -428,7 +442,7 @@ class DatabaseManager:
         """
         existing_connections = self.list_connections()
         if name not in existing_connections:
-            raise ConfigError(CONNECTION_NOT_FOUND_MSG.format(name))
+            raise ConfigError(self.CONNECTION_NOT_FOUND_MSG.format(name))
 
     def _cleanup_connection(self, name: str) -> None:
         """
@@ -443,7 +457,7 @@ class DatabaseManager:
         """
         with self._lock:
             if name not in self.connection_pool:
-                logger.debug(f"连接 {name} 不在连接池中，无需清理")
+                logger.debug("连接 %s 不在连接池中，无需清理", name)
                 return
 
             connection_info = self.connection_pool[name]
@@ -454,31 +468,31 @@ class DatabaseManager:
 
                 # 安全关闭连接
                 if (
-                    hasattr(connection_info.driver, "is_connected")
-                    and connection_info.driver.is_connected
+                    hasattr(connection_info.driver, "engine")
+                    and connection_info.driver.engine
                 ):
                     try:
                         connection_info.driver.disconnect()
-                        logger.debug(f"连接 {name} 已安全关闭")
+                        logger.debug("连接 %s 已安全关闭", name)
                     except Exception as disconnect_error:
                         logger.warning(
-                            f"关闭连接 {name} 时发生异常: {str(disconnect_error)}"
+                            "关闭连接 %s 时发生异常: %s", name, str(disconnect_error)
                         )
                 else:
-                    logger.debug(f"连接 {name} 未连接或已关闭")
+                    logger.debug("连接 %s 未连接或已关闭", name)
 
             except Exception as e:
-                logger.error(f"清理连接 {name} 时发生严重异常: {str(e)}")
+                logger.error("清理连接 %s 时发生严重异常: %s", name, str(e))
             finally:
                 # 确保从连接池中移除，避免内存泄漏
                 try:
                     del self.connection_pool[name]
                     self._statistics["total_connections_closed"] += 1
-                    logger.debug(f"连接 {name} 已从连接池中移除")
+                    logger.debug("连接 %s 已从连接池中移除", name)
                 except KeyError:
-                    logger.debug(f"连接 {name} 已从连接池中移除")
+                    logger.debug("连接 %s 已从连接池中移除", name)
                 except Exception as e:
-                    logger.error(f"从连接池中移除连接 {name} 时发生异常: {str(e)}")
+                    logger.error("从连接池中移除连接 %s 时发生异常: %s", name, str(e))
 
     def update_connection(self, name: str, connection_config: Dict[str, Any]) -> None:
         """
@@ -513,6 +527,7 @@ class DatabaseManager:
             ... }
             >>> db_manager.update_connection("mysql_db", new_config)
         """
+
         def _update_connection():
             # 检查连接是否存在
             self._validate_connection_exists(name)
@@ -524,8 +539,8 @@ class DatabaseManager:
             self._cleanup_connection(name)
 
             # 更新配置
-            self.config_manager.update_connection(name, connection_config)
-            logger.info(f"连接配置已更新: {name}")
+            self.config_manager.update_config(name, connection_config)
+            logger.info("连接配置已更新: %s", name)
 
         with self._lock:
             self._safe_operation("连接配置更新", name, _update_connection)
@@ -547,7 +562,7 @@ class DatabaseManager:
             >>> config = db_manager.show_connection("mysql_db")
             >>> print(f"主机: {config['host']}")
         """
-        return self.config_manager.get_connection(name)
+        return self.config_manager.get_config(name)
 
     def list_connections(self) -> List[str]:
         """
@@ -560,7 +575,7 @@ class DatabaseManager:
             >>> connections = db_manager.list_connections()
             >>> print(f"可用的连接: {', '.join(connections)}")
         """
-        return self.config_manager.list_connections()
+        return self.config_manager.list_configs()
 
     def get_connection(
         self, name: str, config_overrides: Dict[str, Any] | None = None
@@ -578,7 +593,7 @@ class DatabaseManager:
 
         Raises:
             DatabaseError: 当获取连接失败时
-            ConnectionError: 当连接建立失败时
+            DBConnectionError: 当连接建立失败时
             ConfigError: 当连接配置不存在时
 
         Process:
@@ -623,14 +638,18 @@ class DatabaseManager:
                     try:
                         driver.connect()
                     except Exception as connect_error:
-                        logger.error(f"使用临时配置建立连接失败 {name}: {str(connect_error)}")
-                        raise ConnectionError(f"连接建立失败: {str(connect_error)}")
+                        logger.error(
+                            "使用临时配置建立连接失败 %s: %s", name, str(connect_error)
+                        )
+                        raise DBConnectionError(
+                            f"连接建立失败: {str(connect_error)}"
+                        ) from connect_error
 
                     # 创建连接信息但不加入连接池（因为是临时配置）
                     connection_info = ConnectionInfo(driver)
                     # 注意：临时配置的连接不加入连接池，避免配置冲突
 
-                    logger.info(f"使用临时配置建立数据库连接: {name}")
+                    logger.info("使用临时配置建立数据库连接: %s", name)
                     return driver
 
                 # 连接池管理逻辑（无配置覆盖时）
@@ -642,7 +661,7 @@ class DatabaseManager:
                         connection_info.driver
                     ):
                         connection_info.mark_used()
-                        logger.debug(f"使用缓存的数据库连接: {name}")
+                        logger.debug("使用缓存的数据库连接: %s", name)
                         return connection_info.driver
                     else:
                         # 连接无效，清理并重新创建
@@ -655,31 +674,39 @@ class DatabaseManager:
                     driver.connect()
                 except Exception as connect_error:
                     self._statistics["connection_errors"] += 1
-                    logger.error(f"建立数据库连接失败 {name}: {str(connect_error)}")
+                    logger.error("建立数据库连接失败 %s: %s", name, str(connect_error))
                     # 分析错误类型，提供更详细的错误信息
                     if "timeout" in str(connect_error).lower():
-                        raise ConnectionError(f"连接超时: {str(connect_error)}")
+                        raise DBConnectionError(
+                            f"连接超时: {str(connect_error)}"
+                        ) from connect_error
                     elif "refused" in str(connect_error).lower():
-                        raise ConnectionError(f"连接被拒绝: {str(connect_error)}")
+                        raise DBConnectionError(
+                            f"连接被拒绝: {str(connect_error)}"
+                        ) from connect_error
                     elif "unreachable" in str(connect_error).lower():
-                        raise ConnectionError(f"主机不可达: {str(connect_error)}")
+                        raise DBConnectionError(
+                            f"主机不可达: {str(connect_error)}"
+                        ) from connect_error
                     else:
-                        raise ConnectionError(f"连接建立失败: {str(connect_error)}")
+                        raise DBConnectionError(
+                            f"连接建立失败: {str(connect_error)}"
+                        ) from connect_error
 
                 # 创建连接信息并加入连接池
                 connection_info = ConnectionInfo(driver)
                 self.connection_pool[name] = connection_info
                 self._statistics["total_connections_created"] += 1
 
-                logger.info(f"数据库连接已建立: {name}")
+                logger.info("数据库连接已建立: %s", name)
                 return driver
 
-            except (ConfigError, ConnectionError):
+            except (ConfigError, DBConnectionError):
                 raise
             except Exception as e:
                 self._statistics["connection_errors"] += 1
-                logger.error(f"获取数据库连接失败 {name}: {str(e)}")
-                raise DatabaseError(f"数据库连接获取失败: {str(e)}")
+                logger.error("获取数据库连接失败 %s: %s", name, str(e))
+                raise DatabaseError(f"数据库连接获取失败: {str(e)}") from e
 
     def _is_connection_valid(self, driver: SQLAlchemyDriver) -> bool:
         """
@@ -697,11 +724,11 @@ class DatabaseManager:
         """
         try:
             # 第一层检查：基本属性验证
-            if not hasattr(driver, "is_connected"):
-                logger.debug("驱动实例缺少is_connected属性")
+            if not hasattr(driver, "engine"):
+                logger.debug("驱动实例缺少engine属性")
                 return False
 
-            if not driver.is_connected:
+            if not driver.engine:
                 logger.debug("驱动实例标记为未连接状态")
                 return False
 
@@ -714,11 +741,11 @@ class DatabaseManager:
             try:
                 return driver.test_connection()
             except Exception as query_error:
-                logger.debug(f"连接查询测试失败: {str(query_error)}")
+                logger.debug("连接查询测试失败: %s", str(query_error))
                 return False
 
         except Exception as e:
-            logger.debug(f"连接有效性检查失败: {str(e)}")
+            logger.debug("连接有效性检查失败: %s", str(e))
             return False
 
     def test_connection(self, name: str) -> bool:
@@ -747,51 +774,50 @@ class DatabaseManager:
             driver = self.get_connection(name)
             success = driver.test_connection()
             if success:
-                logger.info(f"连接测试成功: {name}")
+                logger.info("连接测试成功: %s", name)
             else:
-                logger.warning(f"连接测试失败: {name}")
+                logger.warning("连接测试失败: %s", name)
 
             # 测试完成后立即清理连接，避免连接池污染
             self._cleanup_connection(name)
 
             return success
-        except ConnectionError as e:
+        except DBConnectionError as e:
             # 连接错误，已经在get_connection中处理过
             try:
                 self._cleanup_connection(name)
             except Exception:
                 pass  # 忽略清理过程中的异常
-            logger.error(f"连接测试失败 {name}: {str(e)}")
+            logger.error("连接测试失败 %s: %s", name, str(e))
             return False
         except ConfigError as e:
             # 配置错误
-            logger.error(f"连接测试失败（配置错误） {name}: {str(e)}")
+            logger.error("连接测试失败（配置错误） %s: %s", name, str(e))
             return False
         except Exception as e:
-            # 其他错误
             # 确保异常情况下也清理连接
             try:
                 self._cleanup_connection(name)
             except Exception:
                 pass  # 忽略清理过程中的异常
-            
+
             # 分析错误类型，提供更详细的错误信息
             error_message = str(e)
             error_lower = error_message.lower()
-            
+
             if "timeout" in error_lower:
-                logger.error(f"连接测试失败（连接超时） {name}: {error_message}")
+                logger.error("连接测试失败（连接超时） %s: %s", name, error_message)
             elif "refused" in error_lower:
-                logger.error(f"连接测试失败（连接被拒绝） {name}: {error_message}")
+                logger.error("连接测试失败（连接被拒绝） %s: %s", name, error_message)
             elif "unreachable" in error_lower:
-                logger.error(f"连接测试失败（主机不可达） {name}: {error_message}")
+                logger.error("连接测试失败（主机不可达） %s: %s", name, error_message)
             elif "permission" in error_lower or "access denied" in error_lower:
-                logger.error(f"连接测试失败（权限错误） {name}: {error_message}")
+                logger.error("连接测试失败（权限错误） %s: %s", name, error_message)
             elif "database" in error_lower and "not found" in error_lower:
-                logger.error(f"连接测试失败（数据库不存在） {name}: {error_message}")
+                logger.error("连接测试失败（数据库不存在） %s: %s", name, error_message)
             else:
-                logger.error(f"连接测试失败（未知错误） {name}: {error_message}")
-            
+                logger.error("连接测试失败（未知错误） %s: %s", name, error_message)
+
             return False
 
     def execute_query(
@@ -830,6 +856,7 @@ class DatabaseManager:
             ...     {"age": 18}
             ... )
         """
+
         def _execute_query():
             driver = self.get_connection(connection_name)
             # 记录查询开始时间
@@ -838,18 +865,18 @@ class DatabaseManager:
             result = driver.execute_query(query, params)
             # 计算响应时间
             response_time = time.time() - start_time
-            
+
             # 更新连接信息
             if connection_name in self.connection_pool:
                 connection_info = self.connection_pool[connection_name]
                 connection_info.mark_query(response_time)
                 connection_info.mark_used()
-            
+
             return result
 
         try:
             return _execute_query()
-        except (ConfigError, ConnectionError):
+        except (ConfigError, DBConnectionError):
             raise
         except Exception as e:
             # 记录错误信息
@@ -857,6 +884,8 @@ class DatabaseManager:
                 connection_info = self.connection_pool[connection_name]
                 connection_info.mark_error(str(e))
             self._handle_exception("查询执行", connection_name, e)
+            # 确保即使_handle_exception没有抛出异常，也会抛出异常
+            raise DatabaseError("查询执行失败") from e
 
     def execute_command(
         self,
@@ -897,6 +926,7 @@ class DatabaseManager:
             ...     {"name": "Bob", "id": 1}
             ... )
         """
+
         def _execute_command():
             driver = self.get_connection(connection_name)
             # 记录命令开始时间
@@ -905,19 +935,19 @@ class DatabaseManager:
             result = driver.execute_command(command, params)
             # 计算响应时间
             response_time = time.time() - start_time
-            
+
             # 更新连接信息
             if connection_name in self.connection_pool:
                 connection_info = self.connection_pool[connection_name]
                 connection_info.mark_query(response_time)
                 connection_info.mark_transaction()
                 connection_info.mark_used()
-            
+
             return result
 
         try:
             return _execute_command()
-        except (ConfigError, ConnectionError):
+        except (ConfigError, DBConnectionError):
             raise
         except Exception as e:
             # 记录错误信息
@@ -925,6 +955,8 @@ class DatabaseManager:
                 connection_info = self.connection_pool[connection_name]
                 connection_info.mark_error(str(e))
             self._handle_exception("命令执行", connection_name, e)
+            # 确保即使_handle_exception没有抛出异常，也会抛出异常
+            raise DatabaseError("命令执行失败") from e
 
     def close_connection(self, name: str) -> None:
         """
@@ -943,9 +975,10 @@ class DatabaseManager:
         Example:
             >>> db_manager.close_connection("mysql_db")
         """
+
         def _close_connection():
             self._cleanup_connection(name)
-            logger.info(f"数据库连接已关闭: {name}")
+            logger.info("数据库连接已关闭: %s", name)
 
         with self._lock:
             self._safe_operation("连接关闭", name, _close_connection)
@@ -985,23 +1018,23 @@ class DatabaseManager:
                     logger.info("连接池为空，无需关闭连接")
                     return
 
-                logger.info(f"开始关闭所有连接，共 {total_connections} 个连接")
+                logger.info("开始关闭所有连接，共 %s 个连接", total_connections)
 
                 for name in connection_names:
                     try:
                         # 使用内部清理方法，避免递归调用close_connection
                         self._cleanup_connection(name)
                         success_count += 1
-                        logger.debug(f"连接 {name} 关闭成功")
+                        logger.debug("连接 %s 关闭成功", name)
                     except Exception as e:
                         error_count += 1
-                        logger.error(f"关闭连接 {name} 失败: {str(e)}")
+                        logger.error("关闭连接 %s 失败: %s", name, str(e))
 
                 # 最终检查连接池是否完全清空
                 remaining_connections = len(self.connection_pool)
                 if remaining_connections > 0:
                     logger.warning(
-                        f"连接池清理不完整，仍有 {remaining_connections} 个连接未清理"
+                        "连接池清理不完整，仍有 %s 个连接未清理", remaining_connections
                     )
                     # 强制清空连接池
                     self.connection_pool.clear()
@@ -1010,20 +1043,23 @@ class DatabaseManager:
                 # 记录详细汇总信息
                 if error_count > 0:
                     logger.warning(
-                        f"关闭所有连接完成，成功: {success_count}, 失败: {error_count}, 总数: {total_connections}"
+                        "关闭所有连接完成，成功: %s, 失败: %s, 总数: %s",
+                        success_count,
+                        error_count,
+                        total_connections,
                     )
                 else:
-                    logger.info(f"所有数据库连接已安全关闭，共 {success_count} 个连接")
+                    logger.info("所有数据库连接已安全关闭，共 %s 个连接", success_count)
 
             except Exception as e:
-                logger.error(f"关闭所有连接时发生严重异常: {str(e)}")
+                logger.error("关闭所有连接时发生严重异常: %s", str(e))
                 # 即使发生异常也要尝试清理连接池
                 try:
                     self.connection_pool.clear()
                     logger.info("异常情况下已强制清空连接池")
                 except Exception:
                     pass
-                raise DatabaseError(f"关闭所有连接失败: {str(e)}")
+                raise DatabaseError(f"关闭所有连接失败: {str(e)}") from e
 
     def get_connection_info(self, name: str) -> Dict[str, Any]:
         """
@@ -1045,6 +1081,7 @@ class DatabaseManager:
             >>> print(f"最后使用时间: {info['last_used']}")
             >>> print(f"错误次数: {info['connection_errors']}")
         """
+
         def _get_connection_info():
             # 检查连接是否存在
             self._validate_connection_exists(name)
@@ -1135,6 +1172,7 @@ class DatabaseManager:
             >>> cleaned_count = db_manager.cleanup_idle_connections(600)  # 10分钟
             >>> print(f"清理了 {cleaned_count} 个空闲连接")
         """
+
         def _cleanup_idle_connections():
             current_time = time.time()
             connection_names = list(self.connection_pool.keys())
@@ -1144,7 +1182,7 @@ class DatabaseManager:
                 logger.debug("连接池为空，无需清理空闲连接")
                 return 0
 
-            logger.info(f"开始清理空闲连接，最大空闲时间: {max_idle_time}秒")
+            logger.info("开始清理空闲连接，最大空闲时间: %s秒", max_idle_time)
 
             for name in connection_names:
                 if name not in self.connection_pool:
@@ -1156,25 +1194,27 @@ class DatabaseManager:
                 if idle_time > max_idle_time:
                     try:
                         logger.debug(
-                            f"连接 {name} 空闲时间 {idle_time:.1f}秒超过限制，执行清理"
+                            "连接 %s 空闲时间 %.1f秒超过限制，执行清理", name, idle_time
                         )
                         self._cleanup_connection(name)
                         cleaned_count += 1
                         self._statistics["idle_connections_cleaned"] += 1
                     except Exception as e:
-                        logger.warning(f"清理空闲连接 {name} 失败: {str(e)}")
+                        logger.warning("清理空闲连接 %s 失败: %s", name, str(e))
 
             self._statistics["last_cleanup_time"] = current_time
 
             if cleaned_count > 0:
-                logger.info(f"空闲连接清理完成，共清理 {cleaned_count} 个连接")
+                logger.info("空闲连接清理完成，共清理 %s 个连接", cleaned_count)
             else:
                 logger.debug("未发现需要清理的空闲连接")
 
             return cleaned_count
 
         with self._lock:
-            return self._safe_operation("空闲连接清理", "all", _cleanup_idle_connections)
+            return self._safe_operation(
+                "空闲连接清理", "all", _cleanup_idle_connections
+            )
 
     def get_connection_pool_status(self) -> Dict[str, Any]:
         """
@@ -1212,7 +1252,7 @@ class DatabaseManager:
                     total_response_time += connection_info.response_time
                     idle_time = current_time - connection_info.last_used
                     max_idle_time = max(max_idle_time, idle_time)
-                
+
                 # 记录每个连接的详细信息
                 connection_details[name] = {
                     "is_active": connection_info.is_active,
@@ -1228,8 +1268,12 @@ class DatabaseManager:
 
             # 计算平均值
             pool_size = len(self.connection_pool)
-            average_response_time = total_response_time / pool_size if pool_size > 0 else 0.0
-            error_rate = total_errors / (total_query_count + 1) if total_query_count > 0 else 0.0
+            average_response_time = (
+                total_response_time / pool_size if pool_size > 0 else 0.0
+            )
+            error_rate = (
+                total_errors / (total_query_count + 1) if total_query_count > 0 else 0.0
+            )
 
             return {
                 "active_connections": active_connections,
@@ -1342,7 +1386,9 @@ class DatabaseManager:
 
         return diagnosis
 
-    def _handle_exception(self, operation: str, name: str, exception: Exception) -> None:
+    def _handle_exception(
+        self, operation: str, name: str, exception: Exception
+    ) -> None:
         """
         通用异常处理方法
 
@@ -1353,12 +1399,12 @@ class DatabaseManager:
 
         Raises:
             ConfigError: 如果原始异常是ConfigError
-            ConnectionError: 如果原始异常是ConnectionError
+            DBConnectionError: 如果原始异常是DBConnectionError
             DatabaseError: 其他所有异常都会被转换为DatabaseError
         """
-        if isinstance(exception, (ConfigError, ConnectionError)):
-            raise
-        
+        if isinstance(exception, (ConfigError, DBConnectionError)):
+            raise exception
+
         error_message = f"{operation}失败 {name}: {str(exception)}"
         logger.error(error_message)
         raise DatabaseError(f"{operation}失败: {str(exception)}")
@@ -1379,15 +1425,17 @@ class DatabaseManager:
 
         Raises:
             ConfigError: 如果执行过程中发生ConfigError
-            ConnectionError: 如果执行过程中发生ConnectionError
+            DBConnectionError: 如果执行过程中发生DBConnectionError
             DatabaseError: 其他所有异常都会被转换为DatabaseError
         """
         try:
             return func(*args, **kwargs)
-        except (ConfigError, ConnectionError):
+        except (ConfigError, DBConnectionError):
             raise
         except Exception as e:
             self._handle_exception(operation, name, e)
+            # 确保即使_handle_exception没有抛出异常，也会抛出异常
+            raise DatabaseError(f"{operation}失败") from e
 
     def __str__(self) -> str:
         """返回数据库管理器的字符串表示"""

@@ -88,18 +88,17 @@ def parse_kingbase_version(self, connection: Any) -> Tuple[int, ...]:
         >>> print(version)
         (8, 6, 0)
     """
-
-    v = connection.exec_driver_sql("select pg_catalog.version()").scalar()
-    m = re.match(
+    version_string = connection.exec_driver_sql("select pg_catalog.version()").scalar()
+    version_match = re.match(
         r".*(?:PostgreSQL|EnterpriseDB) "
         r"(\d+)\.?(\d+)?(?:\.(\d+))?(?:\.\d+)?(?:devel|beta)?",
-        v,
-    ) or re.search(r"V(\d+)R(\d+)C(\d+)B(\d+)", v)
+        version_string,
+    ) or re.search(r"V(\d+)R(\d+)C(\d+)B(\d+)", version_string)
 
-    if not m:
-        raise AssertionError(f"无法从字符串 '{v}' 中解析版本信息")
+    if not version_match:
+        raise AssertionError(f"无法从字符串 '{version_string}' 中解析版本信息")
 
-    return tuple(int(x) for x in m.group(1, 2, 3) if x is not None)
+    return tuple(int(x) for x in version_match.group(1, 2, 3) if x is not None)
 
 
 # 为 PostgreSQL 方言设置自定义版本解析方法，用于支持 Kingbase 数据库
@@ -263,7 +262,6 @@ class SQLAlchemyDriver:
             ... }
             >>> oracle_driver = SQLAlchemyDriver(oracle_config)
         """
-
         self.config = config
         self.engine: Optional[Engine] = None
         self.session_factory = None
@@ -316,7 +314,6 @@ class SQLAlchemyDriver:
             ...     results = driver.execute_query("SELECT * FROM users")
             ...     # 退出with块时自动关闭连接
         """
-
         self.connect()
         return self
 
@@ -334,7 +331,6 @@ class SQLAlchemyDriver:
         Note:
             无论是否发生异常，都会确保数据库连接被安全关闭
         """
-
         self.disconnect()
 
     def _validate_config(self) -> None:
@@ -356,22 +352,25 @@ class SQLAlchemyDriver:
             - 必需参数列表根据数据库类型从 DB_CONFIGS 中获取
             - 空字符串或 None 值都被视为无效参数
         """
+        database_type = self.config.get("type", "").lower()
 
-        db_type = self.config.get("type", "").lower()
+        if database_type not in self.DB_CONFIGS:
+            supported_types = ", ".join(self.DB_CONFIGS.keys())
+            raise DriverError(
+                f"不支持的数据库类型: {database_type}。支持的类型: {supported_types}"
+            )
 
-        if db_type not in self.DB_CONFIGS:
-            supported = ", ".join(self.DB_CONFIGS.keys())
-            raise DriverError(f"不支持的数据库类型: {db_type}。支持的类型: {supported}")
-
-        db_config = self.DB_CONFIGS[db_type]
-        missing_params = [
+        database_config = self.DB_CONFIGS[database_type]
+        missing_parameters = [
             param
-            for param in db_config["required_params"]
+            for param in database_config["required_params"]
             if param not in self.config or not self.config[param]
         ]
 
-        if missing_params:
-            raise DriverError(f"数据库配置缺少必需参数: {', '.join(missing_params)}")
+        if missing_parameters:
+            raise DriverError(
+                f"数据库配置缺少必需参数: {', '.join(missing_parameters)}"
+            )
 
     def _build_connection_url(self) -> str:
         """构建数据库连接URL
@@ -398,13 +397,12 @@ class SQLAlchemyDriver:
             - IPv6 地址会被正确编码
             - 端口使用数据库类型的默认值（如未指定）
         """
-
-        db_type = self.config["type"].lower()
-        db_config = self.DB_CONFIGS[db_type]
+        database_type = self.config["type"].lower()
+        database_config = self.DB_CONFIGS[database_type]
 
         # 复制配置并设置默认值
         config_copy = self.config.copy()
-        config_copy.setdefault("port", db_config["default_port"])
+        config_copy.setdefault("port", database_config["default_port"])
 
         # 对连接参数进行URL编码
         if "host" in config_copy:
@@ -419,7 +417,7 @@ class SQLAlchemyDriver:
             # 密码通常包含特殊字符，必须进行编码
             config_copy["password"] = quote_plus(str(config_copy["password"]))
 
-        return db_config["url_template"].format(**config_copy)
+        return database_config["url_template"].format(**config_copy)
 
     def connect(self) -> None:
         """建立数据库连接
@@ -441,7 +439,6 @@ class SQLAlchemyDriver:
             >>> # 执行数据库操作
             >>> driver.disconnect()  # 关闭连接
         """
-
         try:
             if self.engine:
                 self.disconnect()
@@ -487,7 +484,6 @@ class SQLAlchemyDriver:
             >>> # 执行数据库操作
             >>> driver.disconnect()  # 安全关闭连接
         """
-
         try:
             if self.session:
                 self.session.remove()
@@ -528,26 +524,25 @@ class SQLAlchemyDriver:
             ... else:
             ...     print("数据库连接异常，需要检查配置")
         """
-
         try:
             if not self.engine:
                 self.connect()
             return self._perform_connection_test()
-        except (SQLAlchemyError, DBConnectionError) as e:
+        except (SQLAlchemyError, DBConnectionError) as error:
             # 数据库连接相关的错误
-            logger.warning("连接测试失败: 数据库错误 - %s", str(e))
+            logger.warning("连接测试失败: 数据库错误 - %s", str(error))
             return False
-        except OSError as e:
+        except OSError as error:
             # 网络、I/O或超时相关的错误
-            logger.warning("连接测试失败: 网络/I/O错误 - %s", str(e))
+            logger.warning("连接测试失败: 网络/I/O错误 - %s", str(error))
             return False
-        except (ValueError, TypeError, AttributeError) as e:
+        except (ValueError, TypeError, AttributeError) as error:
             # 配置或参数相关的错误
-            logger.warning("连接测试失败: 配置错误 - %s", str(e))
+            logger.warning("连接测试失败: 配置错误 - %s", str(error))
             return False
-        except Exception as e:  # pylint: disable=broad-exception-caught
+        except Exception as error:  # pylint: disable=broad-exception-caught
             # 其他未知错误，记录详细日志
-            logger.error("连接测试失败: 意外错误 - %s", str(e))
+            logger.error("连接测试失败: 意外错误 - %s", str(error))
             return False
 
     def _perform_connection_test(self) -> bool:
@@ -582,9 +577,11 @@ class SQLAlchemyDriver:
             logger.warning("连接测试失败: 数据库引擎未初始化")
             return False
 
-        db_type = self.config.get("type", "").lower()
+        database_type = self.config.get("type", "").lower()
         test_query = (
-            self.ORACLE_TEST_QUERY if db_type == "oracle" else self.TEST_QUERY_DEFAULT
+            self.ORACLE_TEST_QUERY
+            if database_type == "oracle"
+            else self.TEST_QUERY_DEFAULT
         )
 
         with self.engine.connect() as conn:
@@ -624,11 +621,13 @@ class SQLAlchemyDriver:
             >>> for row in results:
             ...     print(row["name"], row["age"])
         """
-        result = self._execute_sql(query, parameters)
-        columns = result.keys()
-        return [dict(zip(columns, row)) for row in result.fetchall()]
+        query_result = self._execute_sql(query, parameters)
+        column_names = query_result.keys()
+        return [dict(zip(column_names, row)) for row in query_result.fetchall()]
 
-    def execute_command(self, command: str) -> int:
+    def execute_command(
+        self, command: str, parameters: Dict[str, Any] | None = None
+    ) -> int:
         """执行SQL命令（INSERT/UPDATE/DELETE等）
 
         执行SQL命令，如INSERT、UPDATE、DELETE等，
@@ -636,6 +635,7 @@ class SQLAlchemyDriver:
 
         Args:
             command: SQL命令语句
+            parameters: SQL参数字典，用于参数化查询，防止SQL注入
 
         Returns:
             int: 受影响的行数
@@ -644,19 +644,21 @@ class SQLAlchemyDriver:
             QueryError: 当命令执行失败时
 
         Example:
-            >>> # 更新操作
+            >>> # 更新操作（使用参数化查询）
             >>> affected = driver.execute_command(
-            ...     "UPDATE users SET status = 'active' WHERE id = 1"
+            ...     "UPDATE users SET status = 'active' WHERE id = :id",
+            ...     {"id": 1}
             ... )
             >>> print(f"更新了 {affected} 行")
 
-            >>> # 插入操作
+            >>> # 插入操作（使用参数化查询）
             >>> affected = driver.execute_command(
-            ...     "INSERT INTO users (name, email) VALUES ('John', 'john@example.com')"
+            ...     "INSERT INTO users (name, email) VALUES (:name, :email)",
+            ...     {"name": "John", "email": "john@example.com"}
             ... )
             >>> print(f"插入了 {affected} 行")
         """
-        return self._execute_sql(command, commit=True)
+        return self._execute_sql(command, parameters, commit=True)
 
     def _execute_sql(
         self, sql: str, parameters: Dict[str, Any] | None = None, commit: bool = False
@@ -698,23 +700,23 @@ class SQLAlchemyDriver:
 
             self._validate_sql_query(sql)
 
-            with self.engine.connect() as conn:
+            with self.engine.connect() as connection:
                 if parameters:
-                    result = conn.execute(text(sql), parameters)
+                    sql_result = connection.execute(text(sql), parameters)
                 else:
-                    result = conn.execute(text(sql))
+                    sql_result = connection.execute(text(sql))
 
                 if commit:
-                    conn.commit()
-                    return result.rowcount
-                return result
+                    connection.commit()
+                    return sql_result.rowcount
+                return sql_result
 
-        except SQLAlchemyError as e:
-            raise QueryError(f"SQL执行失败: 数据库错误 - {str(e)}") from e
-        except ValueError as e:
-            raise QueryError(f"SQL执行失败: 验证错误 - {str(e)}") from e
-        except Exception as e:
-            raise QueryError(f"SQL执行失败: {str(e)}") from e
+        except SQLAlchemyError as error:
+            raise QueryError(f"SQL执行失败: 数据库错误 - {str(error)}") from error
+        except ValueError as error:
+            raise QueryError(f"SQL执行失败: 验证错误 - {str(error)}") from error
+        except Exception as error:
+            raise QueryError(f"SQL执行失败: {str(error)}") from error
 
     def _validate_sql_query(self, query: str) -> None:
         """验证SQL查询语句，防止SQL注入攻击
@@ -750,7 +752,6 @@ class SQLAlchemyDriver:
             - 即使通过验证，仍建议使用参数化查询
             - 查询长度限制可以防止大规模注入攻击
         """
-
         # 检查查询长度
         if len(query) > 10000:
             logger.warning("查询语句长度超过限制: %d > 10000", len(query))

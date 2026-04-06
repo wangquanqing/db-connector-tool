@@ -193,9 +193,9 @@ class CryptoManager:
                 self.iterations,
             )
 
-        except Exception as e:
-            logger.error("初始化加密管理器失败: %s", str(e))
-            raise CryptoError(f"加密系统初始化失败: {str(e)}") from e
+        except Exception as error:
+            logger.error("初始化加密管理器失败: %s", str(error))
+            raise CryptoError(f"加密系统初始化失败: {str(error)}") from error
 
     def __str__(self) -> str:
         """返回加密管理器的用户友好字符串表示"""
@@ -273,18 +273,18 @@ class CryptoManager:
 
         if hasattr(self, "password") and self.password:
             # 使用固定字符覆盖密码字符串，确保长度一致
-            original_len = len(self.password)
-            self.password = "0" * original_len
+            original_length = len(self.password)
+            self.password = "0" * original_length
             # 再次覆盖，使用随机字符
-            self.password = secrets.token_hex(original_len)[:original_len]
+            self.password = secrets.token_hex(original_length)[:original_length]
             # 最终清零
             self.password = ""
         if hasattr(self, "salt") and self.salt:
             # 使用零字节覆盖盐值，确保长度一致
-            salt_len = len(self.salt)
-            self.salt = bytes(salt_len)
+            salt_length = len(self.salt)
+            self.salt = bytes(salt_length)
             # 再次覆盖，使用随机字节
-            self.salt = secrets.token_bytes(salt_len)
+            self.salt = secrets.token_bytes(salt_length)
             # 最终清零
             self.salt = b""
         if hasattr(self, "fernet"):
@@ -320,7 +320,7 @@ class CryptoManager:
             - 特殊字符: !@#$%^&*()_+-=[]{}|;:,.<>?~`\"'\\/ (32个)
         """
         # 定义丰富的字符集（94个字符）
-        characters = (
+        character_set = (
             string.ascii_uppercase  # 大写字母 A-Z (26)
             + string.ascii_lowercase  # 小写字母 a-z (26)
             + string.digits  # 数字 0-9 (10)
@@ -330,23 +330,27 @@ class CryptoManager:
         # 使用迭代代替递归
         for attempt in range(max_attempts):
             # 方法1: 直接选择字符（更优的熵值）
-            password = "".join(secrets.choice(characters) for _ in range(24))
+            generated_password = "".join(
+                secrets.choice(character_set) for _ in range(24)
+            )
 
             # 验证密码强度
-            if self.validate_password_strength(password):
+            if self.validate_password_strength(generated_password):
                 logger.debug("密码生成成功，尝试次数: %s", attempt + 1)
-                return password
+                return generated_password
 
             # 方法2: 如果方法1失败，使用Base64后备方案
             if attempt == max_attempts // 2:  # 中途切换策略
                 random_bytes = secrets.token_bytes(24)
-                password = base64.urlsafe_b64encode(random_bytes).decode("utf-8")
+                generated_password = base64.urlsafe_b64encode(random_bytes).decode(
+                    "utf-8"
+                )
                 # 移除可能存在的填充字符
-                password = password.rstrip("=")
+                generated_password = generated_password.rstrip("=")
 
-                if self.validate_password_strength(password):
+                if self.validate_password_strength(generated_password):
                     logger.debug("Base64方法生成成功，尝试次数: %s", attempt + 1)
-                    return password
+                    return generated_password
 
             logger.debug("密码强度不足，第%s次重新生成", attempt + 1)
 
@@ -363,25 +367,31 @@ class CryptoManager:
             str: 强制生成的符合强度要求的密码
         """
         # 确保每个类别至少有一个字符
-        uppercase = secrets.choice(string.ascii_uppercase)
-        lowercase = secrets.choice(string.ascii_lowercase)
-        digit = secrets.choice(string.digits)
-        special = secrets.choice(self.SPECIAL_CHARACTERS)
+        uppercase_char = secrets.choice(string.ascii_uppercase)
+        lowercase_char = secrets.choice(string.ascii_lowercase)
+        digit_char = secrets.choice(string.digits)
+        special_char = secrets.choice(self.SPECIAL_CHARACTERS)
 
         # 生成剩余字符
-        characters = string.ascii_letters + string.digits + self.SPECIAL_CHARACTERS
+        character_set = string.ascii_letters + string.digits + self.SPECIAL_CHARACTERS
         remaining_length = 20  # 总长度24 - 4个强制字符
-        remaining_chars = "".join(
-            secrets.choice(characters) for _ in range(remaining_length)
+        remaining_characters = "".join(
+            secrets.choice(character_set) for _ in range(remaining_length)
         )
 
         # 组合所有字符并随机打乱
-        all_chars = list(uppercase + lowercase + digit + special + remaining_chars)
-        secrets.SystemRandom().shuffle(all_chars)
+        all_characters = list(
+            uppercase_char
+            + lowercase_char
+            + digit_char
+            + special_char
+            + remaining_characters
+        )
+        secrets.SystemRandom().shuffle(all_characters)
 
-        password = "".join(all_chars)
+        generated_password = "".join(all_characters)
         logger.debug("使用强制方法生成密码成功")
-        return password
+        return generated_password
 
     def _generate_secure_salt(self, length: int | None = None) -> bytes:
         """生成安全的随机盐值
@@ -477,7 +487,7 @@ class CryptoManager:
         """
         try:
             # 使用 PBKDF2 进行密钥派生
-            kdf = PBKDF2HMAC(
+            key_derivation_function = PBKDF2HMAC(
                 algorithm=hashes.SHA256(),
                 length=32,
                 salt=self.salt,
@@ -486,14 +496,14 @@ class CryptoManager:
             )
 
             # 派生密钥
-            key_material = kdf.derive(self.password.encode("utf-8"))
-            key = base64.urlsafe_b64encode(key_material)
+            key_material = key_derivation_function.derive(self.password.encode("utf-8"))
+            encoded_key = base64.urlsafe_b64encode(key_material)
 
-            return Fernet(key)
+            return Fernet(encoded_key)
 
-        except Exception as e:
-            logger.error("Fernet 实例创建失败: %s", str(e))
-            raise CryptoError(f"加密密钥派生失败: {str(e)}") from e
+        except Exception as error:
+            logger.error("Fernet 实例创建失败: %s", str(error))
+            raise CryptoError(f"加密密钥派生失败: {str(error)}") from error
 
     def encrypt(self, data: str) -> str:
         """加密字符串数据
@@ -636,9 +646,9 @@ class CryptoManager:
 
         try:
             return self.fernet.encrypt(data)
-        except Exception as e:
-            logger.error("数据加密失败: %s", str(e))
-            raise CryptoError(f"加密失败: {str(e)}") from e
+        except Exception as error:
+            logger.error("数据加密失败: %s", str(error))
+            raise CryptoError(f"加密失败: {str(error)}") from error
 
     def _decrypt(self, encrypted_data: bytes) -> bytes:
         """通用解密方法，处理字节数据
@@ -658,12 +668,12 @@ class CryptoManager:
 
         try:
             return self.fernet.decrypt(encrypted_data)
-        except InvalidToken as e:
-            logger.error("解密令牌无效: %s", str(e))
-            raise CryptoError("解密失败: 加密数据可能被篡改或密钥不匹配") from e
-        except Exception as e:
-            logger.error("数据解密失败: %s", str(e))
-            raise CryptoError(f"解密失败: {str(e)}") from e
+        except InvalidToken as error:
+            logger.error("解密令牌无效: %s", str(error))
+            raise CryptoError("解密失败: 加密数据可能被篡改或密钥不匹配") from error
+        except Exception as error:
+            logger.error("数据解密失败: %s", str(error))
+            raise CryptoError(f"解密失败: {str(error)}") from error
 
     def get_key_info(self) -> Dict[str, Any]:
         """获取密钥信息（用于持久化存储）
@@ -747,8 +757,8 @@ class CryptoManager:
             CryptoError: 重新初始化失败
         """
         if validate_strength and not self.validate_password_strength(new_password):
-            strength = self.get_password_strength(new_password)
-            raise ValueError(f"新密码强度不足 ({strength})，请使用更强的密码")
+            password_strength = self.get_password_strength(new_password)
+            raise ValueError(f"新密码强度不足 ({password_strength})，请使用更强的密码")
 
         try:
             # 保存当前盐值和迭代次数
@@ -765,9 +775,9 @@ class CryptoManager:
             self.fernet = self._create_fernet_instance()
 
             logger.info("密码更改成功")
-        except Exception as e:
-            logger.error("更改密码失败: %s", str(e))
-            raise CryptoError(f"密码更改失败: {str(e)}") from e
+        except Exception as error:
+            logger.error("更改密码失败: %s", str(error))
+            raise CryptoError(f"密码更改失败: {str(error)}") from error
 
     @classmethod
     def create_secure_instance(cls, password: str | None = None) -> "CryptoManager":
@@ -783,8 +793,8 @@ class CryptoManager:
             ValueError: 密码强度不足
         """
         if password is not None and not cls.validate_password_strength(password):
-            strength = cls.get_password_strength(password)
-            raise ValueError(f"密码强度不足 ({strength})，请使用更强的密码")
+            password_strength = cls.get_password_strength(password)
+            raise ValueError(f"密码强度不足 ({password_strength})，请使用更强的密码")
 
         # 使用推荐的迭代次数和自动生成的盐值
         return cls(password=password, iterations=cls.DEFAULT_ITERATIONS)
@@ -818,9 +828,9 @@ class CryptoManager:
         try:
             salt_bytes = base64.urlsafe_b64decode(salt.encode("utf-8"))
             return cls(password, salt_bytes, iterations, skip_password_validation=True)
-        except Exception as e:
-            logger.error("从保存的密钥创建实例失败: %s", str(e))
-            raise CryptoError(f"密钥恢复失败: {str(e)}") from e
+        except Exception as error:
+            logger.error("从保存的密钥创建实例失败: %s", str(error))
+            raise CryptoError(f"密钥恢复失败: {str(error)}") from error
 
     @staticmethod
     def validate_password_strength(password: str) -> bool:

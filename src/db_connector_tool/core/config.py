@@ -48,13 +48,13 @@ from .crypto import CryptoManager
 from .exceptions import ConfigError, CryptoError
 
 # 条件导入keyring库
-_keyring_available = False  # pylint: disable=invalid-name
-_keyring = None  # 内部使用的模块引用  # pylint: disable=invalid-name
+keyring_available = False  # pylint: disable=invalid-name
+keyring_module = None  # 内部使用的模块引用  # pylint: disable=invalid-name
 try:
     import keyring
 
-    _keyring_available = True  # pylint: disable=invalid-name
-    _keyring = keyring
+    keyring_available = True  # pylint: disable=invalid-name
+    keyring_module = keyring
 except ImportError:
     pass
 
@@ -305,18 +305,18 @@ class ConfigManager:
             def wrapper(self, *args, **kwargs):
                 try:
                     return func(self, *args, **kwargs)
-                except OSError as e:
-                    logger.error("配置文件操作失败: %s", str(e))
-                    raise ConfigError(f"{operation_name}失败: {str(e)}") from e
-                except (json.JSONDecodeError, TypeError, ValueError) as e:
-                    logger.error("配置数据处理失败: %s", str(e))
-                    raise ConfigError(f"{operation_name}失败: {str(e)}") from e
-                except (AttributeError, RuntimeError, MemoryError) as e:
-                    logger.error("%s失败: %s", operation_name, str(e))
-                    raise ConfigError(f"{operation_name}失败: {str(e)}") from e
-                except Exception as e:
-                    logger.error("%s失败: %s", operation_name, str(e))
-                    raise ConfigError(f"{operation_name}失败: {str(e)}") from e
+                except OSError as error:
+                    logger.error("配置文件操作失败: %s", str(error))
+                    raise ConfigError(f"{operation_name}失败: {str(error)}") from error
+                except (json.JSONDecodeError, TypeError, ValueError) as error:
+                    logger.error("配置数据处理失败: %s", str(error))
+                    raise ConfigError(f"{operation_name}失败: {str(error)}") from error
+                except (AttributeError, RuntimeError, MemoryError) as error:
+                    logger.error("%s失败: %s", operation_name, str(error))
+                    raise ConfigError(f"{operation_name}失败: {str(error)}") from error
+                except Exception as error:
+                    logger.error("%s失败: %s", operation_name, str(error))
+                    raise ConfigError(f"{operation_name}失败: {str(error)}") from error
 
             return wrapper
 
@@ -367,12 +367,12 @@ class ConfigManager:
             3. 如果密钥不存在，创建新密钥
         """
         # 尝试使用keyring库（如果可用）
-        if _keyring_available and _keyring is not None:
+        if keyring_available and keyring_module is not None:
             service_name = self.app_name
             username = "master_key"
 
             # 尝试从密钥环获取密钥
-            stored_key = _keyring.get_password(service_name, username)
+            stored_key = keyring_module.get_password(service_name, username)
 
             if stored_key:
                 # 使用统一的密钥加载方法
@@ -381,7 +381,9 @@ class ConfigManager:
             else:
                 # 创建新密钥并存储
                 key_data = self._create_new_crypto_key()
-                _keyring.set_password(service_name, username, json.dumps(key_data))
+                keyring_module.set_password(
+                    service_name, username, json.dumps(key_data)
+                )
                 logger.info("新加密密钥已安全存储到操作系统密钥环")
 
         else:
@@ -467,24 +469,24 @@ class ConfigManager:
             self._load_crypto_from_key_data(json.loads(self._env_key))
             logger.debug("使用环境变量中的加密密钥")
         else:
-            key_file = self.config_dir / "encryption.key"
-            if key_file.exists():
-                self._load_existing_key(key_file)
+            key_file_path = self.config_dir / "encryption.key"
+            if key_file_path.exists():
+                self._load_existing_key(key_file_path)
             else:
-                self._create_new_key(key_file)
+                self._create_new_key(key_file_path)
                 logger.warning(
                     "警告: 使用文件存储加密密钥（安全性较低）。\n"
                     "建议: 1. 安装keyring库 (pip install keyring)\n"
                     "      2. 或设置环境变量 DB_CONNECTOR_TOOL_ENCRYPTION_KEY"
                 )
 
-    def _load_existing_key(self, key_file: Path) -> None:
+    def _load_existing_key(self, key_file_path: Path) -> None:
         """加载现有的加密密钥文件
 
         从指定的密钥文件加载加密密钥。
 
         Args:
-            key_file: 密钥文件路径
+            key_file_path: 密钥文件路径
 
         Raises:
             ConfigError: 密钥加载失败
@@ -501,24 +503,24 @@ class ConfigManager:
         """
         try:
             # 设置文件权限为仅所有者可读写
-            self._set_secure_file_permissions(key_file)
+            self._set_secure_file_permissions(key_file_path)
 
-            with open(key_file, "rb") as f:
+            with open(key_file_path, "rb") as f:
                 key_data = tomllib.load(f)
 
             # 使用统一的密钥加载方法
             self._load_crypto_from_key_data(key_data)
-        except CryptoError as e:
+        except CryptoError as error:
             # 解密失败，可能是因为密钥生成逻辑改变，删除旧密钥文件并创建新的
-            self._handle_crypto_error(key_file, e)
+            self._handle_crypto_error(key_file_path, error)
 
-    def _create_new_key(self, key_file: Path) -> None:
+    def _create_new_key(self, key_file_path: Path) -> None:
         """创建新的加密密钥文件
 
         创建新的加密密钥并保存到指定文件。
 
         Args:
-            key_file: 密钥文件路径
+            key_file_path: 密钥文件路径
 
         Security:
             - 使用密码学安全的随机数生成器
@@ -532,11 +534,11 @@ class ConfigManager:
         key_data = self._create_new_crypto_key()
 
         # 先写入文件，然后设置安全权限
-        with open(key_file, "wb") as f:
+        with open(key_file_path, "wb") as f:
             f.write(tomli_w.dumps(key_data).encode("utf-8"))
 
         # 设置文件权限为仅所有者可读写
-        self._set_secure_file_permissions(key_file)
+        self._set_secure_file_permissions(key_file_path)
 
         logger.info("新加密密钥文件创建成功")
 
@@ -567,7 +569,7 @@ class ConfigManager:
             logger.warning("设置文件权限失败 %s: %s", file_path, str(e))
             # 权限设置失败不应阻止程序运行，但记录警告
 
-    def _set_windows_permissions(self, key_file: Path) -> None:
+    def _set_windows_permissions(self, file_path: Path) -> None:
         """
         设置Windows文件权限（最小权限原则）
 
@@ -575,7 +577,7 @@ class ConfigManager:
         使用icacls命令，这是Windows标准权限管理工具。
 
         Args:
-            key_file: 密钥文件路径
+            file_path: 密钥文件路径
         """
         username = getpass.getuser()
 
@@ -586,7 +588,7 @@ class ConfigManager:
         result = subprocess.run(
             [
                 "icacls",
-                str(key_file),
+                str(file_path),
                 "/inheritance:r",
                 "/grant:r",
                 f"{username}:(R,W)",  # 仅读写权限，非完全控制
@@ -603,7 +605,7 @@ class ConfigManager:
         else:
             logger.debug("Windows: 已设置密钥文件权限为仅当前用户读写")
 
-    def _set_unix_permissions(self, key_file: Path) -> None:
+    def _set_unix_permissions(self, file_path: Path) -> None:
         """
         设置Unix/Linux文件权限（最小权限原则）
 
@@ -611,20 +613,22 @@ class ConfigManager:
         其他用户无任何权限。这是保护密钥文件的最低必要权限。
 
         Args:
-            key_file: 密钥文件路径
+            file_path: 密钥文件路径
         """
         # 设置权限为600：仅所有者可读写
-        key_file.chmod(stat.S_IRUSR | stat.S_IWUSR)
+        file_path.chmod(stat.S_IRUSR | stat.S_IWUSR)
         logger.debug("Unix/Linux: 已设置密钥文件权限为600（仅所有者可读写）")
 
-    def _handle_crypto_error(self, key_file: Path, crypto_error: CryptoError) -> None:
+    def _handle_crypto_error(
+        self, key_file_path: Path, crypto_error: CryptoError
+    ) -> None:
         """处理加密错误：删除旧密钥并创建新的
 
         解密现有密钥文件失败时，删除旧文件并创建新密钥。
         这通常发生在密钥格式变更或密钥损坏时。
 
         Args:
-            key_file: 密钥文件路径
+            key_file_path: 密钥文件路径
             crypto_error: 加密错误异常
 
         Raises:
@@ -641,10 +645,10 @@ class ConfigManager:
         """
         logger.warning("解密密钥文件失败: %s，将创建新的密钥文件", str(crypto_error))
         try:
-            key_file.unlink()
+            key_file_path.unlink()
             logger.info("已删除旧的密钥文件")
             # 直接创建新的密钥，避免递归调用
-            self._create_new_key(key_file)
+            self._create_new_key(key_file_path)
         except Exception as delete_error:
             logger.error("删除旧密钥文件失败: %s", str(delete_error))
             raise ConfigError(
@@ -941,7 +945,6 @@ class ConfigManager:
             ... }
             >>> config_manager.add_config("postgres_db", config)
         """
-
         self._validate_connection_name(name)
         self._validate_connection_config(connection_config)
 
@@ -1259,8 +1262,8 @@ class ConfigManager:
                 return str(raw_value)
             return raw_value  # 其他类型直接返回
 
-        except (json.JSONDecodeError, KeyError, TypeError, ValueError) as e:
-            logger.warning("反序列化失败，返回原始字符串: %s", str(e))
+        except (json.JSONDecodeError, KeyError, TypeError, ValueError) as error:
+            logger.warning("反序列化失败，返回原始字符串: %s", str(error))
             return json_str
 
     def _increment_config_version(self, config: Dict[str, Any]) -> None:
@@ -1412,7 +1415,6 @@ class ConfigManager:
         Example:
             >>> config_manager.remove_config("postgres_db")
         """
-
         self._validate_connection_name(name)
 
         config = self._load_config()
@@ -1476,7 +1478,6 @@ class ConfigManager:
             >>> new_config = {"host": "new_host", "port": 5433}
             >>> config_manager.update_config("postgres_db", new_config)
         """
-
         self._validate_connection_name(name)
         self._validate_connection_config(connection_config)
 
@@ -1534,7 +1535,6 @@ class ConfigManager:
             >>> print(config["host"])
             "localhost"
         """
-
         self._validate_connection_name(name)
 
         config = self._load_config()
@@ -1887,11 +1887,11 @@ class ConfigManager:
         3. 文件存储 - 基础安全（仅作为后备）
         """
         # 1. 优先尝试保存到操作系统密钥环
-        if _keyring_available and _keyring is not None:
+        if keyring_available and keyring_module is not None:
             service_name = self.app_name
             username = "master_key"
 
-            _keyring.set_password(service_name, username, json.dumps(key_data))
+            keyring_module.set_password(service_name, username, json.dumps(key_data))
             logger.info("轮换加密密钥已安全存储到操作系统密钥环")
             return
 
@@ -1938,7 +1938,7 @@ class ConfigManager:
             logger.debug("环境变量中无加密密钥")
 
         # 检查是否有可用的密钥存储
-        if not _keyring_available and not cls._env_key_available:
+        if not keyring_available and not cls._env_key_available:
             logger.warning(
                 "警告: 未找到安全的密钥存储方案。\n"
                 "建议: 1. 安装keyring库 (pip install keyring)\n"
