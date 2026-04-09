@@ -111,7 +111,6 @@ class KeyManager:
     >>> key_manager.close()
     """
 
-
     _env_key = None
     # 类级别的依赖检查结果（全局依赖，与应用名无关）
     _env_key_available = None
@@ -133,11 +132,10 @@ class KeyManager:
         Example:
             >>> # 使用默认应用名称
             >>> key_manager = KeyManager()
-            
+
             >>> # 使用自定义应用名称
             >>> key_manager = KeyManager("my_application")
         """
-
         self.app_name = app_name
         self.config_dir = PathHelper.get_user_config_dir(app_name)
         self.crypto: Optional[CryptoManager] = None
@@ -166,7 +164,6 @@ class KeyManager:
         Note:
             调用此方法后，密钥管理器将无法继续使用，需要重新创建实例。
         """
-
         if self.crypto is not None:
             self.crypto.close()
             self.crypto = None
@@ -197,7 +194,6 @@ class KeyManager:
             ...     # 保存配置逻辑
             ...     pass
         """
-
 
         def decorator(func: Callable) -> Callable:
             @wraps(func)
@@ -238,7 +234,6 @@ class KeyManager:
             >>> crypto = key_manager.get_crypto_manager()
             >>> encrypted = crypto.encrypt("敏感数据")
         """
-
         if self.crypto is None:
             raise ConfigError("加密管理器未初始化，无法处理敏感信息")
         return self.crypto
@@ -258,7 +253,6 @@ class KeyManager:
             2. 如果 keyring 不可用，检查环境变量是否存在加密密钥
             3. 如果环境变量也不可用，使用文件存储作为后备方案
         """
-
         # 尝试使用keyring库（如果可用）
         if keyring_available and keyring_module is not None:
             self._load_or_create_key_from_keyring()
@@ -280,7 +274,6 @@ class KeyManager:
             2. 如果找到密钥，加载并初始化加密管理器
             3. 如果未找到密钥，创建新密钥并存储到密钥环
         """
-
         assert keyring_module is not None, "keyring库可用"
 
         service_name = self.app_name
@@ -315,7 +308,6 @@ class KeyManager:
             2. 使用密钥数据初始化加密管理器
             3. 记录加载成功的日志信息
         """
-
         # 验证密钥数据格式
         if "password" not in key_data or "salt" not in key_data:
             raise ConfigError("密钥数据格式无效")
@@ -339,7 +331,6 @@ class KeyManager:
             2. 获取密钥信息
             3. 记录密钥创建成功的日志信息
         """
-
         self.crypto = CryptoManager()
         key_data = self.crypto.get_key_info()
         logger.debug("新加密密钥创建成功")
@@ -361,7 +352,6 @@ class KeyManager:
             4. 如果密钥文件存在，加载密钥
             5. 如果密钥文件不存在，创建新密钥并存储到文件
         """
-
         if self._env_key:
             # 使用环境变量中的密钥
             self._load_crypto_from_key_data(json.loads(self._env_key))
@@ -395,7 +385,6 @@ class KeyManager:
             3. 加载密钥数据并初始化加密管理器
             4. 处理可能的加密错误
         """
-
         try:
             # 设置文件权限为仅所有者可读写
             self._set_secure_file_permissions(key_file_path)
@@ -423,7 +412,6 @@ class KeyManager:
             3. 设置文件权限为仅所有者可读写
             4. 记录密钥创建成功的日志信息
         """
-
         key_data = self._create_new_crypto_key()
 
         # 先写入文件，然后设置安全权限
@@ -457,7 +445,6 @@ class KeyManager:
             2. 根据操作系统类型执行相应的权限设置
             3. 记录权限设置的结果
         """
-
         try:
             system = platform.system().lower()
 
@@ -491,7 +478,6 @@ class KeyManager:
             2. 使用icacls命令设置权限
             3. 记录权限设置的结果
         """
-
         username = getpass.getuser()
 
         # 使用icacls设置权限：
@@ -536,7 +522,6 @@ class KeyManager:
             1. 使用chmod设置文件权限为600
             2. 记录权限设置的结果
         """
-
         # 设置权限为600：仅所有者可读写
         file_path.chmod(stat.S_IRUSR | stat.S_IWUSR)
         logger.debug("Unix/Linux: 已设置密钥文件权限为600（仅所有者可读写）")
@@ -562,7 +547,6 @@ class KeyManager:
             3. 创建新的密钥文件
             4. 处理可能的删除错误
         """
-
         logger.warning("解密密钥文件失败: %s，将创建新的密钥文件", str(crypto_error))
         try:
             key_file_path.unlink()
@@ -595,7 +579,6 @@ class KeyManager:
             3. 如果未初始化，检查环境变量是否存在HMAC密钥
             4. 如果环境变量也不存在，生成临时HMAC密钥
         """
-
         # 优先从主加密密钥派生HMAC密钥
         if self.crypto is not None:
             key_info = self.crypto.get_key_info()
@@ -631,7 +614,6 @@ class KeyManager:
             2. 按照安全层次结构保存新密钥
             3. 返回新的密钥数据
         """
-
         # 生成新的加密密钥
         key_data = self._create_new_crypto_key()
 
@@ -658,7 +640,6 @@ class KeyManager:
             2. 如果keyring不可用，检查环境变量方案
             3. 最后回退到文件存储
         """
-
         # 1. 优先尝试保存到操作系统密钥环
         if keyring_available and keyring_module is not None:
             service_name = self.app_name
@@ -710,7 +691,6 @@ class KeyManager:
             2. 检查是否有可用的密钥存储方案
             3. 记录依赖检查的结果
         """
-
         # 检查环境变量密钥
         cls._env_key = os.environ.get("DB_CONNECTOR_TOOL_ENCRYPTION_KEY")
         cls._env_key_available = bool(cls._env_key)
