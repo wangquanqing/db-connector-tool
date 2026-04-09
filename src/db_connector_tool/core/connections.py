@@ -30,6 +30,7 @@ from .config import ConfigManager
 from .exceptions import ConfigError
 from .exceptions import ConnectionError as DBConnectionError
 from .exceptions import DatabaseError
+from .validators import ConnectionValidator
 
 # 获取模块级别的日志记录器
 logger = get_logger(__name__)
@@ -159,15 +160,7 @@ class DatabaseManager:
     CONNECTION_NOT_FOUND_MSG = "连接配置不存在: {}"
     CONNECTION_ALREADY_EXISTS_MSG = "连接配置已存在: {}"
 
-    # 支持的数据库类型
-    SUPPORTED_DATABASE_TYPES: Set[str] = {
-        "oracle",
-        "postgresql",
-        "mysql",
-        "mssql",
-        "sqlite",
-        "gbasedbt",
-    }
+
 
     # 默认配置参数
     DEFAULT_MAX_IDLE_TIME = 300  # 5分钟
@@ -250,7 +243,7 @@ class DatabaseManager:
                 raise ConfigError(self.CONNECTION_ALREADY_EXISTS_MSG.format(name))
 
             # 简化配置验证
-            self._validate_basic_config(connection_config)
+            ConnectionValidator.validate_basic_config(connection_config)
 
             # 保存到配置管理器
             self.config_manager.add_config(name, connection_config)
@@ -259,134 +252,7 @@ class DatabaseManager:
         with self._lock:
             self._safe_operation("数据库连接配置创建", name, _add_connection)
 
-    def _validate_basic_config(self, config: Dict[str, Any]) -> None:
-        """
-        基本配置验证
 
-        Args:
-            config: 连接配置字典
-
-        Raises:
-            ConfigError: 当基本配置验证失败时
-
-        Note:
-            详细验证逻辑由SQLAlchemyDriver处理，这里只做基本检查
-            确保配置结构正确，避免无效配置进入系统
-
-        Validation Rules:
-            - 配置不能为空且必须是字典
-            - 数据库类型必须在支持列表中
-            - 非SQLite数据库需要基本连接参数
-            - 端口号必须是有效的整数
-            - 连接超时等参数必须是有效的数值
-            - 字符串参数长度限制和特殊字符过滤
-        """
-        if not config or not isinstance(config, dict):
-            raise ConfigError("连接配置不能为空且必须是字典")
-
-        # 验证数据库类型
-        db_type = config.get("type", "").lower()
-        if db_type not in self.SUPPORTED_DATABASE_TYPES:
-            supported_types = ", ".join(sorted(self.SUPPORTED_DATABASE_TYPES))
-            raise ConfigError(
-                f"不支持的数据库类型: {db_type}，支持的类型: {supported_types}"
-            )
-
-        # 字符串参数验证函数
-        def validate_string_param(param_name, value, max_length=100):
-            if not isinstance(value, str):
-                logger.warning("%s类型无效: %s", param_name, type(value).__name__)
-                raise ConfigError(f"{param_name}必须是字符串类型")
-            if len(value) > max_length:
-                logger.warning(
-                    "%s长度超过限制: %s > %s", param_name, len(value), max_length
-                )
-                raise ConfigError(f"{param_name}长度不能超过{max_length}个字符")
-            # 检查特殊字符，防止注入攻击
-            if re.search(r"[;\\\'\"]", value):
-                logger.warning("%s包含潜在的恶意字符: %s", param_name, value)
-                raise ConfigError(f"{param_name}包含不允许的特殊字符")
-
-        # 验证字符串参数
-        string_params = [
-            "username",
-            "password",
-            "host",
-            "database",
-            "service_name",
-            "sid",
-            "server",
-        ]
-        for param in string_params:
-            if param in config:
-                validate_string_param(param, config[param])
-
-        # SQLite数据库特殊处理
-        if db_type == "sqlite":
-            if "database" not in config:
-                config["database"] = ":memory:"
-            return
-
-        # 应用特定数据库类型的默认配置
-        self._apply_default_config(config)
-
-        # 验证必需参数
-        required_fields = ["username", "password", "host"]
-        missing_fields = [field for field in required_fields if field not in config]
-        if missing_fields:
-            raise ConfigError(f"缺少必需的连接参数: {', '.join(missing_fields)}")
-
-        # 验证端口号
-        if "port" in config:
-            port = config["port"]
-            if not isinstance(port, int) or port <= 0 or port > 65535:
-                raise ConfigError("端口号必须是1-65535之间的整数")
-
-        # 验证连接超时参数
-        if "timeout" in config:
-            timeout = config["timeout"]
-            if not isinstance(timeout, (int, float)) or timeout <= 0:
-                raise ConfigError("连接超时必须是大于0的数值")
-
-        # 验证连接池参数
-        if "pool_size" in config:
-            pool_size = config["pool_size"]
-            if not isinstance(pool_size, int) or pool_size <= 0:
-                raise ConfigError("连接池大小必须是大于0的整数")
-
-        # 验证特定数据库类型的参数
-        if db_type == "oracle":
-            if "service_name" not in config and "sid" not in config:
-                raise ConfigError("Oracle数据库必须提供service_name或sid")
-        elif db_type == "postgresql" and "database" not in config:
-            raise ConfigError("PostgreSQL数据库必须提供database参数")
-        elif db_type == "mysql" and "database" not in config:
-            raise ConfigError("MySQL数据库必须提供database参数")
-        elif db_type == "mssql" and "database" not in config:
-            raise ConfigError("SQL Server数据库必须提供database参数")
-        elif db_type == "gbasedbt" and "database" not in config:
-            raise ConfigError("GBase数据库必须提供database参数")
-
-    def _apply_default_config(self, config: Dict[str, Any]) -> None:
-        """
-        应用特定数据库类型的默认配置
-
-        Args:
-            config: 连接配置字典
-        """
-        db_type = config.get("type", "").lower()
-
-        if db_type == "oracle" and "service_name" not in config:
-            config["service_name"] = "XE"
-        elif db_type == "postgresql" and "gssencmode" not in config:
-            config["gssencmode"] = "disable"
-        elif db_type == "mssql":
-            if "charset" not in config:
-                config["charset"] = "cp936"
-            if "tds_version" not in config:
-                config["tds_version"] = "7.0"
-        elif db_type == "gbasedbt" and "server" not in config:
-            config["server"] = "gbase01"
 
     def remove_connection(self, name: str) -> None:
         """
@@ -533,7 +399,7 @@ class DatabaseManager:
             self._validate_connection_exists(name)
 
             # 简化配置验证
-            self._validate_basic_config(connection_config)
+            ConnectionValidator.validate_basic_config(connection_config)
 
             # 关闭现有连接
             self._cleanup_connection(name)
@@ -631,7 +497,7 @@ class DatabaseManager:
                     connection_config = {**base_config, **config_overrides}
 
                     # 验证修改后的配置
-                    self._validate_basic_config(connection_config)
+                    ConnectionValidator.validate_basic_config(connection_config)
 
                     # 创建新连接，处理连接超时
                     driver = SQLAlchemyDriver(connection_config)

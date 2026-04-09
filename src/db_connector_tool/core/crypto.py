@@ -41,6 +41,7 @@ from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 from ..utils.logging_utils import get_logger
 from .exceptions import CryptoError
+from .validators import PasswordValidator
 
 logger = get_logger(__name__)
 
@@ -155,9 +156,9 @@ class CryptoManager:
         if (
             password is not None
             and not skip_password_validation
-            and not self.validate_password_strength(password)
+            and not PasswordValidator.validate_strength(password)
         ):
-            strength = self.get_password_strength(password)
+            strength = PasswordValidator.get_strength(password)
             raise ValueError(f"密码强度不足 ({strength})，请使用更强的密码")
 
         # 验证盐值长度
@@ -317,7 +318,7 @@ class CryptoManager:
             - 大写字母: A-Z (26个)
             - 小写字母: a-z (26个)
             - 数字: 0-9 (10个)
-            - 特殊字符: !@#$%^&*()_+-=[]{}|;:,.<>?~`\"'\\/ (32个)
+            - 特殊字符: !@#$%^&*()_+-=[]{}|;:,.<>?~`"'\/ (32个)
         """
         # 定义丰富的字符集（94个字符）
         character_set = (
@@ -335,7 +336,7 @@ class CryptoManager:
             )
 
             # 验证密码强度
-            if self.validate_password_strength(generated_password):
+            if PasswordValidator.validate_strength(generated_password):
                 logger.debug("密码生成成功，尝试次数: %s", attempt + 1)
                 return generated_password
 
@@ -348,7 +349,7 @@ class CryptoManager:
                 # 移除可能存在的填充字符
                 generated_password = generated_password.rstrip("=")
 
-                if self.validate_password_strength(generated_password):
+                if PasswordValidator.validate_strength(generated_password):
                     logger.debug("Base64方法生成成功，尝试次数: %s", attempt + 1)
                     return generated_password
 
@@ -756,8 +757,8 @@ class CryptoManager:
             ValueError: 新密码强度不足
             CryptoError: 重新初始化失败
         """
-        if validate_strength and not self.validate_password_strength(new_password):
-            password_strength = self.get_password_strength(new_password)
+        if validate_strength and not PasswordValidator.validate_strength(new_password):
+            password_strength = PasswordValidator.get_strength(new_password)
             raise ValueError(f"新密码强度不足 ({password_strength})，请使用更强的密码")
 
         try:
@@ -792,8 +793,8 @@ class CryptoManager:
         Raises:
             ValueError: 密码强度不足
         """
-        if password is not None and not cls.validate_password_strength(password):
-            password_strength = cls.get_password_strength(password)
+        if password is not None and not PasswordValidator.validate_strength(password):
+            password_strength = PasswordValidator.get_strength(password)
             raise ValueError(f"密码强度不足 ({password_strength})，请使用更强的密码")
 
         # 使用推荐的迭代次数和自动生成的盐值
@@ -831,101 +832,3 @@ class CryptoManager:
         except Exception as error:
             logger.error("从保存的密钥创建实例失败: %s", str(error))
             raise CryptoError(f"密钥恢复失败: {str(error)}") from error
-
-    @staticmethod
-    def validate_password_strength(password: str) -> bool:
-        """验证密码强度（静态方法）
-
-        Args:
-            password: 要验证的密码字符串
-
-        Returns:
-            bool: 密码强度是否足够
-
-        Password Strength Requirements:
-            - 长度至少为 16 字符
-            - 包含至少 1 个大写字母
-            - 包含至少 1 个小写字母
-            - 包含至少 1 个数字
-            - 包含至少 1 个特殊字符
-
-        Example:
-            >>> CryptoManager.validate_password_strength("Weak123")
-            False
-            >>> CryptoManager.validate_password_strength("StrongP@ssw0rd123!")
-            True
-        """
-        requirements = CryptoManager._check_password_requirements(password)
-        return all(requirements.values())
-
-    @staticmethod
-    def get_password_strength(password: str) -> str:
-        """获取密码强度等级（静态方法）
-
-        Args:
-            password: 要评估的密码字符串
-
-        Returns:
-            str: 密码强度等级，可能的值包括：
-                - "weak": 弱密码
-                - "medium": 中等强度密码
-                - "strong": 强密码
-                - "very_strong": 非常强的密码
-
-        Scoring System:
-            - 长度得分：8字符=1分，16字符=2分，24字符=3分
-            - 复杂度得分：大写字母、小写字母、数字、特殊字符各1分
-            - 总分≥7: very_strong, ≥5: strong, ≥3: medium, <3: weak
-
-        Example:
-            >>> CryptoManager.get_password_strength("password")
-            'weak'
-            >>> CryptoManager.get_password_strength("StrongP@ssw0rd123!")
-            'very_strong'
-        """
-        score = 0
-
-        # 长度得分
-        if len(password) >= 24:
-            score += 3
-        elif len(password) >= 16:
-            score += 2
-        elif len(password) >= 8:
-            score += 1
-
-        # 使用统一的密码要求检查方法
-        requirements = CryptoManager._check_password_requirements(password)
-
-        # 复杂度得分（排除长度检查）
-        for req_name, req_met in requirements.items():
-            if req_name != "length_ok" and req_met:
-                score += 1
-
-        # 评估强度等级
-        if score >= 7:
-            return "very_strong"
-        if score >= 5:
-            return "strong"
-        if score >= 3:
-            return "medium"
-        return "weak"
-
-    @staticmethod
-    def _check_password_requirements(password: str) -> Dict[str, bool]:
-        """检查密码是否满足各项要求（内部方法）
-
-        Args:
-            password: 要验证的密码字符串
-
-        Returns:
-            Dict[str, bool]: 各项要求的满足情况
-        """
-        return {
-            "length_ok": len(password) >= 16,
-            "has_uppercase": bool(re.search(r"[A-Z]", password)),
-            "has_lowercase": bool(re.search(r"[a-z]", password)),
-            "has_digit": bool(re.search(r"\d", password)),
-            "has_special": bool(
-                re.search(r'[!@#$%^&*()_+\-=\[\]{}|;:,.<>?~`"\'\\/]', password)
-            ),
-        }

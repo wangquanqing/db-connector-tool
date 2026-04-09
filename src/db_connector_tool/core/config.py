@@ -39,6 +39,7 @@ from ..utils.logging_utils import get_logger
 from ..utils.path_utils import PathHelper
 from .exceptions import ConfigError
 from .key_manager import KeyManager
+from .validators import ConfigValidator, GenericValidator
 
 # 获取模块级别的日志记录器
 logger = get_logger(__name__)
@@ -433,106 +434,13 @@ class ConfigManager:
             - 审计日志必须是列表类型
             - 密钥版本必须是有效的字符串
         """
-        # 验证必需字段
-        required_fields = ["version", "app_name", "connections", "metadata"]
-        self._validate_required_fields(config, required_fields, "配置文件")
+        ConfigValidator.validate_config(config)
 
-        # 验证版本号格式
-        if not self._is_valid_version_format(config["version"]):
-            raise ConfigError(f"无效的版本号格式: {config['version']}")
 
-        # 验证connections字段类型
-        self._validate_field_type(config["connections"], dict, "connections字段")
 
-        # 验证metadata字段结构
-        metadata = config.get("metadata", {})
-        self._validate_field_type(metadata, dict, "metadata字段")
 
-        # 验证metadata必需子字段
-        required_metadata_fields = ["created", "last_modified", "key_version"]
-        self._validate_required_fields(metadata, required_metadata_fields, "metadata")
 
-        # 验证密钥版本格式
-        key_version = metadata.get("key_version")
-        if not isinstance(key_version, (str, int)) or not str(key_version).isdigit():
-            raise ConfigError("key_version必须是有效的数字字符串")
 
-        # 验证审计日志格式
-        audit_log = metadata.get("audit_log", [])
-        self._validate_field_type(audit_log, list, "audit_log字段")
-
-    def _validate_required_fields(
-        self, data: Dict[str, Any], required_fields: List[str], context: str = ""
-    ) -> None:
-        """
-        验证必需字段是否存在
-
-        Args:
-            data: 要验证的数据字典
-            required_fields: 必需字段列表
-            context: 上下文描述，用于错误消息
-
-        Raises:
-            ConfigError: 缺少必需字段
-        """
-        for field in required_fields:
-            if field not in data:
-                error_msg = (
-                    f"{context}缺少必需字段: {field}"
-                    if context
-                    else f"缺少必需字段: {field}"
-                )
-                raise ConfigError(error_msg)
-
-    def _is_valid_version_format(self, version: str) -> bool:
-        """
-        验证版本号格式是否符合语义化版本规范
-
-        Args:
-            version: 版本号字符串
-
-        Returns:
-            bool: 版本号格式是否有效
-
-        语义化版本规范：
-            - 格式为 x.y.z，其中 x、y、z 均为非负整数
-            - 不允许前导零
-            - x 为主版本号，y 为次版本号，z 为修订号
-        """
-        try:
-            parts = version.split(".")
-            if len(parts) != 3:
-                return False
-
-            for part in parts:
-                if not part.isdigit():
-                    return False
-                if len(part) > 1 and part.startswith("0"):
-                    return False  # 不允许前导零
-                num = int(part)
-                if num < 0:
-                    return False
-
-            return True
-        except (ValueError, AttributeError):
-            return False
-
-    def _validate_field_type(
-        self, value: Any, expected_type: type, field_name: str
-    ) -> None:
-        """
-        验证字段类型
-
-        Args:
-            value: 要验证的值
-            expected_type: 期望的类型
-            field_name: 字段名称，用于错误消息
-
-        Raises:
-            ConfigError: 类型不匹配
-        """
-        if not isinstance(value, expected_type):
-            raise ConfigError(f"{field_name}必须是{expected_type.__name__}类型")
 
     def add_config(self, name: str, connection_config: Dict[str, Any]) -> None:
         """添加数据库连接配置
@@ -557,8 +465,8 @@ class ConfigManager:
             ... }
             >>> config_manager.add_config("postgres_db", config)
         """
-        self._validate_connection_name(name)
-        self._validate_connection_config(connection_config)
+        ConfigValidator.validate_connection_name(name)
+        ConfigValidator.validate_connection_config(connection_config)
 
         config = self._load_config()
 
@@ -582,60 +490,7 @@ class ConfigManager:
             self._save_config(config, self.OPERATION_ADD)
             self._log_operation_success("添加", name)
 
-    def _validate_connection_name(self, name: str) -> None:
-        """验证连接名称是否有效
 
-        验证连接名称是否符合命名规范。
-
-        Args:
-            name: 连接名称
-
-        Raises:
-            ValueError: 连接名称无效
-
-        Validation Rules:
-            - 不能为空且必须是字符串
-            - 长度不能超过50个字符
-            - 只能包含字母、数字和下划线
-            - 不能使用保留字（default, test, backup）
-        """
-        if not name or not isinstance(name, str):
-            raise ValueError("连接名称不能为空且必须是字符串")
-
-        # 长度限制
-        if len(name) > 50:
-            raise ValueError("连接名称长度不能超过50个字符")
-
-        # 字符格式（只允许字母、数字、下划线）
-        if not re.match(r"^\w+$", name):
-            raise ValueError("连接名称只能包含字母、数字和下划线")
-
-        # 保留字检查
-        if name in ["default", "test", "backup"]:
-            raise ValueError("连接名称不能使用保留字")
-
-    def _validate_connection_config(self, connection_config: Dict[str, Any]) -> None:
-        """验证连接配置字典是否有效
-
-        验证连接配置字典是否符合格式要求。
-
-        Args:
-            connection_config: 连接配置字典
-
-        Raises:
-            ValueError: 连接配置无效
-
-        Validation Rules:
-            - 不能为空且必须是字典
-            - 所有键必须是字符串
-        """
-        if not connection_config or not isinstance(connection_config, dict):
-            raise ValueError("连接配置不能为空且必须是字典")
-
-        # 键名格式检查
-        for key in connection_config.keys():
-            if not isinstance(key, str):
-                raise ValueError("连接配置的键必须是字符串")
 
     @_handle_config_operation("配置文件加载")
     def _load_config(self) -> Dict[str, Any]:
@@ -1011,7 +866,8 @@ class ConfigManager:
         Example:
             >>> config_manager.remove_config("postgres_db")
         """
-        self._validate_connection_name(name)
+
+        ConfigValidator.validate_connection_name(name)
 
         config = self._load_config()
         self._ensure_connection_exists(config, name)
@@ -1074,8 +930,8 @@ class ConfigManager:
             >>> new_config = {"host": "new_host", "port": 5433}
             >>> config_manager.update_config("postgres_db", new_config)
         """
-        self._validate_connection_name(name)
-        self._validate_connection_config(connection_config)
+        ConfigValidator.validate_connection_name(name)
+        ConfigValidator.validate_connection_config(connection_config)
 
         # 加载配置并直接更新
         config = self._load_config()
@@ -1131,7 +987,7 @@ class ConfigManager:
             >>> print(config["host"])
             "localhost"
         """
-        self._validate_connection_name(name)
+        ConfigValidator.validate_connection_name(name)
 
         config = self._load_config()
         self._ensure_connection_exists(config, name)
