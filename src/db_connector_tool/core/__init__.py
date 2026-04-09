@@ -42,6 +42,7 @@
 from .config import ConfigManager
 from .connections import DatabaseManager
 from .crypto import CryptoManager
+from .key_manager import KeyManager
 from .exceptions import (
     ConfigError,
     ConnectionError,
@@ -65,6 +66,7 @@ __all__ = [
     "DatabaseManager",
     # ==================== 加密管理模块 ====================
     "CryptoManager",
+    "KeyManager",
     # ==================== 异常处理体系 ====================
     # 基础异常类
     "DBConnectorError",
@@ -91,6 +93,7 @@ __all__ = [
 ConfigManagerType = ConfigManager
 DatabaseManagerType = DatabaseManager
 CryptoManagerType = CryptoManager
+KeyManagerType = KeyManager
 
 # 向后兼容性信息
 

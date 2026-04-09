@@ -316,9 +316,13 @@ class TestConfigManagerAdvanced(unittest.TestCase):
     def test_close_method(self) -> None:
         """测试 close 方法"""
         config_manager = ConfigManager(self.app_name, self.config_file)
-        self.assertIsNotNone(config_manager.crypto)
+        # 确保加密管理器已初始化
+        crypto = config_manager.key_manager.get_crypto_manager()
+        self.assertIsNotNone(crypto)
         config_manager.close()
-        self.assertIsNone(config_manager.crypto)
+        # 验证加密管理器已被清理
+        with self.assertRaises(ConfigError):
+            config_manager.key_manager.get_crypto_manager()
 
     def test_validate_connection_name_length(self) -> None:
         """测试连接名称长度验证"""
@@ -535,11 +539,11 @@ class TestConfigManagerAdvanced(unittest.TestCase):
         config_manager = ConfigManager(self.app_name, self.config_file)
 
         # 加密管理器应该已经初始化
-        self.assertIsNotNone(config_manager.crypto)
+        crypto = config_manager.key_manager.get_crypto_manager()
+        self.assertIsNotNone(crypto)
 
         # 清理后再次检查
         config_manager.close()
-        self.assertIsNone(config_manager.crypto)
 
         # 尝试确保初始化（应该抛出异常）
         with self.assertRaises(ConfigError):
