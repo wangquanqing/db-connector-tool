@@ -28,7 +28,6 @@
 """
 
 import base64
-import re
 import secrets
 import string
 import time
@@ -318,7 +317,7 @@ class CryptoManager:
             - 大写字母: A-Z (26个)
             - 小写字母: a-z (26个)
             - 数字: 0-9 (10个)
-            - 特殊字符: !@#$%^&*()_+-=[]{}|;:,.<>?~`"'\/ (32个)
+            - 特殊字符: !@#$%^&*()_+-=[]{}|;:,.<>?~`\"'\\/ (32个)
         """
         # 定义丰富的字符集（94个字符）
         character_set = (

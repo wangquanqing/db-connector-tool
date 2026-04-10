@@ -25,7 +25,6 @@
 import hashlib
 import hmac
 import json
-import re
 import shutil
 import tomllib
 from datetime import datetime, timezone
@@ -39,7 +38,7 @@ from ..utils.logging_utils import get_logger
 from ..utils.path_utils import PathHelper
 from .exceptions import ConfigError
 from .key_manager import KeyManager
-from .validators import ConfigValidator, GenericValidator
+from .validators import ConfigValidator
 
 # 获取模块级别的日志记录器
 logger = get_logger(__name__)
@@ -406,7 +405,7 @@ class ConfigManager:
             config["metadata"]["audit_log"] = config["metadata"]["audit_log"][-100:]
 
         # 验证配置结构
-        self._validate_config(config)
+        ConfigValidator.validate_config(config)
 
         with open(self.config_path, "wb") as f:
             f.write(tomli_w.dumps(config).encode("utf-8"))
@@ -415,32 +414,6 @@ class ConfigManager:
         self._config_cache = None
         self._config_mtime = None
         logger.debug("配置文件已保存: %s", self.config_path)
-
-    def _validate_config(self, config: Dict[str, Any]) -> None:
-        """
-        验证配置文件结构
-
-        Args:
-            config: 要验证的配置字典
-
-        Raises:
-            ConfigError: 配置结构无效
-
-        Validation Rules:
-            - 必须包含 version, app_name, connections, metadata 字段
-            - 版本号格式必须有效
-            - metadata 字段必须包含必要的子字段
-            - connections 必须是字典类型
-            - 审计日志必须是列表类型
-            - 密钥版本必须是有效的字符串
-        """
-        ConfigValidator.validate_config(config)
-
-
-
-
-
-
 
     def add_config(self, name: str, connection_config: Dict[str, Any]) -> None:
         """添加数据库连接配置
@@ -490,8 +463,6 @@ class ConfigManager:
             self._save_config(config, self.OPERATION_ADD)
             self._log_operation_success("添加", name)
 
-
-
     @_handle_config_operation("配置文件加载")
     def _load_config(self) -> Dict[str, Any]:
         """
@@ -524,7 +495,7 @@ class ConfigManager:
             config = tomllib.load(f)
 
         # 验证配置文件结构
-        self._validate_config(config)
+        ConfigValidator.validate_config(config)
 
         # 验证数字签名
         self._verify_config_signature(config)
@@ -737,7 +708,7 @@ class ConfigManager:
             current_version = config["version"]
 
             # 确保当前版本号格式有效
-            if not self._is_valid_version_format(current_version):
+            if not ConfigValidator.is_valid_version_format(current_version):
                 # 如果当前版本号格式无效，重置为初始版本
                 logger.warning(
                     "无效的版本号格式，重置为初始版本: %s -> 1.0.0", current_version
@@ -767,7 +738,7 @@ class ConfigManager:
             new_version = f"{major_num}.{minor_num}.{patch_num}"
 
             # 验证新版本号格式
-            if not self._is_valid_version_format(new_version):
+            if not ConfigValidator.is_valid_version_format(new_version):
                 raise ConfigError(
                     "版本号格式无效",
                     details={
