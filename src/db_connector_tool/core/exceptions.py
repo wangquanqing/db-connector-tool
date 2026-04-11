@@ -280,7 +280,7 @@ class DatabaseError(DBConnectorError):
             self.details["operation"] = operation
 
 
-class ConnectionError(DatabaseError):
+class DBConnectionError(DatabaseError):
     """
     数据库连接异常
 
@@ -294,7 +294,7 @@ class ConnectionError(DatabaseError):
         database (str | None): 数据库名称
 
     Example:
-        >>> raise ConnectionError(
+        >>> raise DBConnectionError(
         ...     "数据库连接失败",
         ...     "CONN_001",
         ...     connection_name="main_db",
@@ -598,19 +598,18 @@ class FileSystemError(DBConnectorError):
             self.details["operation"] = operation
 
 
-class TimeoutError(DBConnectorError):
+class DBTimeoutError(DBConnectorError):
     """
     超时异常
 
-    处理各种操作超时的情况。
-    包含超时时间和操作类型信息。
+    处理各种操作超时的情况，包含超时时间和操作类型信息。
 
     Attributes:
         timeout_seconds (float | None): 超时时间（秒）
         operation (str | None): 超时的操作类型
 
     Example:
-        >>> raise TimeoutError(
+        >>> raise DBTimeoutError(
         ...     "数据库查询超时",
         ...     "TIMEOUT_001",
         ...     timeout_seconds=30.0,

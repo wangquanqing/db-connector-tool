@@ -1,6 +1,6 @@
 """验证器模块
 
-提供统一的验证功能，包括配置验证、连接验证、密码验证等。
+提供统一的验证功能，包括配置验证、 连接验证、 密码验证等。
 所有验证方法集中管理，便于维护和复用。
 """
 
@@ -155,10 +155,51 @@ class ConnectionValidator:
         Raises:
             ConfigError: 当基本配置验证失败时
         """
+        ConnectionValidator._validate_config_structure(config)
+        db_type = ConnectionValidator._validate_database_type(config)
+        ConnectionValidator._validate_string_parameters(config)
+
+        # SQLite数据库特殊处理
+        if db_type == "sqlite":
+            ConnectionValidator._handle_sqlite_config(config)
+            return
+
+        # 应用特定数据库类型的默认配置
+        ConnectionValidator._apply_default_config(config)
+
+        # 验证必需参数和其他参数
+        ConnectionValidator._validate_required_parameters(config)
+        ConnectionValidator._validate_optional_parameters(config)
+        ConnectionValidator._validate_database_specific_parameters(config, db_type)
+
+    @staticmethod
+    def _validate_config_structure(config: Dict[str, Any]) -> None:
+        """
+        验证配置结构
+
+        Args:
+            config: 连接配置字典
+
+        Raises:
+            ConfigError: 当配置结构无效时
+        """
         if not config or not isinstance(config, dict):
             raise ConfigError("连接配置不能为空且必须是字典")
 
-        # 验证数据库类型
+    @staticmethod
+    def _validate_database_type(config: Dict[str, Any]) -> str:
+        """
+        验证数据库类型
+
+        Args:
+            config: 连接配置字典
+
+        Returns:
+            str: 数据库类型
+
+        Raises:
+            ConfigError: 当数据库类型不支持时
+        """
         db_type = config.get("type", "").lower()
         if db_type not in ConnectionValidator.SUPPORTED_DATABASE_TYPES:
             supported_types = ", ".join(
@@ -167,18 +208,19 @@ class ConnectionValidator:
             raise ConfigError(
                 f"不支持的数据库类型: {db_type}，支持的类型: {supported_types}"
             )
+        return db_type
 
-        # 字符串参数验证函数
-        def validate_string_param(param_name, value, max_length=100):
-            if not isinstance(value, str):
-                raise ConfigError(f"{param_name}必须是字符串类型")
-            if len(value) > max_length:
-                raise ConfigError(f"{param_name}长度不能超过{max_length}个字符")
-            # 检查特殊字符，防止注入攻击
-            if re.search(r"[;\\\'\"]", value):
-                raise ConfigError(f"{param_name}包含不允许的特殊字符")
+    @staticmethod
+    def _validate_string_parameters(config: Dict[str, Any]) -> None:
+        """
+        验证字符串参数
 
-        # 验证字符串参数
+        Args:
+            config: 连接配置字典
+
+        Raises:
+            ConfigError: 当字符串参数无效时
+        """
         string_params = [
             "username",
             "password",
@@ -190,23 +232,69 @@ class ConnectionValidator:
         ]
         for param in string_params:
             if param in config:
-                validate_string_param(param, config[param])
+                ConnectionValidator._validate_string_param(param, config[param])
 
-        # SQLite数据库特殊处理
-        if db_type == "sqlite":
-            if "database" not in config:
-                config["database"] = ":memory:"
-            return
+    @staticmethod
+    def _validate_string_param(
+        param_name: str, value: Any, max_length: int = 100
+    ) -> None:
+        """
+        验证字符串参数
 
-        # 应用特定数据库类型的默认配置
-        ConnectionValidator._apply_default_config(config)
+        Args:
+            param_name: 参数名称
+            value: 参数值
+            max_length: 最大长度
 
-        # 验证必需参数
+        Raises:
+            ConfigError: 当字符串参数无效时
+        """
+        if not isinstance(value, str):
+            raise ConfigError(f"{param_name}必须是字符串类型")
+        if len(value) > max_length:
+            raise ConfigError(f"{param_name}长度不能超过{max_length}个字符")
+        # 检查特殊字符，防止注入攻击
+        if re.search(r"[;\\\'\"]", value):
+            raise ConfigError(f"{param_name}包含不允许的特殊字符")
+
+    @staticmethod
+    def _handle_sqlite_config(config: Dict[str, Any]) -> None:
+        """
+        处理SQLite数据库配置
+
+        Args:
+            config: 连接配置字典
+        """
+        if "database" not in config:
+            config["database"] = ":memory:"
+
+    @staticmethod
+    def _validate_required_parameters(config: Dict[str, Any]) -> None:
+        """
+        验证必需参数
+
+        Args:
+            config: 连接配置字典
+
+        Raises:
+            ConfigError: 当缺少必需参数时
+        """
         required_fields = ["username", "password", "host"]
         missing_fields = [field for field in required_fields if field not in config]
         if missing_fields:
             raise ConfigError(f"缺少必需的连接参数: {', '.join(missing_fields)}")
 
+    @staticmethod
+    def _validate_optional_parameters(config: Dict[str, Any]) -> None:
+        """
+        验证可选参数
+
+        Args:
+            config: 连接配置字典
+
+        Raises:
+            ConfigError: 当可选参数无效时
+        """
         # 验证端口号
         if "port" in config:
             port = config["port"]
@@ -225,7 +313,20 @@ class ConnectionValidator:
             if not isinstance(pool_size, int) or pool_size <= 0:
                 raise ConfigError("连接池大小必须是大于0的整数")
 
-        # 验证特定数据库类型的参数
+    @staticmethod
+    def _validate_database_specific_parameters(
+        config: Dict[str, Any], db_type: str
+    ) -> None:
+        """
+        验证特定数据库类型的参数
+
+        Args:
+            config: 连接配置字典
+            db_type: 数据库类型
+
+        Raises:
+            ConfigError: 当特定数据库类型的参数无效时
+        """
         if db_type == "oracle":
             if "service_name" not in config and "sid" not in config:
                 raise ConfigError("Oracle数据库必须提供service_name或sid")

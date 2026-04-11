@@ -4,15 +4,7 @@
 使用 PBKDF2-HMAC-SHA256 进行密钥派生，支持密码学安全的随机数生成、
 数据加密解密等操作。
 
-主要特性：
-- 基于 PBKDF2-HMAC-SHA256 的密钥派生，防止暴力破解攻击
-- 使用 secrets 模块生成密码学安全的随机数和盐值
-- 支持字符串和字节数据的加密解密操作
-- 提供密钥信息的持久化存储和恢复功能
-- 完整的错误处理、日志记录和安全最佳实践
-- 自动根据系统性能调整迭代次数优化性能
-
-使用示例：
+Example:
 >>> from db_connector_tool.core.crypto import CryptoManager
 >>>
 >>> # 创建加密管理器实例
@@ -52,26 +44,7 @@ class CryptoManager:
     使用 PBKDF2-HMAC-SHA256 进行安全的密钥派生，支持自动参数优化，
     支持上下文管理器模式，确保敏感数据的精确生命周期管理。
 
-    主要功能：
-    - 安全的密码和盐值生成
-    - 字符串和字节数据的加密解密
-    - 密钥信息的持久化存储和恢复
-    - 密码强度验证和自动调整
-    - 敏感数据的安全清理
-    - 上下文管理器支持（精确生命周期控制）
-
-    类属性：
-    - DEFAULT_SALT_LENGTH: 默认盐值长度（16字节，符合安全标准）
-    - MIN_SALT_LENGTH: 最小盐值长度（16字节，安全要求）
-    - DEFAULT_PASSWORD_LENGTH: 默认密码长度（32字节）
-    - DEFAULT_ITERATIONS: PBKDF2 默认迭代次数（480000，OWASP推荐）
-
-    异常处理：
-    - CryptoError: 加密相关操作失败时抛出
-    - ValueError: 参数验证失败时抛出
-    - InvalidToken: 解密令牌无效时抛出
-
-    使用示例：
+    Example:
     >>> # 创建默认配置的加密管理器
     >>> crypto = CryptoManager()
     >>>
@@ -122,9 +95,6 @@ class CryptoManager:
     ):
         """初始化加密管理器实例
 
-        创建新的加密管理器，支持自定义密码、盐值和迭代次数配置。
-        如果参数为 None，将自动生成安全的默认值。
-
         Args:
             password: 加密使用的密码。None 时自动生成安全的随机密码
             salt: 加密盐值。None 时自动生成安全的随机盐值
@@ -151,6 +121,7 @@ class CryptoManager:
             ...     "saved_password", b"saved_salt", skip_password_validation=True
             ... )
         """
+
         # 验证用户提供的密码强度
         if (
             password is not None
@@ -199,6 +170,7 @@ class CryptoManager:
 
     def __str__(self) -> str:
         """返回加密管理器的用户友好字符串表示"""
+
         status = "✅ 已初始化" if self.is_initialized() else "❌ 未初始化"
         return (
             f"CryptoManager({status}, 盐值:{len(self.salt)}B, 迭代:{self.iterations:,})"
@@ -206,6 +178,7 @@ class CryptoManager:
 
     def __repr__(self) -> str:
         """返回加密管理器的详细表示（安全版本）"""
+
         status = (
             "initialized"
             if hasattr(self, "fernet") and self.fernet
@@ -223,10 +196,8 @@ class CryptoManager:
 
         Returns:
             CryptoManager: 当前加密管理器实例
-
-        Note:
-            允许使用 with 语句来精确控制加密管理器的生命周期
         """
+
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -236,38 +207,20 @@ class CryptoManager:
             exc_type: 异常类型（如果有异常发生）
             exc_val: 异常值（如果有异常发生）
             exc_tb: 异常回溯（如果有异常发生）
-
-        Note:
-            无论是否发生异常，都会确保敏感数据被安全清理
         """
+
         self._clear_sensitive_data()
         logger.info("加密管理器上下文已退出")
 
     def close(self):
-        """手动关闭加密管理器，清理敏感数据
+        """手动关闭加密管理器，清理敏感数据"""
 
-        Note:
-            提供显式的清理方法，适用于不使用 with 语句的场景
-        """
         self._clear_sensitive_data()
         logger.info("加密管理器已手动关闭")
 
     def _clear_sensitive_data(self):
-        """清理内存中的敏感数据（私有方法）
+        """清理内存中的敏感数据（私有方法）"""
 
-        安全地覆盖内存中的密码、盐值等敏感信息，防止数据泄漏。
-        调用后实例将无法继续使用加密解密功能。
-
-        Security:
-            - 多次覆盖敏感数据（固定字符 + 随机字符 + 清零）
-            - 确保原始数据长度不变，防止长度分析攻击
-            - 清理 Fernet 实例引用
-
-        Note:
-            - 调用后需要重新创建实例才能继续使用
-            - 主要用于上下文管理器和析构函数
-            - 符合内存安全最佳实践
-        """
         # 标记清理状态
         self._cleaned = True
 
@@ -361,11 +314,10 @@ class CryptoManager:
     def _generate_forced_strong_password(self) -> str:
         """强制生成符合强度要求的密码
 
-        当常规方法达到最大尝试次数时使用，确保一定能生成有效密码。
-
         Returns:
             str: 强制生成的符合强度要求的密码
         """
+
         # 确保每个类别至少有一个字符
         uppercase_char = secrets.choice(string.ascii_uppercase)
         lowercase_char = secrets.choice(string.ascii_lowercase)
@@ -404,15 +356,8 @@ class CryptoManager:
 
         Raises:
             ValueError: 盐值长度不足
-
-        Security:
-            - 使用 secrets 模块确保密码学安全性
-            - 盐值长度符合安全标准（16字节）
-            - 每个盐值都是唯一的随机值
-
-        Note:
-            secrets.token_bytes() 比 random 模块更安全，适用于密码学场景
         """
+
         salt_length = length or self.DEFAULT_SALT_LENGTH
 
         if salt_length < self.MIN_SALT_LENGTH:
@@ -425,13 +370,8 @@ class CryptoManager:
 
         Returns:
             int: 适合当前系统性能的迭代次数
-
-        Process:
-            1. 测试基础迭代次数的执行时间
-            2. 目标是找到一个在 100-200ms 内完成的迭代次数
-            3. 确保最低迭代次数不低于 100000
-            4. 最高迭代次数不超过 1000000
         """
+
         # 测试基础迭代次数的执行时间
         test_iterations = self.MIN_ITERATIONS
         test_password = "test_password"
@@ -479,12 +419,8 @@ class CryptoManager:
 
         Raises:
             CryptoError: 密钥派生或 Fernet 实例创建失败
-
-        Process:
-            1. 使用 PBKDF2 从密码和盐值派生密钥
-            2. 将派生的密钥编码为 base64 格式
-            3. 创建 Fernet 实例
         """
+
         try:
             # 使用 PBKDF2 进行密钥派生
             key_derivation_function = PBKDF2HMAC(
@@ -507,8 +443,6 @@ class CryptoManager:
 
     def encrypt(self, data: str) -> str:
         """加密字符串数据
-
-        将明文字符串加密为 base64 编码的安全字符串，支持 Unicode 字符和特殊字符。
 
         Args:
             data: 要加密的明文字符串数据，不能为空且必须是字符串类型
@@ -535,6 +469,7 @@ class CryptoManager:
             >>> encrypted = crypto.encrypt("中文文本 🌟 emoji 表情")
             >>> print("加密成功")
         """
+
         if not data or not isinstance(data, str):
             raise ValueError("加密数据不能为空且必须是字符串")
 
@@ -545,8 +480,6 @@ class CryptoManager:
 
     def decrypt(self, encrypted_data: str) -> str:
         """解密加密数据
-
-        将 base64 编码的加密字符串解密为原始明文字符串，验证数据完整性和时间戳有效性。
 
         Args:
             encrypted_data: base64 URL 安全编码的加密字符串数据
@@ -575,6 +508,7 @@ class CryptoManager:
             ... except InvalidToken:
             ...     print("令牌无效，数据可能被篡改")
         """
+
         if not encrypted_data or not isinstance(encrypted_data, str):
             raise ValueError("加密数据不能为空且必须是字符串")
 
@@ -601,6 +535,7 @@ class CryptoManager:
             >>> data = b"binary_data"
             >>> encrypted = crypto.encrypt_bytes(data)
         """
+
         if not data or not isinstance(data, bytes):
             raise ValueError("加密数据不能为空且必须是字节")
 
@@ -624,6 +559,7 @@ class CryptoManager:
             >>> crypto = CryptoManager()
             >>> decrypted = crypto.decrypt_bytes(encrypted_bytes)
         """
+
         if not encrypted_data or not isinstance(encrypted_data, bytes):
             raise ValueError("加密数据不能为空且必须是字节")
 
@@ -641,6 +577,7 @@ class CryptoManager:
         Raises:
             CryptoError: 加密过程失败
         """
+
         if self.fernet is None:
             raise CryptoError("加密管理器未初始化或已被销毁，无法执行加密操作")
 
@@ -663,6 +600,7 @@ class CryptoManager:
             CryptoError: 解密过程失败
             InvalidToken: 加密数据被篡改或密钥不匹配
         """
+
         if self.fernet is None:
             raise CryptoError("加密管理器未初始化或已被销毁，无法执行解密操作")
 
@@ -681,13 +619,6 @@ class CryptoManager:
         Returns:
             Dict[str, Any]: 包含密码、盐值和迭代次数的字典
 
-        Warning:
-            密钥信息应安全存储，避免泄露。建议使用安全的存储机制。
-
-        Security Note:
-            - 盐值和密码都以 base64 编码形式存储
-            - 实际应用中应考虑额外的安全措施
-
         Example:
             >>> key_info = crypto.get_key_info()
             >>> print(key_info)
@@ -697,6 +628,7 @@ class CryptoManager:
                 'iterations': 480000
             }
         """
+
         return {
             "salt": base64.urlsafe_b64encode(self.salt).decode("utf-8"),
             "password": self.password,
@@ -709,6 +641,7 @@ class CryptoManager:
         Returns:
             Dict[str, Any]: 包含安全相关信息的字典
         """
+
         return {
             "salt_length": len(self.salt),
             "password_length": len(self.password),
@@ -724,6 +657,7 @@ class CryptoManager:
         Returns:
             bool: 如果已初始化且可用返回 True，否则返回 False
         """
+
         return hasattr(self, "fernet") and self.fernet is not None
 
     def verify_encryption(self, test_data: str = "test_encryption_data") -> bool:
@@ -735,6 +669,7 @@ class CryptoManager:
         Returns:
             bool: 如果加密解密过程正常返回 True，否则返回 False
         """
+
         try:
             encrypted = self.encrypt(test_data)
             decrypted = self.decrypt(encrypted)
@@ -756,6 +691,7 @@ class CryptoManager:
             ValueError: 新密码强度不足
             CryptoError: 重新初始化失败
         """
+
         if validate_strength and not PasswordValidator.validate_strength(new_password):
             password_strength = PasswordValidator.get_strength(new_password)
             raise ValueError(f"新密码强度不足 ({password_strength})，请使用更强的密码")
@@ -792,6 +728,7 @@ class CryptoManager:
         Raises:
             ValueError: 密码强度不足
         """
+
         if password is not None and not PasswordValidator.validate_strength(password):
             password_strength = PasswordValidator.get_strength(password)
             raise ValueError(f"密码强度不足 ({password_strength})，请使用更强的密码")
@@ -822,6 +759,7 @@ class CryptoManager:
             ...     "saved_password", "saved_salt_base64", 480000
             ... )
         """
+
         if not password or not salt:
             raise ValueError("密码和盐值不能为空")
 

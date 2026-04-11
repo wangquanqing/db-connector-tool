@@ -4,25 +4,7 @@
 封装了数据库连接管理、查询执行、连接池配置和错误处理等功能，
 提供线程安全的数据库操作接口。
 
-支持的数据库类型：
-- Oracle
-- PostgreSQL
-- MySQL
-- SQL Server
-- SQLite
-- GBase 8s
-
-主要特性：
-- 多数据库类型支持，统一接口
-- 连接池管理和优化配置
-- 线程安全操作，支持并发访问
-- 上下文管理器支持，自动资源管理
-- 详细的错误处理和日志记录
-- 自动重连机制和连接有效性验证
-- 参数化查询支持，防止 SQL 注入
-- 完整的数据库元数据获取功能
-
-使用示例：
+Example:
 >>> from db_connector_tool.drivers.sqlalchemy_driver import SQLAlchemyDriver
 >>>
 >>> # 创建数据库驱动实例
@@ -40,7 +22,7 @@
 >>> with driver:
 ...     results = driver.execute_query("SELECT * FROM users")
 ...     print(results)
-...
+>>>
 >>> # 手动管理连接
 >>> driver.connect()
 >>> try:
@@ -60,8 +42,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import scoped_session, sessionmaker
 
-from ..core.exceptions import ConnectionError as DBConnectionError
-from ..core.exceptions import DriverError, QueryError
+from ..core.exceptions import DBConnectionError, DriverError, QueryError
 from ..utils.logging_utils import get_logger
 
 logger = get_logger(__name__)
@@ -71,8 +52,7 @@ logger = get_logger(__name__)
 def parse_kingbase_version(self, connection: Any) -> Tuple[int, ...]:
     """解析 Kingbase 数据库版本信息
 
-    从数据库连接中获取版本信息并解析为版本号元组，
-    支持多种版本字符串格式，确保正确识别 Kingbase 数据库版本。
+    解析 Kingbase 数据库的版本字符串，提取主版本号、次版本号和修订号。
 
     Args:
         connection: 数据库连接对象，用于执行版本查询
@@ -110,60 +90,39 @@ class SQLAlchemyDriver:
     """SQLAlchemy 数据库驱动类 (SQLAlchemy Driver)
 
     提供统一的数据库连接和操作接口，支持多种数据库类型，
-    使用连接池管理数据库连接，提高性能和资源利用率。
+    使用连接池管理数据库连接，提高性能和资源利用率，
+    支持上下文管理器协议，可使用 `with` 语句自动管理连接。
 
-    主要特性：
-    - 多数据库类型支持（Oracle、PostgreSQL、MySQL、SQL Server、SQLite、GBase 8s）
-    - 连接池管理和优化配置，提高性能
-    - 线程安全操作，支持并发访问
-    - 上下文管理器支持，自动资源管理
-    - 详细的错误处理和日志记录
-    - 连接有效性验证和自动重连机制
-    - 参数化查询支持，防止 SQL 注入
-    - 完整的数据库元数据获取功能
-    - 统一的异常处理机制
-
-    类属性：
-    - DB_CONFIGS (Dict[str, Dict[str, Any]]): 各数据库类型的连接配置，包含URL模板、必需参数、默认端口和默认值
-    - TEST_QUERY_DEFAULT (str): 默认测试查询语句
-    - ORACLE_TEST_QUERY (str): Oracle 专用测试查询语句
-
-    异常处理：
-    - DBConnectionError: 数据库连接失败时抛出
-    - QueryError: 查询执行失败时抛出
-    - DriverError: 驱动配置错误时抛出
-
-    使用示例：
-    >>> # 创建默认配置的数据库驱动
-    >>> config = {
-    ...     "type": "mysql",
-    ...     "host": "localhost",
-    ...     "port": 3306,
-    ...     "database": "test_db",
-    ...     "username": "user",
-    ...     "password": "password"
-    ... }
-    >>> driver = SQLAlchemyDriver(config)
-    >>>
-    >>> # 使用上下文管理器（推荐方式）
-    >>> with driver:
-    ...     results = driver.execute_query("SELECT * FROM users")
-    ...     print(results)
-    ...     # 退出 with 块时自动关闭连接
-    ...
-    >>> # 手动管理连接（备选方式）
-    >>> driver.connect()
-    >>> try:
-    ...     affected = driver.execute_command("UPDATE users SET status = 'active'")
-    ...     print(f"更新了 {affected} 行")
-    ... finally:
-    ...     driver.disconnect()  # 确保关闭连接
-    >>>
-    >>> # 测试连接
-    >>> if driver.test_connection():
-    ...     print("数据库连接正常")
-    ... else:
-    ...     print("数据库连接异常")
+    Example:
+        >>> # 创建默认配置的数据库驱动
+        >>> config = {
+        ...     "type": "mysql",
+        ...     "host": "localhost",
+        ...     "port": 3306,
+        ...     "database": "test_db",
+        ...     "username": "user",
+        ...     "password": "password"
+        ... }
+        >>> driver = SQLAlchemyDriver(config)
+        >>>
+        >>> # 使用上下文管理器（推荐方式）
+        >>> with driver:
+        ...     results = driver.execute_query("SELECT * FROM users")
+        ...     print(results)
+        >>>
+        >>> # 手动管理连接（备选方式）
+        >>> driver.connect()
+        >>> try:
+        ...     affected = driver.execute_command("UPDATE users SET status = 'active'")
+        ...     print(f"更新了 {affected} 行")
+        ... finally:
+        ...     driver.disconnect()
+        >>>
+        >>> # 测试连接
+        >>> if driver.test_connection():
+        ...     print("数据库连接正常")
+        ... else:
+        ...     print("数据库连接异常")
     """
 
     # 数据库连接配置
@@ -225,7 +184,7 @@ class SQLAlchemyDriver:
     def __init__(self, config: Dict[str, Any]) -> None:
         """初始化 SQLAlchemy 驱动
 
-        创建新的 SQLAlchemy 驱动实例，验证配置有效性并准备连接参数。
+        创建新的 SQLAlchemy 驱动实例，自动验证配置并准备连接参数。
 
         Args:
             config: 数据库连接配置字典，包含以下必需字段：
@@ -272,7 +231,7 @@ class SQLAlchemyDriver:
         """返回 SQLAlchemyDriver 的用户友好字符串表示
 
         Returns:
-            格式为 "SQLAlchemyDriver('database_type', connected: True/False)" 的字符串
+            str: 格式为 "SQLAlchemyDriver('database_type', connected: True/False)" 的字符串
         """
         db_type = self.config.get("type", "unknown")
         is_connected = self.engine is not None
@@ -282,7 +241,7 @@ class SQLAlchemyDriver:
         """返回 SQLAlchemyDriver 的详细表示，用于调试
 
         Returns:
-            包含完整配置信息的字符串，用于调试
+            str: 包含完整配置信息的字符串，用于调试
         """
         db_type = self.config.get("type", "unknown")
         host = self.config.get("host", "N/A")
@@ -298,59 +257,37 @@ class SQLAlchemyDriver:
         )
 
     def __enter__(self) -> "SQLAlchemyDriver":
-        """上下文管理器入口
-
-        使用 with 语句时自动建立数据库连接。
+        """上下文管理器入口，返回自身实例
 
         Returns:
-            SQLAlchemyDriver: 返回驱动实例自身
-
-        Note:
-            允许使用 with 语句来精确控制驱动的生命周期，
-            退出 with 块时会自动关闭连接。
+            SQLAlchemyDriver: 当前驱动实例
 
         Example:
             >>> with SQLAlchemyDriver(config) as driver:
             ...     results = driver.execute_query("SELECT * FROM users")
-            ...     # 退出with块时自动关闭连接
         """
         self.connect()
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
-        """上下文管理器出口
-
-        退出 with 语句块时自动关闭数据库连接，
-        会正确处理执行过程中发生的异常。
+    def __exit__(
+        self, exc_type: type | None, exc_val: Exception | None, exc_tb: Any | None
+    ) -> None:
+        """上下文管理器出口，自动关闭数据库连接
 
         Args:
             exc_type: 异常类型（如果有异常发生）
             exc_val: 异常值（如果有异常发生）
             exc_tb: 异常回溯（如果有异常发生）
-
-        Note:
-            无论是否发生异常，都会确保数据库连接被安全关闭
         """
         self.disconnect()
 
     def _validate_config(self) -> None:
-        """验证数据库连接配置
+        """验证数据库连接配置（内部方法）
 
-        检查配置字典中是否包含所有必需的参数，以及数据库类型是否受支持，
-        确保配置的完整性和有效性，为后续的连接建立做好准备。
+        验证数据库类型是否支持，以及必需的连接参数是否存在。
 
         Raises:
             DriverError: 当配置无效时抛出，包含具体的错误信息
-
-        Process:
-            1. 验证数据库类型是否在支持列表中
-            2. 检查配置中是否包含所有必需参数
-            3. 验证必需参数是否非空
-
-        Note:
-            - 不区分数据库类型的大小写
-            - 必需参数列表根据数据库类型从 DB_CONFIGS 中获取
-            - 空字符串或 None 值都被视为无效参数
         """
         database_type = self.config.get("type", "").lower()
 
@@ -373,29 +310,16 @@ class SQLAlchemyDriver:
             )
 
     def _build_connection_url(self) -> str:
-        """构建数据库连接URL
+        """构建数据库连接URL（内部方法）
 
-        根据配置信息构建 SQLAlchemy 格式的数据库连接URL，
-        对于包含特殊字符的密码、用户名和主机名，会进行URL编码处理，
-        确保连接URL的正确性和安全性。
+        根据配置信息构建 SQLAlchemy 格式的数据库连接 URL，
+        自动处理特殊字符的 URL 编码，确保连接字符串的安全性。
 
         Returns:
             str: SQLAlchemy 格式的数据库连接URL
 
         Raises:
             DriverError: 当构建URL过程中发生错误时
-
-        Process:
-            1. 获取对应数据库类型的URL模板
-            2. 设置默认端口（如未配置）
-            3. 对用户名、密码、主机名进行URL编码
-            4. 使用配置参数格式化URL模板
-
-        Note:
-            - 使用 urllib.parse.quote_plus 进行URL编码
-            - 支持特殊字符如 @、:、/、空格等的正确编码
-            - IPv6 地址会被正确编码
-            - 端口使用数据库类型的默认值（如未指定）
         """
         database_type = self.config["type"].lower()
         database_config = self.DB_CONFIGS[database_type]
@@ -422,17 +346,11 @@ class SQLAlchemyDriver:
     def connect(self) -> None:
         """建立数据库连接
 
-        创建 SQLAlchemy 引擎和会话工厂，配置连接池参数，
-        如果已存在连接，会先关闭旧连接。
+        初始化 SQLAlchemy 引擎和会话，配置连接池参数，
+        建立与数据库的连接，支持线程安全的操作。
 
         Raises:
             DBConnectionError: 当连接失败时抛出
-
-        Note:
-            - 连接池大小默认为5，最大溢出为10
-            - 连接超时时间为30秒
-            - 启用连接预ping以验证连接有效性
-            - 自动回收超过3600秒的空闲连接
 
         Example:
             >>> driver.connect()  # 建立连接
@@ -471,13 +389,8 @@ class SQLAlchemyDriver:
     def disconnect(self) -> None:
         """断开数据库连接
 
-        关闭所有连接池中的连接，释放数据库资源，
-        此方法会安全地处理各种连接状态。
-
-        Note:
-            - 即使连接未建立，调用此方法也不会报错
-            - 会等待所有进行中的事务完成后再关闭连接
-            - 关闭后会清理会话和引擎对象
+        关闭数据库会话，释放连接池资源，
+        确保数据库连接被正确关闭，避免资源泄漏。
 
         Example:
             >>> driver.connect()
@@ -508,15 +421,11 @@ class SQLAlchemyDriver:
     def test_connection(self) -> bool:
         """测试数据库连接
 
-        验证数据库连接是否可用，包括连接建立和基础查询测试，
-        如果连接未建立，会自动尝试建立连接。
+        测试数据库连接是否可用，自动处理连接建立和错误捕获，
+        返回连接状态，不抛出异常。
 
         Returns:
             bool: 连接是否可用
-
-        Note:
-            测试失败时会记录警告日志，但不会抛出异常
-            适合用于连接状态检查和健康监控
 
         Example:
             >>> if driver.test_connection():
@@ -546,32 +455,13 @@ class SQLAlchemyDriver:
             return False
 
     def _perform_connection_test(self) -> bool:
-        """执行连接测试
+        """执行连接测试（内部方法）
 
-        执行简单的查询来验证数据库连接是否正常工作，
-        对于不同类型的数据库使用相应的测试查询，
-        确保数据库引擎和连接池正常工作。
+        执行简单的 SQL 查询来验证数据库连接是否正常，
+        根据数据库类型选择合适的测试查询语句。
 
         Returns:
             bool: 连接测试是否成功
-
-        Note:
-            - Oracle 数据库使用特殊的测试查询 "SELECT 1 FROM DUAL"
-            - 其他数据库使用标准测试查询 "SELECT 1"
-            - 测试失败会记录警告日志但不抛出异常
-            - 测试成功后会立即释放连接，不占用连接池资源
-
-        Process:
-            1. 检查数据库引擎是否已初始化
-            2. 根据数据库类型选择合适的测试查询
-            3. 建立临时连接并执行查询
-            4. 获取查询结果验证连接有效性
-            5. 释放临时连接
-
-        Security:
-            - 测试查询不涉及任何用户数据
-            - 使用参数化查询的方式执行（虽然此查询不需要参数）
-            - 连接用完即释放，避免资源泄漏
         """
         if self.engine is None:
             logger.warning("连接测试失败: 数据库引擎未初始化")
@@ -594,8 +484,8 @@ class SQLAlchemyDriver:
     ) -> List[Dict[str, Any]]:
         """执行SQL查询语句并返回结果
 
-        执行SQL查询语句，支持参数化查询，防止SQL注入，
-        返回格式化的查询结果列表。
+        执行 SELECT 等查询语句，返回格式化的结果列表，
+        支持参数化查询，防止 SQL 注入攻击。
 
         Args:
             query: SQL查询语句
@@ -630,8 +520,8 @@ class SQLAlchemyDriver:
     ) -> int:
         """执行SQL命令（INSERT/UPDATE/DELETE等）
 
-        执行SQL命令，如INSERT、UPDATE、DELETE等，
-        返回受影响的行数。
+        执行 INSERT、UPDATE、DELETE 等修改操作，返回受影响的行数，
+        支持参数化查询，防止 SQL 注入攻击，并自动提交事务。
 
         Args:
             command: SQL命令语句
@@ -665,8 +555,8 @@ class SQLAlchemyDriver:
     ) -> Any:
         """执行SQL语句（内部方法）
 
-        统一的SQL执行方法，处理查询和命令两种场景，
-        支持参数化查询，自动验证SQL安全性，确保数据库操作的可靠性。
+        执行 SQL 语句，处理参数化查询，自动管理连接和事务，
+        根据 commit 参数决定是否提交事务。
 
         Args:
             sql: SQL语句字符串
@@ -680,18 +570,6 @@ class SQLAlchemyDriver:
 
         Raises:
             QueryError: 当SQL执行失败时抛出，包含具体的错误信息
-
-        Process:
-            1. 确保数据库连接已建立
-            2. 验证SQL语句的安全性
-            3. 执行SQL语句（带参数或不带参数）
-            4. 根据commit标志决定是否提交事务
-            5. 返回相应的执行结果
-
-        Note:
-            - 这是内部方法，不建议直接调用
-            - 外部调用应使用 execute_query() 或 execute_command()
-            - 参数化查询使用 :name 格式的占位符
         """
         try:
             if not self.engine:
@@ -719,38 +597,16 @@ class SQLAlchemyDriver:
             raise QueryError(f"SQL执行失败: {str(error)}") from error
 
     def _validate_sql_query(self, query: str) -> None:
-        """验证SQL查询语句，防止SQL注入攻击
+        """验证SQL查询语句，防止SQL注入攻击（内部方法）
 
-        对SQL查询语句进行多层安全验证，检测潜在的SQL注入攻击模式，
-        使用白名单和黑名单结合的策略，确保查询语句符合安全标准。
+        检查 SQL 查询语句的长度、危险模式和注释，
+        防止 SQL 注入攻击和其他安全风险。
 
         Args:
             query: SQL查询语句字符串
 
         Raises:
             ValueError: 当查询语句包含潜在的注入攻击代码时
-
-        Security:
-            - 检查查询长度限制（最大10000字符）
-            - 检测危险的SQL关键字组合（DROP、TRUNCATE、GRANT等）
-            - 验证合法的DDL和DML操作（白名单机制）
-            - 检测可疑的SQL注释模式
-            - 检测经典SQL注入模式（布尔盲注、UNION注入、时间盲注等）
-            - 检测系统命令执行和文件操作相关的危险模式
-
-        Process:
-            1. 检查查询语句长度是否超过限制
-            2. 验证是否为合法的DDL操作（白名单）
-            3. 验证是否为合法的DML操作（白名单）
-            4. 检测危险模式（黑名单）
-            5. 检测可疑的注释模式
-            6. 记录合法操作的日志
-
-        Note:
-            - 白名单优先：合法的DDL/DML操作会被允许
-            - 黑名单兜底：危险操作会被拦截
-            - 即使通过验证，仍建议使用参数化查询
-            - 查询长度限制可以防止大规模注入攻击
         """
         # 检查查询长度
         if len(query) > 10000:
@@ -834,8 +690,8 @@ class SQLAlchemyDriver:
     def get_tables(self) -> List[str]:
         """获取数据库中的所有表名
 
-        获取数据库中的所有表名列表，
-        不同数据库类型的表名获取方式可能不同。
+        使用 SQLAlchemy 的 inspector 获取数据库中的所有表名，
+        自动处理连接建立和错误捕获。
 
         Returns:
             List[str]: 表名列表
@@ -865,7 +721,8 @@ class SQLAlchemyDriver:
     def get_table_schema(self, table_name: str) -> List[Dict[str, Any]]:
         """获取指定表的列信息
 
-        获取指定表的列信息，包含列名、数据类型、是否可空等信息。
+        使用 SQLAlchemy 的 inspector 获取指定表的列信息，
+        包括列名、数据类型、是否可空、默认值等详细信息。
 
         Args:
             table_name: 表名

@@ -45,14 +45,14 @@ from .crypto import CryptoManager
 from .key_manager import KeyManager
 from .exceptions import (
     ConfigError,
-    ConnectionError,
+    DBConnectionError,
     CryptoError,
     DatabaseError,
     DBConnectorError,
+    DBTimeoutError,
     DriverError,
     FileSystemError,
     QueryError,
-    TimeoutError,
     ValidationError,
 )
 
@@ -74,8 +74,8 @@ __all__ = [
     "ConfigError",
     "ValidationError",
     # 连接相关异常
-    "ConnectionError",
-    "TimeoutError",
+    "DBConnectionError",
+    "DBTimeoutError",
     # 数据库操作异常
     "DatabaseError",
     "QueryError",
