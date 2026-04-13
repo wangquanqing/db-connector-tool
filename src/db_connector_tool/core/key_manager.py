@@ -95,6 +95,8 @@ class KeyManager:
     def __init__(self, app_name: str = "db_connector_tool") -> None:
         """初始化密钥管理器
 
+        创建新的密钥管理器实例，用于管理加密密钥的安全存储和操作。
+
         Args:
             app_name: 应用名称，用于确定配置目录和密钥存储标识
 
@@ -130,7 +132,15 @@ class KeyManager:
                         KeyManager._check_dependencies()
 
     def close(self) -> None:
-        """关闭密钥管理器，清理敏感数据"""
+        """关闭密钥管理器，清理敏感数据
+
+        清理内存中的敏感数据，确保密钥信息不会被泄露。
+
+        Example:
+            >>> key_manager = KeyManager()
+            >>> # 使用密钥管理器...
+            >>> key_manager.close()  # 手动清理敏感数据
+        """
 
         if self.crypto is not None:
             self.crypto.close()
@@ -140,6 +150,8 @@ class KeyManager:
     @staticmethod
     def handle_config_operation(operation_name: str) -> Callable:
         """配置操作异常处理装饰器
+
+        捕获并处理配置操作中的异常，提供统一的错误处理和日志记录。
 
         Args:
             operation_name: 操作名称，用于错误消息和日志记录
@@ -179,6 +191,8 @@ class KeyManager:
     def get_crypto_manager(self) -> CryptoManager:
         """获取加密管理器实例
 
+        获取初始化好的加密管理器实例，用于执行加密和解密操作。
+
         Returns:
             CryptoManager: 初始化好的加密管理器实例
 
@@ -200,8 +214,16 @@ class KeyManager:
     def load_or_create_key(self) -> None:
         """加载或创建加密密钥
 
+        加载现有的加密密钥，如果不存在则创建新的密钥，
+        按照安全层次结构选择密钥存储方式。
+
         Raises:
             ConfigError: 密钥加载或创建失败
+
+        Example:
+            >>> key_manager = KeyManager()
+            >>> key_manager.load_or_create_key()
+            >>> # 密钥已加载或创建成功
         """
 
         # 尝试使用keyring库（如果可用）
@@ -215,8 +237,15 @@ class KeyManager:
     def _load_or_create_key_from_keyring(self) -> None:
         """从操作系统密钥环加载或创建密钥
 
+        从操作系统的密钥环中加载现有的加密密钥，
+        如果不存在则创建新的密钥并存储到密钥环。
+
         Raises:
             ConfigError: 密钥操作失败
+
+        Example:
+            >>> key_manager = KeyManager()
+            >>> key_manager._load_or_create_key_from_keyring()
         """
 
         assert keyring_module is not None, "keyring库可用"
@@ -240,11 +269,17 @@ class KeyManager:
     def _load_crypto_from_key_data(self, key_data: Dict[str, Any]) -> None:
         """从密钥数据加载加密管理器
 
+        从包含密码和盐值的密钥数据中加载加密管理器。
+
         Args:
             key_data: 包含password和salt的密钥数据字典
 
         Raises:
             ConfigError: 密钥数据无效
+
+        Example:
+            >>> key_data = {"password": "secure_password", "salt": "random_salt"}
+            >>> key_manager._load_crypto_from_key_data(key_data)
         """
 
         # 验证密钥数据格式
@@ -260,8 +295,17 @@ class KeyManager:
     def _create_new_crypto_key(self) -> Dict[str, str]:
         """创建新的加密密钥
 
+        创建新的加密密钥并初始化加密管理器。
+
         Returns:
             Dict[str, str]: 包含password和salt的密钥数据
+
+        Example:
+            >>> key_data = key_manager._create_new_crypto_key()
+            >>> print("password" in key_data)
+            True
+            >>> print("salt" in key_data)
+            True
         """
 
         self.crypto = CryptoManager()
@@ -272,8 +316,15 @@ class KeyManager:
     def _load_or_create_key_from_file(self) -> None:
         """从文件加载或创建密钥（回退方案）
 
+        从文件中加载现有的加密密钥，
+        如果不存在则创建新的密钥文件。
+
         Raises:
             ConfigError: 密钥加载或创建失败
+
+        Example:
+            >>> key_manager = KeyManager()
+            >>> key_manager._load_or_create_key_from_file()
         """
 
         if self._env_key:
@@ -295,11 +346,17 @@ class KeyManager:
     def _load_existing_key(self, key_file_path: Path) -> None:
         """加载现有的加密密钥文件
 
+        加载现有的加密密钥文件，并设置安全的文件权限。
+
         Args:
             key_file_path: 密钥文件路径
 
         Raises:
             ConfigError: 密钥加载失败
+
+        Example:
+            >>> key_file = Path("/path/to/encryption.key")
+            >>> key_manager._load_existing_key(key_file)
         """
 
         try:
@@ -318,8 +375,14 @@ class KeyManager:
     def _create_new_key(self, key_file_path: Path) -> None:
         """创建新的加密密钥文件
 
+        创建新的加密密钥文件，并设置安全的文件权限。
+
         Args:
             key_file_path: 密钥文件路径
+
+        Example:
+            >>> key_file = Path("/path/to/encryption.key")
+            >>> key_manager._create_new_key(key_file)
         """
 
         key_data = self._create_new_crypto_key()
@@ -336,11 +399,17 @@ class KeyManager:
     def _set_secure_file_permissions(self, file_path: Path) -> None:
         """设置文件安全权限（最小权限原则）
 
+        设置文件的安全权限，确保只有所有者可以访问。
+
         Args:
             file_path: 文件路径
 
         Raises:
             ConfigError: 权限设置失败
+
+        Example:
+            >>> key_file = Path("/path/to/encryption.key")
+            >>> key_manager._set_secure_file_permissions(key_file)
         """
 
         try:
@@ -360,8 +429,14 @@ class KeyManager:
     def _set_windows_permissions(self, file_path: Path) -> None:
         """设置Windows文件权限（最小权限原则）
 
+        设置Windows系统下的文件权限，确保只有当前用户可以访问。
+
         Args:
             file_path: 密钥文件路径
+
+        Example:
+            >>> key_file = Path("C:\\path\\to\\encryption.key")
+            >>> key_manager._set_windows_permissions(key_file)
         """
 
         username = getpass.getuser()
@@ -393,8 +468,14 @@ class KeyManager:
     def _set_unix_permissions(self, file_path: Path) -> None:
         """设置Unix/Linux文件权限（最小权限原则）
 
+        设置Unix/Linux系统下的文件权限，确保只有所有者可以访问。
+
         Args:
             file_path: 密钥文件路径
+
+        Example:
+            >>> key_file = Path("/path/to/encryption.key")
+            >>> key_manager._set_unix_permissions(key_file)
         """
 
         # 设置权限为600：仅所有者可读写
@@ -406,12 +487,19 @@ class KeyManager:
     ) -> None:
         """处理加密错误：删除旧密钥并创建新的
 
+        处理加密错误，删除旧的密钥文件并创建新的密钥。
+
         Args:
             key_file_path: 密钥文件路径
             crypto_error: 加密错误异常
 
         Raises:
             ConfigError: 删除旧密钥文件失败
+
+        Example:
+            >>> key_file = Path("/path/to/encryption.key")
+            >>> crypto_error = CryptoError("解密失败")
+            >>> key_manager._handle_crypto_error(key_file, crypto_error)
         """
 
         logger.warning("解密密钥文件失败: %s，将创建新的密钥文件", str(crypto_error))
@@ -429,8 +517,17 @@ class KeyManager:
     def get_secure_hmac_key(self) -> bytes:
         """获取安全的HMAC密钥（从主加密密钥派生）
 
+        获取用于生成HMAC签名的安全密钥，优先从主加密密钥派生。
+
         Returns:
             bytes: 安全的HMAC密钥
+
+        Example:
+            >>> key_manager = KeyManager()
+            >>> key_manager.load_or_create_key()
+            >>> hmac_key = key_manager.get_secure_hmac_key()
+            >>> print(len(hmac_key))
+            32
         """
 
         # 优先从主加密密钥派生HMAC密钥
@@ -455,11 +552,20 @@ class KeyManager:
     def rotate_key(self) -> Dict[str, str]:
         """轮换加密密钥
 
+        生成新的加密密钥并按照安全层次结构保存。
+
         Returns:
             Dict[str, str]: 新的密钥数据
 
         Raises:
             ConfigError: 密钥轮换失败
+
+        Example:
+            >>> key_manager = KeyManager()
+            >>> key_manager.load_or_create_key()
+            >>> new_key = key_manager.rotate_key()
+            >>> print("password" in new_key)
+            True
         """
 
         # 生成新的加密密钥
@@ -473,8 +579,14 @@ class KeyManager:
     def _save_new_key_secure(self, key_data: Dict[str, str]) -> None:
         """按照安全层次结构保存新密钥：keyring > 环境变量 > 文件
 
+        按照安全优先级保存新的加密密钥。
+
         Args:
             key_data: 包含新密钥信息的字典
+
+        Example:
+            >>> key_data = {"password": "new_password", "salt": "new_salt"}
+            >>> key_manager._save_new_key_secure(key_data)
         """
 
         # 1. 优先尝试保存到操作系统密钥环
@@ -512,7 +624,13 @@ class KeyManager:
 
     @classmethod
     def _check_dependencies(cls) -> None:
-        """检查依赖项可用性（类方法，只执行一次）"""
+        """检查依赖项可用性（类方法，只执行一次）
+
+        检查密钥存储相关的依赖项可用性，包括keyring库和环境变量。
+
+        Example:
+            >>> KeyManager._check_dependencies()
+        """
 
         # 检查环境变量密钥
         cls._env_key = os.environ.get("DB_CONNECTOR_TOOL_ENCRYPTION_KEY")

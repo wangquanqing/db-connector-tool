@@ -82,9 +82,9 @@ DATABASE_TO_DRIVER_MAPPING = {
     "oracle": DRIVER_TYPE_SQLALCHEMY,
     "postgresql": DRIVER_TYPE_SQLALCHEMY,
     "mysql": DRIVER_TYPE_SQLALCHEMY,
-    "mssql": DRIVER_TYPE_SQLALCHEMY,
+    "sqlserver": DRIVER_TYPE_SQLALCHEMY,
     "sqlite": DRIVER_TYPE_SQLALCHEMY,
-    "gbasedbt": DRIVER_TYPE_SQLALCHEMY,
+    "gbase": DRIVER_TYPE_SQLALCHEMY,
 }
 
 # 向后兼容性信息

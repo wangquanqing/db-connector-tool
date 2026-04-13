@@ -1026,13 +1026,13 @@ def _setup_connection_arguments(parser: argparse.ArgumentParser) -> None:
         "-k",
         "--charset",
         choices=["cp936", "utf8", "utf8mb4"],
-        help="MySQL/MSSQL字符集",
+        help="MySQL/SQL Server字符集",
     )
     parser.add_argument(
         "-t",
         "--tds-version",
         choices=["7.0", "7.1", "7.2", "7.3", "7.4", "8.0"],
-        help="MSSQL TDS 版本",
+        help="SQL Server TDS 版本",
     )
     parser.add_argument(
         "-c",

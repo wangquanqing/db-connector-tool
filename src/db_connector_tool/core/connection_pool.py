@@ -18,7 +18,7 @@ from typing import Any, Dict, List, Optional
 
 from ..drivers.sqlalchemy_driver import SQLAlchemyDriver
 from ..utils.logging_utils import get_logger
-from .exceptions import DatabaseError, DBConnectionError
+from .exceptions import DatabaseError
 
 # 获取模块级别的日志记录器
 logger = get_logger(__name__)
@@ -80,9 +80,47 @@ class ConnectionPoolManager:
         """
         with self._lock:
             self.connection_pool[name] = driver
-            self._initialize_connection_metadata(name)
+
+            self._connection_metadata[name] = {
+                "last_used": time.time(),
+                "use_count": 0,
+                "created_at": time.time(),
+                "connection_errors": 0,
+                "last_error": None,
+                "response_time": 0.0,
+                "transaction_count": 0,
+                "query_count": 0,
+                "last_query_time": None,
+            }
+
             self._statistics["total_connections_created"] += 1
             logger.info("数据库连接已添加到连接池: %s", name)
+
+    def remove_connection(self, name: str) -> None:
+        """从连接池移除连接
+
+        从连接池移除指定名称的连接，并清理相关资源。
+
+        Args:
+            name: 连接名称
+
+        Example:
+            >>> pool_manager.remove_connection('mysql_db')
+        """
+        with self._lock:
+            if not self._is_connection_in_pool(name):
+                return
+
+            driver = self.connection_pool[name]
+
+            try:
+                # 安全关闭连接
+                self._safe_disconnect_driver(driver, name)
+            except OSError as e:
+                logger.error("清理连接 %s 时发生严重异常: %s", name, str(e))
+            finally:
+                # 确保从连接池中移除，避免内存泄漏
+                self._remove_connection_from_pool(name)
 
     def get_connection(self, name: str) -> Optional[SQLAlchemyDriver]:
         """从连接池获取连接
@@ -115,22 +153,8 @@ class ConnectionPoolManager:
                 return driver
 
             # 连接无效，清理并返回None
-            self._cleanup_connection(name)
+            self.remove_connection(name)
             return None
-
-    def remove_connection(self, name: str) -> None:
-        """从连接池移除连接
-
-        从连接池移除指定名称的连接，并清理相关资源。
-
-        Args:
-            name: 连接名称
-
-        Example:
-            >>> pool_manager.remove_connection('mysql_db')
-        """
-        with self._lock:
-            self._cleanup_connection(name)
 
     def _is_connection_valid(self, driver: SQLAlchemyDriver) -> bool:
         """检查连接是否有效
@@ -215,20 +239,6 @@ class ConnectionPoolManager:
         Example:
             >>> pool_manager._cleanup_connection('mysql_db')
         """
-        with self._lock:
-            if not self._is_connection_in_pool(name):
-                return
-
-            driver = self.connection_pool[name]
-
-            try:
-                # 安全关闭连接
-                self._safe_disconnect_driver(driver, name)
-            except OSError as e:
-                logger.error("清理连接 %s 时发生严重异常: %s", name, str(e))
-            finally:
-                # 确保从连接池中移除，避免内存泄漏
-                self._remove_connection_from_pool(name)
 
     def _is_connection_in_pool(self, name: str) -> bool:
         """检查连接是否在连接池中
@@ -308,29 +318,6 @@ class ConnectionPoolManager:
         if name in self._connection_metadata:
             del self._connection_metadata[name]
 
-    def _initialize_connection_metadata(self, name: str) -> None:
-        """初始化连接元数据
-
-        初始化指定连接的元数据信息。
-
-        Args:
-            name: 连接名称
-
-        Example:
-            >>> pool_manager._initialize_connection_metadata('mysql_db')
-        """
-        self._connection_metadata[name] = {
-            "last_used": time.time(),
-            "use_count": 0,
-            "created_at": time.time(),
-            "connection_errors": 0,
-            "last_error": None,
-            "response_time": 0.0,
-            "transaction_count": 0,
-            "query_count": 0,
-            "last_query_time": None,
-        }
-
     def update_query_metadata(self, connection_name: str, response_time: float) -> None:
         """更新查询元数据
 
@@ -349,7 +336,9 @@ class ConnectionPoolManager:
             self._connection_metadata[connection_name]["response_time"] = response_time
             self._connection_metadata[connection_name]["query_count"] += 1
 
-    def update_command_metadata(self, connection_name: str, response_time: float) -> None:
+    def update_command_metadata(
+        self, connection_name: str, response_time: float
+    ) -> None:
         """更新命令元数据
 
         更新指定连接的命令元数据信息。
@@ -399,6 +388,7 @@ class ConnectionPoolManager:
             >>> cleaned_count = pool_manager.cleanup_idle_connections(600)  # 10分钟
             >>> print(f"清理了 {cleaned_count} 个空闲连接")
         """
+
         def _cleanup_idle_connections():
             current_time = time.time()
             connection_names = list(self.connection_pool.keys())
@@ -487,7 +477,7 @@ class ConnectionPoolManager:
         """
         try:
             logger.debug("连接 %s 空闲时间 %.1f秒超过限制，执行清理", name, idle_time)
-            self._cleanup_connection(name)
+            self.remove_connection(name)
             self._statistics["idle_connections_cleaned"] += 1
             return 1
         except (OSError, DatabaseError) as e:
@@ -593,7 +583,7 @@ class ConnectionPoolManager:
             current_time = time.time()
 
             # 计算连接池统计信息
-            stats = self._calculate_pool_stats(current_time)
+            stats = self._calculate_pool_stats()
             connection_details = self._get_connection_details(current_time)
 
             # 计算平均值
@@ -615,7 +605,7 @@ class ConnectionPoolManager:
             }
             return self._build_pool_status_response(status_data)
 
-    def _calculate_pool_stats(self, current_time: float) -> Dict[str, Any]:
+    def _calculate_pool_stats(self) -> Dict[str, Any]:
         """计算连接池统计信息
 
         计算连接池的统计信息，包含活跃连接数、总使用次数等。
@@ -635,7 +625,7 @@ class ConnectionPoolManager:
         total_response_time = 0.0
         total_errors = 0
 
-        for name, metadata in self._connection_metadata.items():
+        for _, metadata in self._connection_metadata.items():
             total_use_count += metadata.get("use_count", 0)
             total_query_count += metadata.get("query_count", 0)
             total_transaction_count += metadata.get("transaction_count", 0)
@@ -678,7 +668,9 @@ class ConnectionPoolManager:
             details.append(detail)
         return details
 
-    def _calculate_average_response_time(self, total_response_time: float, pool_size: int) -> float:
+    def _calculate_average_response_time(
+        self, total_response_time: float, pool_size: int
+    ) -> float:
         """计算平均响应时间
 
         计算连接池的平均响应时间。
@@ -716,7 +708,9 @@ class ConnectionPoolManager:
             return total_errors / total_queries
         return 0.0
 
-    def _build_pool_status_response(self, status_data: Dict[str, Any]) -> Dict[str, Any]:
+    def _build_pool_status_response(
+        self, status_data: Dict[str, Any]
+    ) -> Dict[str, Any]:
         """构建连接池状态响应
 
         构建连接池状态响应字典。
@@ -738,10 +732,16 @@ class ConnectionPoolManager:
             "error_rate": status_data["error_rate"],
             "connection_details": status_data["connection_details"],
             "statistics": {
-                "total_connections_created": self._statistics["total_connections_created"],
-                "total_connections_closed": self._statistics["total_connections_closed"],
+                "total_connections_created": self._statistics[
+                    "total_connections_created"
+                ],
+                "total_connections_closed": self._statistics[
+                    "total_connections_closed"
+                ],
                 "connection_errors": self._statistics["connection_errors"],
-                "idle_connections_cleaned": self._statistics["idle_connections_cleaned"],
+                "idle_connections_cleaned": self._statistics[
+                    "idle_connections_cleaned"
+                ],
                 "uptime": status_data["current_time"] - self._statistics["start_time"],
             },
         }
@@ -768,9 +768,7 @@ class ConnectionPoolManager:
 
             logger.info("开始关闭所有连接，共 %s 个连接", total_connections)
 
-            success_count, error_count = self._close_all_connections(
-                connection_names
-            )
+            success_count, error_count = self._close_all_connections(connection_names)
 
             # 最终检查连接池是否完全清空
             self._ensure_pool_cleanup()
@@ -802,7 +800,7 @@ class ConnectionPoolManager:
         for name in connection_names:
             try:
                 # 使用内部清理方法
-                self._cleanup_connection(name)
+                self.remove_connection(name)
                 success_count += 1
                 logger.debug("连接 %s 关闭成功", name)
             except (OSError, DatabaseError) as e:

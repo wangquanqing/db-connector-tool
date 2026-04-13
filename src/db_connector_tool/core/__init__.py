@@ -1,5 +1,4 @@
-"""
-数据库连接器核心模块
+"""数据库连接器核心模块 (Core)
 
 提供数据库连接管理的核心功能，采用模块化设计支持多种数据库类型。
 该模块封装了配置管理、连接管理、异常处理和加密功能，提供统一的API接口。
@@ -18,36 +17,35 @@
 - Python要求: >= 3.8
 - 依赖: SQLAlchemy, cryptography
 
-使用示例：
-    >>> from db_connector_tool.core import DatabaseManager, ConfigManager
-    >>>
-    >>> # 创建数据库管理器
-    >>> db_manager = DatabaseManager("my_app")
-    >>>
-    >>> # 添加数据库连接
-    >>> config = {
-    ...     "type": "mysql",
-    ...     "host": "localhost",
-    ...     "port": 3306,
-    ...     "username": "user",
-    ...     "password": "pass",
-    ...     "database": "test_db"
-    ... }
-    >>> db_manager.add_connection("mysql_db", config)
-    >>>
-    >>> # 执行查询
-    >>> results = db_manager.execute_query("mysql_db", "SELECT * FROM users")
+Example:
+>>> from db_connector_tool.core import DatabaseManager, ConfigManager
+>>>
+>>> # 创建数据库管理器
+>>> db_manager = DatabaseManager("my_app")
+>>>
+>>> # 添加数据库连接
+>>> config = {
+...     "type": "mysql",
+...     "host": "localhost",
+...     "port": 3306,
+...     "username": "user",
+...     "password": "pass",
+...     "database": "test_db"
+... }
+>>> db_manager.add_connection("mysql_db", config)
+>>>
+>>> # 执行查询
+>>> results = db_manager.execute_query("mysql_db", "SELECT * FROM users")
 """
 
 from .config import ConfigManager
 from .connections import DatabaseManager
 from .crypto import CryptoManager
-from .key_manager import KeyManager
 from .exceptions import (
     ConfigError,
-    DBConnectionError,
     CryptoError,
     DatabaseError,
+    DBConnectionError,
     DBConnectorError,
     DBTimeoutError,
     DriverError,
@@ -55,6 +53,7 @@ from .exceptions import (
     QueryError,
     ValidationError,
 )
+from .key_manager import KeyManager
 
 # 公共API导出列表
 

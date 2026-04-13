@@ -1,29 +1,86 @@
-"""验证器模块
+"""验证器模块 (Validators)
 
-提供统一的验证功能，包括配置验证、 连接验证、 密码验证等。
+提供统一的验证功能，包括配置验证、连接验证、密码验证等。
 所有验证方法集中管理，便于维护和复用。
+
+Example:
+>>> from db_connector_tool.core.validators import (
+...     ConfigValidator, PasswordValidator, GenericValidator
+... )
+>>> # 验证配置文件结构
+>>> config = {
+...     "version": "1.0.0",
+...     "app_name": "test",
+...     "connections": {},
+...     "metadata": {
+...         "created": "2023-01-01",
+...         "last_modified": "2023-01-01",
+...         "key_version": "1"
+...     }
+... }
+>>> ConfigValidator.validate_config(config)
+>>> # 验证连接名称
+>>> ConfigValidator.validate_connection_name("test_db")
+>>> # 验证密码强度
+>>> is_strong = PasswordValidator.validate_strength("StrongPassword123!")
+>>> # 验证必需字段
+>>> GenericValidator.validate_required_fields({"name": "test"}, ["name"], "测试数据")
 """
 
 import re
-from typing import Any, Dict, List, Set
+from typing import Any, Dict, List
 
 from .exceptions import ConfigError
 
 
 class ConfigValidator:
-    """配置验证器"""
+    """配置验证器 (Config Validator)
+
+    提供配置文件结构和连接配置的验证功能，确保配置数据的完整性和有效性。
+    支持版本号格式验证、连接名称验证等功能。
+
+    Example:
+        >>> config = {
+        ...     "version": "1.0.0",
+        ...     "app_name": "test",
+        ...     "connections": {},
+        ...     "metadata": {
+        ...         "created": "2023-01-01",
+        ...         "last_modified": "2023-01-01",
+        ...         "key_version": "1"
+        ...     }
+        ... }
+        >>> ConfigValidator.validate_config(config)
+        >>> ConfigValidator.validate_connection_name("test_db")
+        >>> is_valid_version = ConfigValidator.is_valid_version_format("1.0.0")
+    """
 
     @staticmethod
     def validate_config(config: Dict[str, Any]) -> None:
-        """
-        验证配置文件结构
+        """验证配置文件结构
+
+        验证配置文件的结构完整性和有效性，确保所有必需字段存在且格式正确。
 
         Args:
             config: 要验证的配置字典
 
         Raises:
             ConfigError: 配置结构无效
+
+        Example:
+            >>> config = {
+            ...     "version": "1.0.0",
+            ...     "app_name": "test",
+            ...     "connections": {},
+            ...     "metadata": {
+            ...         "created": "2023-01-01",
+            ...         "last_modified": "2023-01-01",
+            ...         "key_version": "1"
+            ...     }
+            ... }
+            >>> ConfigValidator.validate_config(config)
         """
+
         # 验证必需字段
         required_fields = ["version", "app_name", "connections", "metadata"]
         GenericValidator.validate_required_fields(config, required_fields, "配置文件")
@@ -58,15 +115,27 @@ class ConfigValidator:
 
     @staticmethod
     def is_valid_version_format(version: str) -> bool:
-        """
-        验证版本号格式是否符合语义化版本规范
+        """验证版本号格式是否符合语义化版本规范
+
+        验证版本号格式是否符合语义化版本规范，格式为 x.y.z，其中 x、y、z 为非负整数且不允许前导零。
 
         Args:
             version: 版本号字符串
 
         Returns:
             bool: 版本号格式是否有效
+
+        Example:
+            >>> ConfigValidator.is_valid_version_format("1.0.0")
+            True
+            >>> ConfigValidator.is_valid_version_format("1.0")
+            False
+            >>> ConfigValidator.is_valid_version_format("1.0.0.1")
+            False
+            >>> ConfigValidator.is_valid_version_format("1.0.0a")
+            False
         """
+
         try:
             parts = version.split(".")
             if len(parts) != 3:
@@ -87,15 +156,22 @@ class ConfigValidator:
 
     @staticmethod
     def validate_connection_name(name: str) -> None:
-        """
-        验证连接名称是否有效
+        """验证连接名称是否有效
+
+        验证连接名称是否符合要求，包括非空、字符串类型、长度限制、字符格式和保留字检查。
 
         Args:
             name: 连接名称
 
         Raises:
             ValueError: 连接名称无效
+
+        Example:
+            >>> ConfigValidator.validate_connection_name("test_db")
+            >>> ConfigValidator.validate_connection_name("invalid-name")  # 会抛出 ValueError
+            >>> ConfigValidator.validate_connection_name("default")  # 会抛出 ValueError
         """
+
         if not name or not isinstance(name, str):
             raise ValueError("连接名称不能为空且必须是字符串")
 
@@ -113,15 +189,22 @@ class ConfigValidator:
 
     @staticmethod
     def validate_connection_config(connection_config: Dict[str, Any]) -> None:
-        """
-        验证连接配置字典是否有效
+        """验证连接配置字典是否有效
+
+        验证连接配置字典是否符合要求，包括非空、字典类型和键名格式检查。
 
         Args:
             connection_config: 连接配置字典
 
         Raises:
             ValueError: 连接配置无效
+
+        Example:
+            >>> config = {"host": "localhost", "port": 3306, "username": "root"}
+            >>> ConfigValidator.validate_connection_config(config)
+            >>> ConfigValidator.validate_connection_config("invalid")  # 会抛出 ValueError
         """
+
         if not connection_config or not isinstance(connection_config, dict):
             raise ValueError("连接配置不能为空且必须是字典")
 
@@ -131,265 +214,59 @@ class ConfigValidator:
                 raise ValueError("连接配置的键必须是字符串")
 
 
-class ConnectionValidator:
-    """连接验证器"""
-
-    # 支持的数据库类型
-    SUPPORTED_DATABASE_TYPES: Set[str] = {
-        "oracle",
-        "postgresql",
-        "mysql",
-        "mssql",
-        "sqlite",
-        "gbasedbt",
-    }
-
-    @staticmethod
-    def validate_basic_config(config: Dict[str, Any]) -> None:
-        """
-        基本配置验证
-
-        Args:
-            config: 连接配置字典
-
-        Raises:
-            ConfigError: 当基本配置验证失败时
-        """
-        ConnectionValidator._validate_config_structure(config)
-        db_type = ConnectionValidator._validate_database_type(config)
-        ConnectionValidator._validate_string_parameters(config)
-
-        # SQLite数据库特殊处理
-        if db_type == "sqlite":
-            ConnectionValidator._handle_sqlite_config(config)
-            return
-
-        # 应用特定数据库类型的默认配置
-        ConnectionValidator._apply_default_config(config)
-
-        # 验证必需参数和其他参数
-        ConnectionValidator._validate_required_parameters(config)
-        ConnectionValidator._validate_optional_parameters(config)
-        ConnectionValidator._validate_database_specific_parameters(config, db_type)
-
-    @staticmethod
-    def _validate_config_structure(config: Dict[str, Any]) -> None:
-        """
-        验证配置结构
-
-        Args:
-            config: 连接配置字典
-
-        Raises:
-            ConfigError: 当配置结构无效时
-        """
-        if not config or not isinstance(config, dict):
-            raise ConfigError("连接配置不能为空且必须是字典")
-
-    @staticmethod
-    def _validate_database_type(config: Dict[str, Any]) -> str:
-        """
-        验证数据库类型
-
-        Args:
-            config: 连接配置字典
-
-        Returns:
-            str: 数据库类型
-
-        Raises:
-            ConfigError: 当数据库类型不支持时
-        """
-        db_type = config.get("type", "").lower()
-        if db_type not in ConnectionValidator.SUPPORTED_DATABASE_TYPES:
-            supported_types = ", ".join(
-                sorted(ConnectionValidator.SUPPORTED_DATABASE_TYPES)
-            )
-            raise ConfigError(
-                f"不支持的数据库类型: {db_type}，支持的类型: {supported_types}"
-            )
-        return db_type
-
-    @staticmethod
-    def _validate_string_parameters(config: Dict[str, Any]) -> None:
-        """
-        验证字符串参数
-
-        Args:
-            config: 连接配置字典
-
-        Raises:
-            ConfigError: 当字符串参数无效时
-        """
-        string_params = [
-            "username",
-            "password",
-            "host",
-            "database",
-            "service_name",
-            "sid",
-            "server",
-        ]
-        for param in string_params:
-            if param in config:
-                ConnectionValidator._validate_string_param(param, config[param])
-
-    @staticmethod
-    def _validate_string_param(
-        param_name: str, value: Any, max_length: int = 100
-    ) -> None:
-        """
-        验证字符串参数
-
-        Args:
-            param_name: 参数名称
-            value: 参数值
-            max_length: 最大长度
-
-        Raises:
-            ConfigError: 当字符串参数无效时
-        """
-        if not isinstance(value, str):
-            raise ConfigError(f"{param_name}必须是字符串类型")
-        if len(value) > max_length:
-            raise ConfigError(f"{param_name}长度不能超过{max_length}个字符")
-        # 检查特殊字符，防止注入攻击
-        if re.search(r"[;\\\'\"]", value):
-            raise ConfigError(f"{param_name}包含不允许的特殊字符")
-
-    @staticmethod
-    def _handle_sqlite_config(config: Dict[str, Any]) -> None:
-        """
-        处理SQLite数据库配置
-
-        Args:
-            config: 连接配置字典
-        """
-        if "database" not in config:
-            config["database"] = ":memory:"
-
-    @staticmethod
-    def _validate_required_parameters(config: Dict[str, Any]) -> None:
-        """
-        验证必需参数
-
-        Args:
-            config: 连接配置字典
-
-        Raises:
-            ConfigError: 当缺少必需参数时
-        """
-        required_fields = ["username", "password", "host"]
-        missing_fields = [field for field in required_fields if field not in config]
-        if missing_fields:
-            raise ConfigError(f"缺少必需的连接参数: {', '.join(missing_fields)}")
-
-    @staticmethod
-    def _validate_optional_parameters(config: Dict[str, Any]) -> None:
-        """
-        验证可选参数
-
-        Args:
-            config: 连接配置字典
-
-        Raises:
-            ConfigError: 当可选参数无效时
-        """
-        # 验证端口号
-        if "port" in config:
-            port = config["port"]
-            if not isinstance(port, int) or port <= 0 or port > 65535:
-                raise ConfigError("端口号必须是1-65535之间的整数")
-
-        # 验证连接超时参数
-        if "timeout" in config:
-            timeout = config["timeout"]
-            if not isinstance(timeout, (int, float)) or timeout <= 0:
-                raise ConfigError("连接超时必须是大于0的数值")
-
-        # 验证连接池参数
-        if "pool_size" in config:
-            pool_size = config["pool_size"]
-            if not isinstance(pool_size, int) or pool_size <= 0:
-                raise ConfigError("连接池大小必须是大于0的整数")
-
-    @staticmethod
-    def _validate_database_specific_parameters(
-        config: Dict[str, Any], db_type: str
-    ) -> None:
-        """
-        验证特定数据库类型的参数
-
-        Args:
-            config: 连接配置字典
-            db_type: 数据库类型
-
-        Raises:
-            ConfigError: 当特定数据库类型的参数无效时
-        """
-        if db_type == "oracle":
-            if "service_name" not in config and "sid" not in config:
-                raise ConfigError("Oracle数据库必须提供service_name或sid")
-        elif db_type == "postgresql" and "database" not in config:
-            raise ConfigError("PostgreSQL数据库必须提供database参数")
-        elif db_type == "mysql" and "database" not in config:
-            raise ConfigError("MySQL数据库必须提供database参数")
-        elif db_type == "mssql" and "database" not in config:
-            raise ConfigError("SQL Server数据库必须提供database参数")
-        elif db_type == "gbasedbt" and "database" not in config:
-            raise ConfigError("GBase数据库必须提供database参数")
-
-    @staticmethod
-    def _apply_default_config(config: Dict[str, Any]) -> None:
-        """
-        应用特定数据库类型的默认配置
-
-        Args:
-            config: 连接配置字典
-        """
-        db_type = config.get("type", "").lower()
-
-        if db_type == "oracle" and "service_name" not in config:
-            config["service_name"] = "XE"
-        elif db_type == "postgresql" and "gssencmode" not in config:
-            config["gssencmode"] = "disable"
-        elif db_type == "mssql":
-            if "charset" not in config:
-                config["charset"] = "cp936"
-            if "tds_version" not in config:
-                config["tds_version"] = "7.0"
-        elif db_type == "gbasedbt" and "server" not in config:
-            config["server"] = "gbase01"
-
-
 class PasswordValidator:
-    """密码验证器"""
+    """密码验证器 (Password Validator)
+
+    提供密码强度验证和强度等级评估功能，确保密码安全性。
+    支持密码长度、大小写字母、数字和特殊字符的验证。
+
+    Example:
+        >>> is_strong = PasswordValidator.validate_strength("StrongPassword123!")
+        >>> strength_level = PasswordValidator.get_strength("StrongPassword123!")
+        >>> print(f"密码强度: {strength_level}")
+    """
 
     @staticmethod
     def validate_strength(password: str) -> bool:
-        """
-        验证密码强度
+        """验证密码强度
+
+        验证密码强度是否足够，要求密码长度至少16位，包含大小写字母、数字和特殊字符。
 
         Args:
             password: 要验证的密码字符串
 
         Returns:
             bool: 密码强度是否足够
+
+        Example:
+            >>> PasswordValidator.validate_strength("StrongPassword123!")
+            True
+            >>> PasswordValidator.validate_strength("weak")
+            False
         """
+
         requirements = PasswordValidator._check_password_requirements(password)
         return all(requirements.values())
 
     @staticmethod
     def get_strength(password: str) -> str:
-        """
-        获取密码强度等级
+        """获取密码强度等级
+
+        评估密码强度并返回强度等级，分为 very_strong、strong、medium 和 weak 四个等级。
 
         Args:
             password: 要评估的密码字符串
 
         Returns:
             str: 密码强度等级
+
+        Example:
+            >>> PasswordValidator.get_strength("StrongPassword123!")
+            "strong"
+            >>> PasswordValidator.get_strength("weak")
+            "weak"
         """
+
         score = 0
 
         # 长度得分
@@ -419,15 +296,27 @@ class PasswordValidator:
 
     @staticmethod
     def _check_password_requirements(password: str) -> Dict[str, bool]:
-        """
-        检查密码是否满足各项要求
+        """检查密码是否满足各项要求
+
+        检查密码是否满足各项要求，包括长度、大小写字母、数字和特殊字符。
 
         Args:
             password: 要验证的密码字符串
 
         Returns:
             Dict[str, bool]: 各项要求的满足情况
+
+        Example:
+            >>> PasswordValidator._check_password_requirements("StrongPassword123!")
+            {
+                "length_ok": True,
+                "has_uppercase": True,
+                "has_lowercase": True,
+                "has_digit": True,
+                "has_special": True
+            }
         """
+
         return {
             "length_ok": len(password) >= 16,
             "has_uppercase": bool(re.search(r"[A-Z]", password)),
@@ -440,14 +329,24 @@ class PasswordValidator:
 
 
 class GenericValidator:
-    """通用验证器"""
+    """通用验证器 (Generic Validator)
+
+    提供通用的验证功能，包括必需字段验证和字段类型验证。
+    可用于各种数据结构的基本验证。
+
+    Example:
+        >>> data = {"name": "test", "age": 25}
+        >>> GenericValidator.validate_required_fields(data, ["name", "age"], "用户数据")
+        >>> GenericValidator.validate_field_type(data["age"], int, "年龄字段")
+    """
 
     @staticmethod
     def validate_required_fields(
         data: Dict[str, Any], required_fields: List[str], context: str = ""
     ) -> None:
-        """
-        验证必需字段是否存在
+        """验证必需字段是否存在
+
+        验证数据字典中是否包含所有必需字段，若缺少则抛出异常。
 
         Args:
             data: 要验证的数据字典
@@ -456,7 +355,17 @@ class GenericValidator:
 
         Raises:
             ConfigError: 缺少必需字段
+
+        Example:
+            >>> data = {"name": "test", "age": 25}
+            >>> GenericValidator.validate_required_fields(
+            ...     data, ["name", "age"], "用户数据"
+            ... )
+            >>> GenericValidator.validate_required_fields(
+            ...     data, ["name", "email"], "用户数据"
+            ... )  # 会抛出 ConfigError
         """
+
         for field in required_fields:
             if field not in data:
                 error_msg = (
@@ -468,8 +377,9 @@ class GenericValidator:
 
     @staticmethod
     def validate_field_type(value: Any, expected_type: type, field_name: str) -> None:
-        """
-        验证字段类型
+        """验证字段类型
+
+        验证值的类型是否与期望类型匹配，若不匹配则抛出异常。
 
         Args:
             value: 要验证的值
@@ -478,6 +388,11 @@ class GenericValidator:
 
         Raises:
             ConfigError: 类型不匹配
+
+        Example:
+            >>> GenericValidator.validate_field_type(25, int, "年龄字段")
+            >>> GenericValidator.validate_field_type("25", int, "年龄字段")  # 会抛出 ConfigError
         """
+
         if not isinstance(value, expected_type):
             raise ConfigError(f"{field_name}必须是{expected_type.__name__}类型")
