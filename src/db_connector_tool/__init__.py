@@ -26,7 +26,7 @@ from .core.config import ConfigManager
 from .core.connections import DatabaseManager
 from .core.exceptions import (
     ConfigError,
-    ConnectionError,
+    DBConnectionError,
     CryptoError,
     DatabaseError,
     DBConnectorError,
@@ -67,7 +67,7 @@ __all__ = [
     "ConfigError",
     "CryptoError",
     "DatabaseError",
-    "ConnectionError",
+    "DBConnectionError",
     # CLI相关（可选）
     "DBConnectorCLI",
     "cli_main",
