@@ -121,7 +121,11 @@ class DatabaseManager:
             raise ConfigError(f"数据库管理器初始化失败: {str(e)}") from e
 
     def __str__(self) -> str:
-        """返回数据库管理器的字符串表示"""
+        """返回数据库管理器的字符串表示
+
+        Returns:
+            str: 格式化的数据库管理器字符串表示
+        """
         stats = self.get_statistics()
         return (
             f"DatabaseManager(app_name='{self.app_name}', "
@@ -131,13 +135,10 @@ class DatabaseManager:
 
     def __repr__(self) -> str:
         """返回数据库管理器的详细表示，用于调试
-        
-        提供详细的内部状态信息，格式应该能够用于重新创建对象
-        （或至少提供足够的信息用于调试）
-        
+
         Returns:
-            str: 格式化的详细表示字符串
-            
+            str: 包含完整配置信息的字符串，用于调试
+
         Example:
             >>> repr(db_manager)
             "DatabaseManager(app_name='my_app', config_file='connections.toml', \
@@ -169,12 +170,6 @@ class DatabaseManager:
         Raises:
             DatabaseError: 当创建连接配置失败时
             ConfigError: 当连接配置验证失败或连接已存在时
-
-        Process:
-            1. 检查连接名称是否已存在
-            2. 验证基本配置
-            3. 保存到配置管理器
-            4. 记录日志
 
         Example:
             >>> config = {
@@ -219,8 +214,7 @@ class DatabaseManager:
         return self.config_manager.list_configs()
 
     def _safe_operation(self, operation: str, name: str, func, *args, **kwargs):
-        """
-        安全执行操作的辅助方法，处理异常并转换为适当的错误类型
+        """安全执行操作的辅助方法，处理异常并转换为适当的错误类型
 
         Args:
             operation: 操作名称，用于日志和错误消息
@@ -247,8 +241,7 @@ class DatabaseManager:
     def _handle_exception(
         self, operation: str, name: str, exception: Exception
     ) -> None:
-        """
-        通用异常处理方法
+        """通用异常处理方法
 
         Args:
             operation: 操作名称，用于日志记录
@@ -278,12 +271,6 @@ class DatabaseManager:
         Raises:
             DatabaseError: 当删除连接配置失败时
             ConfigError: 当连接配置不存在时
-
-        Process:
-            1. 验证连接存在
-            2. 清理连接池中的连接
-            3. 删除配置信息
-            4. 记录日志
 
         Note:
             删除前会自动关闭对应的连接并清理缓存
@@ -431,12 +418,6 @@ class DatabaseManager:
             DatabaseError: 当更新连接配置失败时
             ConfigError: 当新的连接配置验证失败或连接不存在时
 
-        Process:
-            1. 验证连接存在和新配置
-            2. 关闭现有连接
-            3. 更新配置信息
-            4. 记录日志
-
         Note:
             更新配置前会关闭现有连接，新连接将在下次获取时创建
             确保配置更新不会影响正在进行的操作
@@ -509,13 +490,6 @@ class DatabaseManager:
             DatabaseError: 当获取连接失败时
             DBConnectionError: 当连接建立失败时
             ConfigError: 当连接配置不存在时
-
-        Process:
-            1. 验证连接配置存在
-            2. 检查连接池中是否有有效连接
-            3. 如果连接无效，清理并重新创建
-            4. 处理网络超时和连接失败的边界情况
-            5. 返回可用的驱动实例
 
         Note:
             如果连接已存在且有效，直接返回缓存的连接，否则创建新连接
@@ -1759,7 +1733,6 @@ class DatabaseManager:
             diagnosis: 诊断信息字典
         """
         if name in self.connection_pool:
-            # 从元数据中获取连接池信息
             if name in self._connection_metadata:
                 metadata = self._connection_metadata[name]
                 diagnosis["details"]["pool_info"] = {
@@ -1770,7 +1743,6 @@ class DatabaseManager:
                     "response_time": metadata["response_time"],
                 }
             else:
-                # 如果没有元数据，使用默认值
                 diagnosis["details"]["pool_info"] = {
                     "is_active": True,
                     "use_count": 0,
