@@ -76,15 +76,6 @@ class DatabaseManager:
         >>> db_manager.close_connection("mysql_db")
     """
 
-    # 错误消息常量
-    CONNECTION_NOT_FOUND_MSG = "连接配置不存在: {}"
-    CONNECTION_ALREADY_EXISTS_MSG = "连接配置已存在: {}"
-
-    # 默认配置参数
-    DEFAULT_MAX_IDLE_TIME = 300  # 5分钟
-    DEFAULT_CONNECTION_TIMEOUT = 30  # 30秒连接超时
-    DEFAULT_POOL_RECYCLE = 3600  # 1小时连接回收
-
     def __init__(
         self, app_name: str = "db_connector_tool", config_file: str = "connections.toml"
     ) -> None:
@@ -129,6 +120,43 @@ class DatabaseManager:
             logger.error("初始化数据库管理器失败: %s", str(e))
             raise ConfigError(f"数据库管理器初始化失败: {str(e)}") from e
 
+    def __str__(self) -> str:
+        """返回数据库管理器的字符串表示"""
+        stats = self.get_statistics()
+        return (
+            f"DatabaseManager(app_name='{self.app_name}', "
+            f"active_connections={stats['active_connections']}, "
+            f"pool_size={stats['connection_pool_size']})"
+        )
+
+    def __repr__(self) -> str:
+        """返回数据库管理器的详细表示，用于调试
+        
+        提供详细的内部状态信息，格式应该能够用于重新创建对象
+        （或至少提供足够的信息用于调试）
+        
+        Returns:
+            str: 格式化的详细表示字符串
+            
+        Example:
+            >>> repr(db_manager)
+            "DatabaseManager(app_name='my_app', config_file='connections.toml', \
+            connection_count=3, pool_size=5, statistics={...})"
+        """
+        stats = self.get_statistics()
+        connection_names = list(self.connection_pool.keys())
+
+        return (
+            f"DatabaseManager(app_name={repr(self.app_name)}, "
+            f"config_file={repr(self.config_file)}, "
+            f"connection_count={len(connection_names)}, "
+            f"connection_names={repr(connection_names)}, "
+            f"pool_size={stats['connection_pool_size']}, "
+            f"active_connections={stats['active_connections']}, "
+            f"total_connections_created={stats['total_connections_created']}, "
+            f"uptime={stats['uptime']:.2f}s)"
+        )
+
     def add_connection(self, name: str, connection_config: Dict[str, Any]) -> None:
         """添加数据库连接配置
 
@@ -164,7 +192,7 @@ class DatabaseManager:
             # 检查连接是否已存在
             existing_connections = self.list_connections()
             if name in existing_connections:
-                raise ConfigError(self.CONNECTION_ALREADY_EXISTS_MSG.format(name))
+                raise ConfigError(f"连接配置已存在: {name}")
 
             # 简化配置验证
             ConnectionValidator.validate_basic_config(connection_config)
@@ -175,6 +203,69 @@ class DatabaseManager:
 
         with self._lock:
             self._safe_operation("数据库连接配置创建", name, _add_connection)
+
+    def list_connections(self) -> List[str]:
+        """获取所有可用的连接名称
+
+        获取并返回所有可用的数据库连接名称列表。
+
+        Returns:
+            List[str]: 连接名称列表
+
+        Example:
+            >>> connections = db_manager.list_connections()
+            >>> print(f"可用的连接: {', '.join(connections)}")
+        """
+        return self.config_manager.list_configs()
+
+    def _safe_operation(self, operation: str, name: str, func, *args, **kwargs):
+        """
+        安全执行操作的辅助方法，处理异常并转换为适当的错误类型
+
+        Args:
+            operation: 操作名称，用于日志和错误消息
+            name: 连接名称
+            func: 要执行的函数
+            *args: 函数位置参数
+            **kwargs: 函数关键字参数
+
+        Returns:
+            函数执行的结果
+
+        Raises:
+            ConfigError: 如果执行过程中发生ConfigError
+            DBConnectionError: 如果执行过程中发生DBConnectionError
+            DatabaseError: 其他所有异常都会被转换为DatabaseError
+        """
+        try:
+            return func(*args, **kwargs)
+        except (OSError, DatabaseError) as e:
+            self._handle_exception(operation, name, e)
+            # 确保即使_handle_exception没有抛出异常，也会抛出异常
+            raise DatabaseError(f"{operation}失败") from e
+
+    def _handle_exception(
+        self, operation: str, name: str, exception: Exception
+    ) -> None:
+        """
+        通用异常处理方法
+
+        Args:
+            operation: 操作名称，用于日志记录
+            name: 连接名称
+            exception: 捕获到的异常
+
+        Raises:
+            ConfigError: 如果原始异常是ConfigError
+            DBConnectionError: 如果原始异常是DBConnectionError
+            DatabaseError: 其他所有异常都会被转换为DatabaseError
+        """
+        if isinstance(exception, (ConfigError)):
+            raise exception
+
+        error_message = f"{operation}失败 {name}: {str(exception)}"
+        logger.error(error_message)
+        raise DatabaseError(f"{operation}失败: {str(exception)}")
 
     def remove_connection(self, name: str) -> None:
         """删除连接配置
@@ -232,7 +323,7 @@ class DatabaseManager:
         """
         existing_connections = self.list_connections()
         if name not in existing_connections:
-            raise ConfigError(self.CONNECTION_NOT_FOUND_MSG.format(name))
+            raise ConfigError(f"连接配置不存在: {name}")
 
     def _cleanup_connection(self, name: str) -> None:
         """安全清理连接资源
@@ -286,7 +377,7 @@ class DatabaseManager:
             driver: 数据库驱动实例
             name: 连接名称
         """
-        if hasattr(driver, "engine") and driver.engine:
+        if self._check_driver_basic_status(driver):
             try:
                 driver.disconnect()
                 logger.debug("连接 %s 已安全关闭", name)
@@ -398,20 +489,6 @@ class DatabaseManager:
             >>> print(f"主机: {config['host']}")
         """
         return self.config_manager.get_config(name)
-
-    def list_connections(self) -> List[str]:
-        """获取所有可用的连接名称
-
-        获取并返回所有可用的数据库连接名称列表。
-
-        Returns:
-            List[str]: 连接名称列表
-
-        Example:
-            >>> connections = db_manager.list_connections()
-            >>> print(f"可用的连接: {', '.join(connections)}")
-        """
-        return self.config_manager.list_configs()
 
     def get_connection(
         self, name: str, config_overrides: Dict[str, Any] | None = None
@@ -543,6 +620,73 @@ class DatabaseManager:
         # 创建新连接
         return self._create_new_connection(name)
 
+    def _is_connection_valid(self, driver: SQLAlchemyDriver) -> bool:
+        """全面的连接有效性检查
+
+        检查数据库连接是否有效，包括基本状态检查和实际查询测试。
+
+        Args:
+            driver: 数据库驱动实例
+
+        Returns:
+            bool: 连接是否有效
+
+        Note:
+            提供多层次的连接有效性验证，包括基本状态检查和实际查询测试
+            详细记录连接失败的原因，便于故障诊断
+        """
+        try:
+            # 检查驱动实例的基本状态
+            if not self._check_driver_basic_status(driver):
+                return False
+
+            # 执行实际查询测试
+            return self._test_connection_query(driver)
+
+        except (OSError, DatabaseError) as e:
+            logger.debug("连接有效性检查失败: %s", str(e))
+            return False
+
+    def _check_driver_basic_status(self, driver: SQLAlchemyDriver) -> bool:
+        """检查驱动实例的基本状态
+
+        检查数据库驱动实例的基本状态是否有效。
+
+        Args:
+            driver: 数据库驱动实例
+
+        Returns:
+            bool: 驱动实例状态是否有效
+        """
+        # 检查驱动实例是否有engine属性
+        if not hasattr(driver, "engine"):
+            logger.debug("驱动实例缺少engine属性")
+            return False
+
+        # 检查engine是否存在
+        if not driver.engine:
+            logger.debug("驱动实例标记为未连接状态")
+            return False
+
+        return True
+
+    def _test_connection_query(self, driver: SQLAlchemyDriver) -> bool:
+        """执行连接查询测试
+
+        执行实际的查询测试来验证连接是否有效。
+
+        Args:
+            driver: 数据库驱动实例
+
+        Returns:
+            bool: 查询测试是否成功
+        """
+        try:
+            return driver.test_connection()
+        except (OSError, DatabaseError) as query_error:
+            logger.debug("连接查询测试失败: %s", str(query_error))
+            return False
+
     def _create_new_connection(self, name: str) -> SQLAlchemyDriver:
         """创建新的数据库连接
 
@@ -625,73 +769,6 @@ class DatabaseManager:
             "last_query_time": None,
         }
 
-    def _is_connection_valid(self, driver: SQLAlchemyDriver) -> bool:
-        """全面的连接有效性检查
-
-        检查数据库连接是否有效，包括基本状态检查和实际查询测试。
-
-        Args:
-            driver: 数据库驱动实例
-
-        Returns:
-            bool: 连接是否有效
-
-        Note:
-            提供多层次的连接有效性验证，包括基本状态检查和实际查询测试
-            详细记录连接失败的原因，便于故障诊断
-        """
-        try:
-            # 检查驱动实例的基本状态
-            if not self._check_driver_basic_status(driver):
-                return False
-
-            # 执行实际查询测试
-            return self._test_connection_query(driver)
-
-        except (OSError, DatabaseError) as e:
-            logger.debug("连接有效性检查失败: %s", str(e))
-            return False
-
-    def _check_driver_basic_status(self, driver: SQLAlchemyDriver) -> bool:
-        """检查驱动实例的基本状态
-
-        检查数据库驱动实例的基本状态是否有效。
-
-        Args:
-            driver: 数据库驱动实例
-
-        Returns:
-            bool: 驱动实例状态是否有效
-        """
-        # 检查驱动实例是否有engine属性
-        if not hasattr(driver, "engine"):
-            logger.debug("驱动实例缺少engine属性")
-            return False
-
-        # 检查engine是否存在
-        if not driver.engine:
-            logger.debug("驱动实例标记为未连接状态")
-            return False
-
-        return True
-
-    def _test_connection_query(self, driver: SQLAlchemyDriver) -> bool:
-        """执行连接查询测试
-
-        执行实际的查询测试来验证连接是否有效。
-
-        Args:
-            driver: 数据库驱动实例
-
-        Returns:
-            bool: 查询测试是否成功
-        """
-        try:
-            return driver.test_connection()
-        except (OSError, DatabaseError) as query_error:
-            logger.debug("连接查询测试失败: %s", str(query_error))
-            return False
-
     def test_connection(self, name: str) -> bool:
         """测试连接是否有效
 
@@ -734,7 +811,7 @@ class DatabaseManager:
             return False
         except (OSError, DatabaseError) as e:
             # 确保异常情况下也清理连接
-            self._cleanup_connection_safe(name)
+            self._cleanup_connection(name)
             # 分析错误类型，提供更详细的错误信息
             self._log_test_error(name, e)
             return False
@@ -763,21 +840,8 @@ class DatabaseManager:
             exception: 异常对象
         """
         # 确保异常情况下也清理连接
-        self._cleanup_connection_safe(name)
+        self._cleanup_connection(name)
         logger.error("连接测试失败 %s: %s", name, str(exception))
-
-    def _cleanup_connection_safe(self, name: str) -> None:
-        """安全清理连接，忽略清理过程中的异常
-
-        安全地清理连接资源，忽略清理过程中的异常。
-
-        Args:
-            name: 连接名称
-        """
-        try:
-            self._cleanup_connection(name)
-        except (OSError, DatabaseError):
-            pass  # 忽略清理过程中的异常
 
     def _log_test_error(self, name: str, error: Exception) -> None:
         """记录测试错误，根据错误类型提供详细信息
@@ -1226,9 +1290,7 @@ class DatabaseManager:
             stats["connection_pool_size"] = len(self.connection_pool)
             return stats
 
-    def cleanup_idle_connections(
-        self, max_idle_time: int = DEFAULT_MAX_IDLE_TIME
-    ) -> int:
+    def cleanup_idle_connections(self, max_idle_time: int = 300) -> int:
         """清理空闲时间过长的连接
 
         清理空闲时间超过指定阈值的数据库连接。
@@ -1716,61 +1778,3 @@ class DatabaseManager:
                     "last_error": None,
                     "response_time": 0.0,
                 }
-
-    def _handle_exception(
-        self, operation: str, name: str, exception: Exception
-    ) -> None:
-        """
-        通用异常处理方法
-
-        Args:
-            operation: 操作名称，用于日志记录
-            name: 连接名称
-            exception: 捕获到的异常
-
-        Raises:
-            ConfigError: 如果原始异常是ConfigError
-            DBConnectionError: 如果原始异常是DBConnectionError
-            DatabaseError: 其他所有异常都会被转换为DatabaseError
-        """
-        if isinstance(exception, (ConfigError)):
-            raise exception
-
-        error_message = f"{operation}失败 {name}: {str(exception)}"
-        logger.error(error_message)
-        raise DatabaseError(f"{operation}失败: {str(exception)}")
-
-    def _safe_operation(self, operation: str, name: str, func, *args, **kwargs):
-        """
-        安全执行操作的辅助方法，处理异常并转换为适当的错误类型
-
-        Args:
-            operation: 操作名称，用于日志和错误消息
-            name: 连接名称
-            func: 要执行的函数
-            *args: 函数位置参数
-            **kwargs: 函数关键字参数
-
-        Returns:
-            函数执行的结果
-
-        Raises:
-            ConfigError: 如果执行过程中发生ConfigError
-            DBConnectionError: 如果执行过程中发生DBConnectionError
-            DatabaseError: 其他所有异常都会被转换为DatabaseError
-        """
-        try:
-            return func(*args, **kwargs)
-        except (OSError, DatabaseError) as e:
-            self._handle_exception(operation, name, e)
-            # 确保即使_handle_exception没有抛出异常，也会抛出异常
-            raise DatabaseError(f"{operation}失败") from e
-
-    def __str__(self) -> str:
-        """返回数据库管理器的字符串表示"""
-        stats = self.get_statistics()
-        return (
-            f"DatabaseManager(app_name='{self.app_name}', "
-            f"active_connections={stats['active_connections']}, "
-            f"pool_size={stats['connection_pool_size']})"
-        )

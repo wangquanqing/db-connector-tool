@@ -99,11 +99,3 @@ KeyManagerType = KeyManager
 
 # 这些常量用于标识模块的兼容性要求
 REQUIRED_PYTHON_VERSION = (3, 8)
-SUPPORTED_DATABASE_TYPES = {
-    "oracle",
-    "postgresql",
-    "mysql",
-    "mssql",
-    "sqlite",
-    "gbasedbt",
-}

@@ -138,7 +138,7 @@ class KeyManager:
         logger.debug("密钥管理器已关闭")
 
     @staticmethod
-    def _handle_config_operation(operation_name: str) -> Callable:
+    def handle_config_operation(operation_name: str) -> Callable:
         """配置操作异常处理装饰器
 
         Args:
@@ -148,7 +148,7 @@ class KeyManager:
             Callable: 装饰器函数
 
         Example:
-            >>> @_handle_config_operation("配置文件保存")
+            >>> @handle_config_operation("配置文件保存")
             ... def _save_config(self, config):
             ...     # 保存配置逻辑
             ...     pass
@@ -196,7 +196,7 @@ class KeyManager:
             raise ConfigError("加密管理器未初始化，无法处理敏感信息")
         return self.crypto
 
-    @_handle_config_operation("安全密钥管理")
+    @handle_config_operation("安全密钥管理")
     def load_or_create_key(self) -> None:
         """加载或创建加密密钥
 

@@ -13,13 +13,11 @@ Example:
 >>> new_version = config_manager.rotate_encryption_key()
 """
 
-import json
 import shutil
 import tomllib
 from datetime import datetime
-from functools import wraps
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 import tomli_w
 
@@ -206,45 +204,6 @@ class ConfigManager:
         self._config_mtime = None
         logger.debug("配置管理器敏感数据和缓存已清理")
 
-    @staticmethod
-    def _handle_config_operation(operation_name: str) -> Callable:
-        """配置操作异常处理装饰器
-
-        Args:
-            operation_name: 操作名称，用于错误消息
-
-        Returns:
-            Callable: 装饰器函数
-
-        Example:
-            >>> @_handle_config_operation("配置文件保存")
-            ... def _save_config(self, config):
-            ...     # 保存配置逻辑
-            ...     pass
-        """
-
-        def decorator(func: Callable) -> Callable:
-            @wraps(func)
-            def wrapper(self, *args, **kwargs):
-                try:
-                    return func(self, *args, **kwargs)
-                except OSError as error:
-                    logger.error("配置文件操作失败: %s", str(error))
-                    raise ConfigError(f"{operation_name}失败: {str(error)}") from error
-                except (json.JSONDecodeError, TypeError, ValueError) as error:
-                    logger.error("配置数据处理失败: %s", str(error))
-                    raise ConfigError(f"{operation_name}失败: {str(error)}") from error
-                except (AttributeError, RuntimeError, MemoryError) as error:
-                    logger.error("%s失败: %s", operation_name, str(error))
-                    raise ConfigError(f"{operation_name}失败: {str(error)}") from error
-                except Exception as error:
-                    logger.error("%s失败: %s", operation_name, str(error))
-                    raise ConfigError(f"{operation_name}失败: {str(error)}") from error
-
-            return wrapper
-
-        return decorator
-
     def _ensure_config_exists(self) -> None:
         """确保配置文件存在，如果不存在则创建默认配置
 
@@ -279,7 +238,7 @@ class ConfigManager:
         self._save_config(default_config)
         logger.info("默认配置文件已创建: %s", self.config_path)
 
-    @_handle_config_operation("配置文件保存")
+    @KeyManager.handle_config_operation("配置文件保存")
     def _save_config(
         self, config: Dict[str, Any], operation: str = OPERATION_UPDATE
     ) -> None:
@@ -382,7 +341,7 @@ class ConfigManager:
             self._save_config(config, self.OPERATION_ADD)
             self._log_operation_success("添加", name)
 
-    @_handle_config_operation("配置文件加载")
+    @KeyManager.handle_config_operation("配置文件加载")
     def _load_config(self) -> Dict[str, Any]:
         """加载并验证配置文件
 
@@ -739,7 +698,7 @@ class ConfigManager:
         config = self._load_config()
         return config.get("metadata", {}).get("audit_log", [])
 
-    @_handle_config_operation("配置文件备份")
+    @KeyManager.handle_config_operation("配置文件备份")
     def backup_config(self, backup_path: Path | None = None) -> Path:
         """备份配置文件
 
@@ -768,7 +727,7 @@ class ConfigManager:
         logger.debug("配置文件已备份: %s", backup_path)
         return backup_path
 
-    @_handle_config_operation("加密密钥轮换")
+    @KeyManager.handle_config_operation("加密密钥轮换")
     def rotate_encryption_key(self) -> str:
         """轮换加密密钥
 
