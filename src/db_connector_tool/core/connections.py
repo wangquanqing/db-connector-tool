@@ -501,72 +501,7 @@ class DatabaseManager:
         # 创建新连接
         return self._create_new_connection(name)
 
-    def _is_connection_valid(self, driver: SQLAlchemyDriver) -> bool:
-        """全面的连接有效性检查
 
-        检查数据库连接是否有效，包括基本状态检查和实际查询测试。
-
-        Args:
-            driver: 数据库驱动实例
-
-        Returns:
-            bool: 连接是否有效
-
-        Note:
-            提供多层次的连接有效性验证，包括基本状态检查和实际查询测试
-            详细记录连接失败的原因，便于故障诊断
-        """
-        try:
-            # 检查驱动实例的基本状态
-            if not self._check_driver_basic_status(driver):
-                return False
-
-            # 执行实际查询测试
-            return self._test_connection_query(driver)
-
-        except (OSError, DatabaseError) as e:
-            logger.debug("连接有效性检查失败: %s", str(e))
-            return False
-
-    def _check_driver_basic_status(self, driver: SQLAlchemyDriver) -> bool:
-        """检查驱动实例的基本状态
-
-        检查数据库驱动实例的基本状态是否有效。
-
-        Args:
-            driver: 数据库驱动实例
-
-        Returns:
-            bool: 驱动实例状态是否有效
-        """
-        # 检查驱动实例是否有engine属性
-        if not hasattr(driver, "engine"):
-            logger.debug("驱动实例缺少engine属性")
-            return False
-
-        # 检查engine是否存在
-        if not driver.engine:
-            logger.debug("驱动实例标记为未连接状态")
-            return False
-
-        return True
-
-    def _test_connection_query(self, driver: SQLAlchemyDriver) -> bool:
-        """执行连接查询测试
-
-        执行实际的查询测试来验证连接是否有效。
-
-        Args:
-            driver: 数据库驱动实例
-
-        Returns:
-            bool: 查询测试是否成功
-        """
-        try:
-            return driver.test_connection()
-        except (OSError, DatabaseError) as query_error:
-            logger.debug("连接查询测试失败: %s", str(query_error))
-            return False
 
     def _create_new_connection(self, name: str) -> SQLAlchemyDriver:
         """创建新的数据库连接
