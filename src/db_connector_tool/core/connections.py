@@ -240,11 +240,7 @@ class DatabaseManager:
 
         try:
             return func(*args, **kwargs)
-        except ConfigError:
-            raise
-        except DBConnectionError:
-            raise
-        except (OSError, DatabaseError, Exception) as error:
+        except (OSError, DatabaseError) as error:
             error_message = f"{operation}失败 {name}: {str(error)}"
             logger.error(error_message)
             raise DatabaseError(f"{operation}失败: {str(error)}") from error
@@ -588,11 +584,7 @@ class DatabaseManager:
 
         try:
             return _execute_query()
-        except ConfigError:
-            raise
-        except DBConnectionError:
-            raise
-        except (OSError, DatabaseError, Exception) as error:
+        except (OSError, DatabaseError) as error:
             # 记录错误信息
             self.pool_manager.record_connection_error(connection_name, error)
             error_message = f"查询执行失败 {connection_name}: {str(error)}"
@@ -643,11 +635,7 @@ class DatabaseManager:
 
         try:
             return _execute_command()
-        except ConfigError:
-            raise
-        except DBConnectionError:
-            raise
-        except (OSError, DatabaseError, Exception) as error:
+        except (OSError, DatabaseError) as error:
             # 记录错误信息
             self.pool_manager.record_connection_error(connection_name, error)
             error_message = f"命令执行失败 {connection_name}: {str(error)}"

@@ -1,11 +1,9 @@
-import unittest
-import tempfile
 import os
-from pathlib import Path
+import tempfile
+import unittest
 
 from src.db_connector_tool.core.config_security import ConfigSecurityManager
 from src.db_connector_tool.core.key_manager import KeyManager
-from src.db_connector_tool.core.exceptions import ConfigError
 
 
 class TestConfigSecurityManager(unittest.TestCase):
@@ -23,7 +21,7 @@ class TestConfigSecurityManager(unittest.TestCase):
 
     def tearDown(self) -> None:
         """清理测试环境"""
-        if hasattr(self, 'key_manager') and self.key_manager:
+        if hasattr(self, "key_manager") and self.key_manager:
             try:
                 self.key_manager.close()
             except Exception:
@@ -51,8 +49,8 @@ class TestConfigSecurityManager(unittest.TestCase):
                 "last_modified": "2024-01-01T00:00:00",
                 "key_version": "1",
                 "audit_log": [],
-                "signature": ""
-            }
+                "signature": "",
+            },
         }
 
         # 验证没有签名的配置
@@ -71,8 +69,8 @@ class TestConfigSecurityManager(unittest.TestCase):
                 "created": "2024-01-01T00:00:00",
                 "last_modified": "2024-01-01T00:00:00",
                 "key_version": "1",
-                "audit_log": []
-            }
+                "audit_log": [],
+            },
         }
 
         # 生成签名
@@ -92,15 +90,17 @@ class TestConfigSecurityManager(unittest.TestCase):
                 "created": "2024-01-01T00:00:00",
                 "last_modified": "2024-01-01T00:00:00",
                 "key_version": "1",
-                "audit_log": []
-            }
+                "audit_log": [],
+            },
         }
 
         # 添加审计日志条目
         current_time = "2024-01-01T00:00:00"
         security_manager.add_audit_log_entry(config, "test_operation", current_time)
         self.assertEqual(len(config["metadata"]["audit_log"]), 1)
-        self.assertEqual(config["metadata"]["audit_log"][0]["operation"], "test_operation")
+        self.assertEqual(
+            config["metadata"]["audit_log"][0]["operation"], "test_operation"
+        )
 
     def test_encrypt_dict_values(self) -> None:
         """测试加密字典值"""
@@ -110,7 +110,7 @@ class TestConfigSecurityManager(unittest.TestCase):
             "host": "localhost",
             "port": 5432,
             "username": "admin",
-            "password": "secret"
+            "password": "secret",
         }
 
         # 加密数据
@@ -128,7 +128,7 @@ class TestConfigSecurityManager(unittest.TestCase):
             "host": "localhost",
             "port": 5432,
             "username": "admin",
-            "password": "secret"
+            "password": "secret",
         }
 
         # 加密并解密数据
@@ -148,19 +148,21 @@ class TestConfigSecurityManager(unittest.TestCase):
                     "host": "localhost",
                     "port": 5432,
                     "username": "admin",
-                    "password": "secret"
+                    "password": "secret",
                 }
             },
             "metadata": {
                 "created": "2024-01-01T00:00:00",
                 "last_modified": "2024-01-01T00:00:00",
                 "key_version": "1",
-                "audit_log": []
-            }
+                "audit_log": [],
+            },
         }
 
         # 先加密连接配置
-        encrypted_connections = security_manager.encrypt_dict_values(config["connections"]["test_db"])
+        encrypted_connections = security_manager.encrypt_dict_values(
+            config["connections"]["test_db"]
+        )
         config["connections"]["test_db"] = encrypted_connections
 
         # 执行密钥轮换

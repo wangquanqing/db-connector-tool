@@ -259,11 +259,9 @@ class TestCryptoManager(unittest.TestCase):
         验证密码强度验证功能的正确性。
         """
         from src.db_connector_tool.core.validators import PasswordValidator
-        
+
         # 强密码
-        self.assertTrue(
-            PasswordValidator.validate_strength("My$trongP@ssw0rd123!")
-        )
+        self.assertTrue(PasswordValidator.validate_strength("My$trongP@ssw0rd123!"))
 
         # 弱密码 - 太短
         self.assertFalse(PasswordValidator.validate_strength("Short1!"))
@@ -286,7 +284,7 @@ class TestCryptoManager(unittest.TestCase):
         验证密码强度等级评估功能的正确性。
         """
         from src.db_connector_tool.core.validators import PasswordValidator
-        
+
         # 弱密码 - 长度不足8，缺少复杂度
         self.assertEqual(PasswordValidator.get_strength("weak"), "weak")
 

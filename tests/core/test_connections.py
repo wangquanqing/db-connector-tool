@@ -7,7 +7,6 @@ import unittest
 from unittest.mock import Mock, patch
 
 from src.db_connector_tool.core.connections import DatabaseManager
-from src.db_connector_tool.core.exceptions import ConfigError, DatabaseError
 
 
 class TestDatabaseManager(unittest.TestCase):
@@ -80,7 +79,7 @@ class TestDatabaseManager(unittest.TestCase):
 
         # 创建数据库管理器
         db_manager = DatabaseManager(self.app_name, self.config_file)
-        
+
         # 测试添加连接
         connection_config = {
             "type": "mysql",
@@ -88,13 +87,15 @@ class TestDatabaseManager(unittest.TestCase):
             "port": 3306,
             "username": "root",
             "password": "password",
-            "database": "test_db"
+            "database": "test_db",
         }
-        
+
         db_manager.add_connection("test_db", connection_config)
-        
+
         # 验证配置管理器的 add_config 方法被调用
-        mock_config_instance.add_config.assert_called_once_with("test_db", connection_config)
+        mock_config_instance.add_config.assert_called_once_with(
+            "test_db", connection_config
+        )
 
     @patch("src.db_connector_tool.core.connections.ConfigManager")
     @patch("src.db_connector_tool.core.connections.ConnectionPoolManager")
@@ -110,10 +111,10 @@ class TestDatabaseManager(unittest.TestCase):
 
         # 创建数据库管理器
         db_manager = DatabaseManager(self.app_name, self.config_file)
-        
+
         # 测试移除连接
         db_manager.remove_connection("test_db")
-        
+
         # 验证连接池管理器的 remove_connection 方法被调用
         mock_pool_instance.remove_connection.assert_called_once_with("test_db")
         # 验证配置管理器的 remove_config 方法被调用
@@ -133,7 +134,7 @@ class TestDatabaseManager(unittest.TestCase):
 
         # 创建数据库管理器
         db_manager = DatabaseManager(self.app_name, self.config_file)
-        
+
         # 测试更新连接
         new_config = {
             "type": "mysql",
@@ -141,15 +142,17 @@ class TestDatabaseManager(unittest.TestCase):
             "port": 3306,
             "username": "root",
             "password": "newpassword",
-            "database": "test_db"
+            "database": "test_db",
         }
-        
+
         db_manager.update_connection("test_db", new_config)
-        
+
         # 验证连接池管理器的 remove_connection 方法被调用
         mock_pool_instance.remove_connection.assert_called_once_with("test_db")
         # 验证配置管理器的 update_config 方法被调用
-        mock_config_instance.update_config.assert_called_once_with("test_db", new_config)
+        mock_config_instance.update_config.assert_called_once_with(
+            "test_db", new_config
+        )
 
     @patch("src.db_connector_tool.core.connections.ConfigManager")
     @patch("src.db_connector_tool.core.connections.ConnectionPoolManager")
@@ -164,7 +167,7 @@ class TestDatabaseManager(unittest.TestCase):
             "port": 3306,
             "username": "root",
             "password": "password",
-            "database": "test_db"
+            "database": "test_db",
         }
 
         mock_pool_instance = Mock()
@@ -172,10 +175,10 @@ class TestDatabaseManager(unittest.TestCase):
 
         # 创建数据库管理器
         db_manager = DatabaseManager(self.app_name, self.config_file)
-        
+
         # 测试显示连接配置
         config = db_manager.show_connection("test_db")
-        
+
         # 验证配置管理器的 get_config 方法被调用
         mock_config_instance.get_config.assert_called_once_with("test_db")
         # 验证返回的配置
@@ -195,10 +198,10 @@ class TestDatabaseManager(unittest.TestCase):
 
         # 创建数据库管理器
         db_manager = DatabaseManager(self.app_name, self.config_file)
-        
+
         # 测试列出所有连接
         connections = db_manager.list_connections()
-        
+
         # 验证配置管理器的 list_configs 方法被调用
         mock_config_instance.list_configs.assert_called_once()
         # 验证返回的连接列表
@@ -219,14 +222,14 @@ class TestDatabaseManager(unittest.TestCase):
         # 模拟驱动实例
         mock_driver = Mock()
         mock_driver.execute_query.return_value = [{"id": 1, "name": "test"}]
-        
+
         # 模拟 get_connection 方法
         db_manager = DatabaseManager(self.app_name, self.config_file)
         db_manager.get_connection = Mock(return_value=mock_driver)
-        
+
         # 测试执行查询
         result = db_manager.execute_query("test_db", "SELECT * FROM users")
-        
+
         # 验证 get_connection 方法被调用
         db_manager.get_connection.assert_called_once_with("test_db")
         # 验证驱动的 execute_query 方法被调用
@@ -249,18 +252,22 @@ class TestDatabaseManager(unittest.TestCase):
         # 模拟驱动实例
         mock_driver = Mock()
         mock_driver.execute_command.return_value = 1
-        
+
         # 模拟 get_connection 方法
         db_manager = DatabaseManager(self.app_name, self.config_file)
         db_manager.get_connection = Mock(return_value=mock_driver)
-        
+
         # 测试执行命令
-        affected_rows = db_manager.execute_command("test_db", "UPDATE users SET name = 'test' WHERE id = 1")
-        
+        affected_rows = db_manager.execute_command(
+            "test_db", "UPDATE users SET name = 'test' WHERE id = 1"
+        )
+
         # 验证 get_connection 方法被调用
         db_manager.get_connection.assert_called_once_with("test_db")
         # 验证驱动的 execute_command 方法被调用
-        mock_driver.execute_command.assert_called_once_with("UPDATE users SET name = 'test' WHERE id = 1", None)
+        mock_driver.execute_command.assert_called_once_with(
+            "UPDATE users SET name = 'test' WHERE id = 1", None
+        )
         # 验证返回的结果
         self.assertEqual(affected_rows, 1)
 
@@ -279,14 +286,14 @@ class TestDatabaseManager(unittest.TestCase):
         # 模拟驱动实例
         mock_driver = Mock()
         mock_driver.test_connection.return_value = True
-        
+
         # 模拟 get_connection 方法
         db_manager = DatabaseManager(self.app_name, self.config_file)
         db_manager.get_connection = Mock(return_value=mock_driver)
-        
+
         # 测试测试连接
         result = db_manager.test_connection("test_db")
-        
+
         # 验证 get_connection 方法被调用
         db_manager.get_connection.assert_called_once_with("test_db")
         # 验证驱动的 test_connection 方法被调用

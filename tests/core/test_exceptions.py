@@ -1,17 +1,16 @@
 import unittest
-from typing import Dict, Any
 
 from src.db_connector_tool.core.exceptions import (
-    DBConnectorError,
     ConfigError,
     CryptoError,
     DatabaseError,
     DBConnectionError,
+    DBConnectorError,
+    DBTimeoutError,
     DriverError,
+    FileSystemError,
     QueryError,
     ValidationError,
-    FileSystemError,
-    DBTimeoutError,
 )
 
 
@@ -53,7 +52,7 @@ class TestDBConnectorError(unittest.TestCase):
         details = {"key": "value"}
         error = DBConnectorError("测试异常", "TEST_001", details)
         error_dict = error.to_dict()
-        
+
         self.assertEqual(error_dict["error_type"], "DBConnectorError")
         self.assertEqual(error_dict["message"], "测试异常")
         self.assertEqual(error_dict["error_code"], "TEST_001")
@@ -78,7 +77,7 @@ class TestConfigError(unittest.TestCase):
             "CONFIG_001",
             config_file="connections.toml",
             config_section="database",
-            config_key="host"
+            config_key="host",
         )
         self.assertEqual(error.message, "配置文件格式错误")
         self.assertEqual(error.error_code, "CONFIG_001")
@@ -108,10 +107,7 @@ class TestCryptoError(unittest.TestCase):
     def test_init_with_crypto_info(self) -> None:
         """测试带加密信息的初始化"""
         error = CryptoError(
-            "加密失败",
-            "CRYPTO_001",
-            operation="encrypt",
-            algorithm="AES-256"
+            "加密失败", "CRYPTO_001", operation="encrypt", algorithm="AES-256"
         )
         self.assertEqual(error.message, "加密失败")
         self.assertEqual(error.error_code, "CRYPTO_001")
@@ -139,10 +135,7 @@ class TestDatabaseError(unittest.TestCase):
     def test_init_with_db_info(self) -> None:
         """测试带数据库信息的初始化"""
         error = DatabaseError(
-            "数据库操作失败",
-            "DB_001",
-            database_type="mysql",
-            operation="query"
+            "数据库操作失败", "DB_001", database_type="mysql", operation="query"
         )
         self.assertEqual(error.message, "数据库操作失败")
         self.assertEqual(error.error_code, "DB_001")
@@ -177,7 +170,7 @@ class TestDBConnectionError(unittest.TestCase):
             connection_name="main_db",
             host="localhost",
             port=3306,
-            database="test_db"
+            database="test_db",
         )
         self.assertEqual(error.message, "连接失败")
         self.assertEqual(error.error_code, "CONN_001")
@@ -212,7 +205,7 @@ class TestDriverError(unittest.TestCase):
             "驱动加载失败",
             "DRIVER_001",
             driver_name="mysql-connector",
-            driver_version="8.0.0"
+            driver_version="8.0.0",
         )
         self.assertEqual(error.message, "驱动加载失败")
         self.assertEqual(error.error_code, "DRIVER_001")
@@ -245,7 +238,7 @@ class TestQueryError(unittest.TestCase):
             "QUERY_001",
             query="SELECT * FROM users WHERE id = ?",
             query_type="SELECT",
-            parameters={"id": 1}
+            parameters={"id": 1},
         )
         self.assertEqual(error.message, "查询语法错误")
         self.assertEqual(error.error_code, "QUERY_001")
@@ -259,12 +252,12 @@ class TestQueryError(unittest.TestCase):
     def test_get_query_preview(self) -> None:
         """测试获取查询预览"""
         error = QueryError("查询错误")
-        
+
         # 测试短查询
         short_query = "SELECT * FROM users"
         preview = error._get_query_preview(short_query)
         self.assertEqual(preview, short_query)
-        
+
         # 测试长查询
         long_query = "SELECT * FROM users WHERE id = 1 AND name = 'test' AND age > 18"
         preview = error._get_query_preview(long_query, max_length=20)
@@ -296,7 +289,7 @@ class TestValidationError(unittest.TestCase):
             field_name="username",
             expected_type="str",
             actual_value="test",
-            validation_rules={"min_length": 3, "max_length": 20}
+            validation_rules={"min_length": 3, "max_length": 20},
         )
         self.assertEqual(error.message, "参数验证失败")
         self.assertEqual(error.error_code, "VALID_001")
@@ -329,10 +322,7 @@ class TestFileSystemError(unittest.TestCase):
     def test_init_with_file_info(self) -> None:
         """测试带文件信息的初始化"""
         error = FileSystemError(
-            "文件读取失败",
-            "FS_001",
-            file_path="/path/to/file.txt",
-            operation="read"
+            "文件读取失败", "FS_001", file_path="/path/to/file.txt", operation="read"
         )
         self.assertEqual(error.message, "文件读取失败")
         self.assertEqual(error.error_code, "FS_001")
@@ -360,10 +350,7 @@ class TestDBTimeoutError(unittest.TestCase):
     def test_init_with_timeout_info(self) -> None:
         """测试带超时信息的初始化"""
         error = DBTimeoutError(
-            "数据库查询超时",
-            "TIMEOUT_001",
-            timeout_seconds=30.0,
-            operation="query"
+            "数据库查询超时", "TIMEOUT_001", timeout_seconds=30.0, operation="query"
         )
         self.assertEqual(error.message, "数据库查询超时")
         self.assertEqual(error.error_code, "TIMEOUT_001")

@@ -123,11 +123,15 @@ class TestPasswordValidator(unittest.TestCase):
         self.assertEqual(PasswordValidator.get_strength("NoDigitPassword!"), "medium")
 
         # 强密码
-        self.assertEqual(PasswordValidator.get_strength("Medium1!"), "strong")  # 8字符+4种类型
+        self.assertEqual(
+            PasswordValidator.get_strength("Medium1!"), "strong"
+        )  # 8字符+4种类型
         self.assertEqual(PasswordValidator.get_strength("StrongP@ssw0rd123!"), "strong")
 
         # 非常强的密码
-        self.assertEqual(PasswordValidator.get_strength("VeryStrongPassword123!@#"), "very_strong")
+        self.assertEqual(
+            PasswordValidator.get_strength("VeryStrongPassword123!@#"), "very_strong"
+        )
 
     def test_validate_strength(self) -> None:
         """测试密码强度验证"""
@@ -154,7 +158,9 @@ class TestGenericValidator(unittest.TestCase):
 
         # 缺少必需字段
         with self.assertRaises(ConfigError) as context:
-            GenericValidator.validate_required_fields(test_data, ["name", "value", "missing"])
+            GenericValidator.validate_required_fields(
+                test_data, ["name", "value", "missing"]
+            )
         self.assertIn("缺少必需字段", str(context.exception))
 
     def test_validate_field_type(self) -> None:

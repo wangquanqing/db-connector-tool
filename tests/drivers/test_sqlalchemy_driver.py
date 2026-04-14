@@ -1,8 +1,8 @@
 import unittest
 from unittest.mock import MagicMock, patch
 
-from src.db_connector_tool.drivers.sqlalchemy_driver import SQLAlchemyDriver
 from src.db_connector_tool.core.exceptions import DriverError
+from src.db_connector_tool.drivers.sqlalchemy_driver import SQLAlchemyDriver
 
 
 class TestSQLAlchemyDriver(unittest.TestCase):
@@ -202,7 +202,9 @@ class TestSQLAlchemyDriver(unittest.TestCase):
         """测试验证 UNION 注入"""
         driver = SQLAlchemyDriver(self.base_config)
         with self.assertRaises(ValueError):
-            driver._validate_sql_query("SELECT * FROM users UNION ALL SELECT * FROM secrets")
+            driver._validate_sql_query(
+                "SELECT * FROM users UNION ALL SELECT * FROM secrets"
+            )
 
     def test_validate_sql_query_grant(self) -> None:
         """测试验证 GRANT 命令"""
@@ -219,8 +221,9 @@ class TestSQLAlchemyDriver(unittest.TestCase):
     def test_context_manager(self) -> None:
         """测试上下文管理器功能"""
         driver = SQLAlchemyDriver(self.base_config)
-        with patch.object(driver, 'connect') as mock_connect, \
-             patch.object(driver, 'disconnect') as mock_disconnect:
+        with patch.object(driver, "connect") as mock_connect, patch.object(
+            driver, "disconnect"
+        ) as mock_disconnect:
             with driver:
                 pass
             mock_connect.assert_called_once()
@@ -296,7 +299,7 @@ class TestSQLAlchemyDriverAdvanced(unittest.TestCase):
     def test_test_connection_no_engine(self) -> None:
         """测试没有引擎时的连接测试"""
         driver = SQLAlchemyDriver(self.base_config)
-        with patch.object(driver, 'connect') as mock_connect:
+        with patch.object(driver, "connect") as mock_connect:
             mock_connect.side_effect = Exception("连接失败")
             result = driver.test_connection()
             self.assertFalse(result)
@@ -310,7 +313,14 @@ class TestSQLAlchemyDriverAdvanced(unittest.TestCase):
 
     def test_db_configs_contains_all_types(self) -> None:
         """测试 DB_CONFIGS 包含所有支持的数据库类型"""
-        expected_types = ["oracle", "postgresql", "mysql", "sqlserver", "sqlite", "gbase"]
+        expected_types = [
+            "oracle",
+            "postgresql",
+            "mysql",
+            "sqlserver",
+            "sqlite",
+            "gbase",
+        ]
         for db_type in expected_types:
             self.assertIn(db_type, SQLAlchemyDriver.DB_CONFIGS)
 

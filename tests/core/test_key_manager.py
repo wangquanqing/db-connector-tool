@@ -1,11 +1,10 @@
-import unittest
-import tempfile
 import os
-from pathlib import Path
+import tempfile
+import unittest
 
-from src.db_connector_tool.core.key_manager import KeyManager
 from src.db_connector_tool.core.crypto import CryptoManager
 from src.db_connector_tool.core.exceptions import ConfigError
+from src.db_connector_tool.core.key_manager import KeyManager
 
 
 class TestKeyManager(unittest.TestCase):
@@ -75,7 +74,7 @@ class TestKeyManager(unittest.TestCase):
         # 确保加密管理器已初始化
         crypto = key_manager.get_crypto_manager()
         self.assertIsInstance(crypto, CryptoManager)
-        
+
         key_manager.close()
         # 验证加密管理器已被清理
         with self.assertRaises(ConfigError):
