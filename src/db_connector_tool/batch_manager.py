@@ -503,6 +503,15 @@ class BatchDatabaseManager:
 
         return stats
 
+    def close_connection(self, connection_name: str) -> None:
+        """关闭特定的数据库连接
+
+        Args:
+            connection_name: 要关闭的连接名称
+        """
+        self.db_manager.close_connection(connection_name)
+        logger.info(f"连接 {connection_name} 已关闭")
+
     def close_all_connections(self) -> None:
         """关闭所有连接"""
         self.db_manager.close_all_connections()

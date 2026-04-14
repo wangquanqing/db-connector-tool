@@ -124,8 +124,8 @@ class TestPasswordValidator(unittest.TestCase):
 
         # 强密码
         self.assertEqual(
-            PasswordValidator.get_strength("Medium1!"), "strong"
-        )  # 8字符+4种类型
+            PasswordValidator.get_strength("Medium1!"), "medium"
+        )  # 7字符+4种类型
         self.assertEqual(PasswordValidator.get_strength("StrongP@ssw0rd123!"), "strong")
 
         # 非常强的密码

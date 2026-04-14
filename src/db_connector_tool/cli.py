@@ -793,7 +793,7 @@ class DBConnectorCLI:
         """
         if len(sql) <= max_length:
             return sql
-        return sql[:max_length] + "..."
+        return sql[:max_length].rstrip() + "..."
 
     def _print_execution_summary(self, success_count: int, error_count: int) -> None:
         """

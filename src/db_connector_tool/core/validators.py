@@ -283,12 +283,16 @@ class PasswordValidator:
         # 复杂度得分（排除长度检查）
         for req_name, req_met in requirements.items():
             if req_name != "length_ok" and req_met:
-                score += 1
+                # 特殊字符权重更高
+                if req_name == "has_special" and req_met:
+                    score += 2
+                else:
+                    score += 1
 
         # 评估强度等级
-        if score >= 7:
+        if score >= 8:
             return "very_strong"
-        if score >= 5:
+        if score >= 6:
             return "strong"
         if score >= 3:
             return "medium"

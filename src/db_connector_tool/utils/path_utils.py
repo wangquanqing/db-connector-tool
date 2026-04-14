@@ -232,12 +232,32 @@ class PathHelper:
             if not path_str.strip():
                 return False
 
+            # 检查是否是Windows路径格式（包含驱动器字母和反斜杠）
+            if ":\\" in path_str and len(path_str) > 2 and path_str[0].isalpha():
+                return PathHelper._is_valid_path_windows(path_str)
             # 根据操作系统选择验证方法
             system = platform.system().lower()
             if system == "windows":
                 return PathHelper._is_valid_path_windows(path_str)
             else:
-                return PathHelper._is_valid_path_unix(path_str)
+                # 对于Unix系统，允许Windows风格的路径格式作为有效路径
+                # 移除反斜杠后检查
+                unix_style_path = path_str.replace('\\', '/')
+                
+                # 检查是否是Windows风格的路径（包含驱动器字母）
+                if len(unix_style_path) > 2 and unix_style_path[1] == ':' and unix_style_path[0].isalpha():
+                    # 对于Windows风格的路径，移除驱动器字母部分后检查
+                    check_path = unix_style_path[2:]
+                    return not any(char in check_path for char in [
+                        '<', '>', '"', '|', '?', '*', '\0',
+                        '\n', '\r', '\t', '\b', '\f'
+                    ])
+                else:
+                    # 普通Unix路径检查
+                    return not any(char in unix_style_path for char in [
+                        '<', '>', ':', '"', '|', '?', '*', '\0',
+                        '\n', '\r', '\t', '\b', '\f'
+                    ])
 
         except (TypeError, ValueError):
             return False

@@ -419,6 +419,20 @@ class LogManager:
             >>> log_manager = LogManager("my_app")
             >>> logger = log_manager.setup(level="DEBUG", log_to_file=True)
         """
+        # 检查是否同时禁用了文件和控制台输出
+        log_to_file = kwargs.get('log_to_file', True)
+        log_to_console = kwargs.get('log_to_console', False)
+        
+        # 如果都禁用了，直接创建一个logger实例，不添加任何handler
+        if not log_to_file and not log_to_console:
+            logger = get_logger(self.app_name)
+            level = kwargs.get('level', 'INFO')
+            log_level = _validate_log_level(level)
+            logger.setLevel(log_level)
+            self.logger.info(f"LogManager为应用 '{self.app_name}' 创建了无输出的logger")
+            return logger
+        
+        # 否则调用setup_logging
         logger = setup_logging(self.app_name, **kwargs)
         self.logger.info(f"LogManager为应用 '{self.app_name}' 配置了日志系统")
         return logger

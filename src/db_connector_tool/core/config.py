@@ -90,6 +90,8 @@ class ConfigManager:
 
             # 确保配置文件存在
             self._ensure_config_exists()
+            # 设置配置文件安全权限
+            self._set_secure_file_permissions()
 
             logger.info(
                 "配置管理器初始化成功: 应用=%s, 配置文件=%s",
@@ -97,8 +99,14 @@ class ConfigManager:
                 self.config_path,
             )
 
+        except OSError as error:
+            logger.error("初始化配置管理器失败 (文件系统错误): %s", str(error))
+            raise ConfigError(f"配置管理器初始化失败 (文件系统错误): {str(error)}") from error
+        except ConfigError as error:
+            logger.error("初始化配置管理器失败 (配置错误): %s", str(error))
+            raise
         except Exception as error:
-            logger.error("初始化配置管理器失败: %s", str(error))
+            logger.error("初始化配置管理器失败 (未知错误): %s", str(error))
             raise ConfigError(f"配置管理器初始化失败: {str(error)}") from error
 
     def __str__(self) -> str:
@@ -162,8 +170,12 @@ class ConfigManager:
             exc_tb: 异常回溯（如果有异常发生）
         """
 
-        self._clear_sensitive_data()
-        logger.info("配置管理器上下文已退出")
+        try:
+            self._clear_sensitive_data()
+            if exc_val:
+                logger.warning("上下文退出时发生异常: %s", str(exc_val))
+        finally:
+            logger.info("配置管理器上下文已退出")
 
     @property
     def config_dir(self) -> Path:
@@ -281,6 +293,12 @@ class ConfigManager:
 
         # 验证配置结构
         ConfigValidator.validate_config(config)
+        # 验证连接配置
+        for name, conn_config in config.get("connections", {}).items():
+            try:
+                ConfigValidator.validate_connection_config(conn_config)
+            except ValueError as e:
+                raise ConfigError(f"连接配置 '{name}' 无效: {str(e)}")
 
         with open(self.config_path, "wb") as f:
             f.write(tomli_w.dumps(config).encode("utf-8"))
@@ -325,21 +343,23 @@ class ConfigManager:
 
         # 确保加密管理器已初始化
         try:
+            # 尝试获取加密管理器
             self.key_manager.get_crypto_manager()
         except ConfigError:
+            # 初始化加密管理器
             self.key_manager.load_or_create_key()
-        finally:
-            # 使用统一的加密方法
-            encrypted_config = self.security_manager.encrypt_dict_values(
-                connection_config
-            )
-            config["connections"][name] = encrypted_config
 
-            # 更新配置文件版本号（每次调用增加修订号）
-            self._increment_config_version(config)
+        # 使用统一的加密方法
+        encrypted_config = self.security_manager.encrypt_dict_values(
+            connection_config
+        )
+        config["connections"][name] = encrypted_config
 
-            self._save_config(config, self.OPERATION_ADD)
-            self._log_operation_success("添加", name)
+        # 更新配置文件版本号（每次调用增加修订号）
+        self._increment_config_version(config)
+
+        self._save_config(config, self.OPERATION_ADD)
+        self._log_operation_success("添加", name)
 
     @KeyManager.handle_config_operation("配置文件加载")
     def _load_config(self) -> Dict[str, Any]:
@@ -370,7 +390,8 @@ class ConfigManager:
         ConfigValidator.validate_config(config)
 
         # 验证数字签名
-        self.security_manager.verify_config_signature(config)
+        if not self.security_manager.verify_config_signature(config):
+            raise ConfigError("配置文件签名验证失败，可能被篡改")
 
         # 更新缓存和修改时间
         self._config_cache = config
@@ -409,17 +430,6 @@ class ConfigManager:
             major_num, minor_num, patch_num = self._increment_version_parts(
                 major_num, minor_num, patch_num
             )
-
-            # 检查主版本号是否合理（限制主版本号不超过99）
-            if major_num > 9:
-                raise ConfigError(
-                    "版本号递增导致第一位发生变化，变更过于频繁，请手动检查",
-                    details={
-                        "current_version": current_version,
-                        "would_become": f"{major_num}.{minor_num}.{patch_num}",
-                        "max_major_version": 9,
-                    },
-                )
 
             new_version = f"{major_num}.{minor_num}.{patch_num}"
 
@@ -492,6 +502,16 @@ class ConfigManager:
             if minor >= 10:
                 minor = 0
                 major += 1
+
+        # 限制主版本号不超过9
+        if major > 9:
+            raise ConfigError(
+                "配置文件版本号已达到最大值 9.9.9，无法继续递增",
+                details={
+                    "current_version": f"{major-1}.{minor}.{patch}",
+                    "attempted_version": f"{major}.{minor}.{patch}",
+                },
+            )
 
         return major, minor, patch
 
@@ -570,21 +590,23 @@ class ConfigManager:
 
         # 确保加密管理器已初始化
         try:
+            # 尝试获取加密管理器
             self.key_manager.get_crypto_manager()
         except ConfigError:
+            # 初始化加密管理器
             self.key_manager.load_or_create_key()
-        finally:
-            # 使用统一的加密方法
-            encrypted_config = self.security_manager.encrypt_dict_values(
-                connection_config
-            )
-            config["connections"][name] = encrypted_config
 
-            # 更新配置文件版本号（每次调用增加修订号）
-            self._increment_config_version(config)
+        # 使用统一的加密方法
+        encrypted_config = self.security_manager.encrypt_dict_values(
+            connection_config
+        )
+        config["connections"][name] = encrypted_config
 
-            self._save_config(config, self.OPERATION_UPDATE)
-            self._log_operation_success("更新", name)
+        # 更新配置文件版本号（每次调用增加修订号）
+        self._increment_config_version(config)
+
+        self._save_config(config, self.OPERATION_UPDATE)
+        self._log_operation_success("更新", name)
 
     def get_config(self, name: str) -> Dict[str, Any]:
         """获取数据库连接配置（自动解密）
@@ -724,6 +746,38 @@ class ConfigManager:
             backup_path = self.config_dir / f"{self.config_file}.backup.{timestamp}"
 
         shutil.copy2(self.config_path, backup_path)
+        # 设置备份文件安全权限
+        try:
+            import platform
+            import stat
+
+            system = platform.system().lower()
+            if system == "windows":
+                # Windows系统权限设置
+                import subprocess
+                import getpass
+                
+                username = getpass.getuser()
+                result = subprocess.run(
+                    [
+                        "icacls",
+                        str(backup_path),
+                        "/inheritance:r",
+                        "/grant:r",
+                        f"{username}:(R,W)",
+                        "/remove",
+                        "*S-1-1-0",
+                    ],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+            else:
+                # Unix/Linux系统权限设置
+                backup_path.chmod(stat.S_IRUSR | stat.S_IWUSR)
+        except Exception as e:
+            logger.warning("设置备份文件权限失败: %s", str(e))
+        
         logger.debug("配置文件已备份: %s", backup_path)
         return backup_path
 
@@ -779,3 +833,44 @@ class ConfigManager:
         self._save_config(config, "rotate_key")
 
         return new_key_version
+
+    def _set_secure_file_permissions(self) -> None:
+        """设置配置文件的安全权限
+
+        确保配置文件只有所有者可读写，防止未授权访问。
+        """
+        try:
+            import platform
+            import stat
+
+            system = platform.system().lower()
+            if system == "windows":
+                # Windows系统权限设置
+                import subprocess
+                import getpass
+                
+                username = getpass.getuser()
+                result = subprocess.run(
+                    [
+                        "icacls",
+                        str(self.config_path),
+                        "/inheritance:r",
+                        "/grant:r",
+                        f"{username}:(R,W)",
+                        "/remove",
+                        "*S-1-1-0",
+                    ],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                if result.returncode != 0:
+                    logger.warning("Windows权限设置警告: %s", result.stderr)
+                else:
+                    logger.debug("Windows: 已设置配置文件权限为仅当前用户读写")
+            else:
+                # Unix/Linux系统权限设置
+                self.config_path.chmod(stat.S_IRUSR | stat.S_IWUSR)
+                logger.debug("Unix/Linux: 已设置配置文件权限为600（仅所有者可读写）")
+        except Exception as e:
+            logger.warning("设置配置文件权限失败: %s", str(e))

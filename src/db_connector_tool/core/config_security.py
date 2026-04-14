@@ -22,7 +22,7 @@ from typing import Any, Dict
 import tomli_w
 
 from ..utils.logging_utils import get_logger
-from .exceptions import ConfigError
+from .exceptions import ConfigError, CryptoError
 
 # 获取模块级别的日志记录器
 logger = get_logger(__name__)
@@ -85,14 +85,15 @@ class ConfigSecurityManager:
         config_to_sign["metadata"] = config_to_sign["metadata"].copy()
         config_to_sign["metadata"].pop("signature", None)
         config_to_sign["metadata"].pop("audit_log", None)
+        config_to_sign["metadata"].pop("signature_timestamp", None)  # 排除时间戳
 
         # 获取HMAC密钥
         hmac_key = self.key_manager.get_secure_hmac_key()
 
-        # 序列化配置
+        # 序列化配置（使用排序确保一致性）
         serialized_config = tomli_w.dumps(config_to_sign)
 
-        # 生成HMAC签名
+        # 生成HMAC签名（使用SHA-256）
         hmac_signature = hmac.new(
             hmac_key, serialized_config.encode(), hashlib.sha256
         ).hexdigest()
@@ -131,8 +132,10 @@ class ConfigSecurityManager:
         config["metadata"]["audit_log"].append(audit_entry)
 
         # 限制审计日志长度，保留最近100条记录
-        if len(config["metadata"]["audit_log"]) > 100:
-            config["metadata"]["audit_log"] = config["metadata"]["audit_log"][-100:]
+        max_audit_log_size = 100
+        if len(config["metadata"]["audit_log"]) > max_audit_log_size:
+            config["metadata"]["audit_log"] = config["metadata"]["audit_log"][-max_audit_log_size:]
+            logger.debug(f"审计日志已裁剪至 {max_audit_log_size} 条记录")
 
     def verify_config_signature(self, config: Dict[str, Any]) -> bool:
         """验证配置文件数字签名
@@ -189,8 +192,8 @@ class ConfigSecurityManager:
 
             if signature != expected_signature:
                 logger.warning("配置文件数字签名验证失败，可能被篡改")
-                # 不抛出异常，允许加载但记录警告
-                return False
+                # 抛出异常，防止使用被篡改的配置
+                raise ConfigError("配置文件数字签名验证失败，可能被篡改")
 
             # 验证时间戳，防止重放攻击
             signature_timestamp = config.get("metadata", {}).get("signature_timestamp")
@@ -202,7 +205,7 @@ class ConfigSecurityManager:
                     time_diff = (current_time - signature_time).total_seconds()
                     if abs(time_diff) > 3600:
                         logger.warning("配置文件签名时间戳过期，可能是重放攻击")
-                        return False
+                        raise ConfigError("配置文件签名时间戳过期，可能是重放攻击")
                 except (ValueError, TypeError) as e:
                     logger.warning("时间戳验证失败: %s", str(e))
                     # 时间戳验证失败不影响签名验证结果
@@ -226,6 +229,9 @@ class ConfigSecurityManager:
         Returns:
             Dict[str, str]: 加密后的字典，所有值均为加密后的字符串
 
+        Raises:
+            CryptoError: 加密失败时抛出异常
+
         Example:
             >>> config = {"host": "localhost", "port": 5432}
             >>> encrypted = security_manager.encrypt_dict_values(config)
@@ -235,12 +241,18 @@ class ConfigSecurityManager:
             True
         """
 
-        crypto = self.key_manager.get_crypto_manager()
-        encrypted_dict = {}
-        for key, value in data_dict.items():
-            serialized_value = self._serialize_value(value)
-            encrypted_dict[key] = crypto.encrypt(serialized_value)
-        return encrypted_dict
+        try:
+            crypto = self.key_manager.get_crypto_manager()
+            encrypted_dict = {}
+            for key, value in data_dict.items():
+                try:
+                    serialized_value = self._serialize_value(value)
+                    encrypted_dict[key] = crypto.encrypt(serialized_value)
+                except Exception as e:
+                    raise CryptoError(f"加密键 '{key}' 失败: {str(e)}") from e
+            return encrypted_dict
+        except Exception as e:
+            raise CryptoError(f"加密字典值失败: {str(e)}") from e
 
     def decrypt_dict_values(self, encrypted_dict: Dict[str, str]) -> Dict[str, Any]:
         """解密字典中的所有值
@@ -253,6 +265,9 @@ class ConfigSecurityManager:
         Returns:
             Dict[str, Any]: 解密后的字典，值为原始类型
 
+        Raises:
+            CryptoError: 解密失败时抛出异常
+
         Example:
             >>> config = {"host": "localhost", "port": 5432}
             >>> encrypted = security_manager.encrypt_dict_values(config)
@@ -263,12 +278,18 @@ class ConfigSecurityManager:
             5432
         """
 
-        crypto = self.key_manager.get_crypto_manager()
-        decrypted_dict = {}
-        for key, encrypted_value in encrypted_dict.items():
-            serialized_value = crypto.decrypt(encrypted_value)
-            decrypted_dict[key] = self._deserialize_value(serialized_value)
-        return decrypted_dict
+        try:
+            crypto = self.key_manager.get_crypto_manager()
+            decrypted_dict = {}
+            for key, encrypted_value in encrypted_dict.items():
+                try:
+                    serialized_value = crypto.decrypt(encrypted_value)
+                    decrypted_dict[key] = self._deserialize_value(serialized_value)
+                except Exception as e:
+                    raise CryptoError(f"解密键 '{key}' 失败: {str(e)}") from e
+            return decrypted_dict
+        except Exception as e:
+            raise CryptoError(f"解密字典值失败: {str(e)}") from e
 
     def _serialize_value(self, value: Any) -> str:
         """序列化值以便加密，保留数据类型信息
@@ -301,6 +322,9 @@ class ConfigSecurityManager:
         Returns:
             Any: 反序列化后的原始值，保持原始数据类型
 
+        Raises:
+            CryptoError: 反序列化失败时抛出异常
+
         Example:
             >>> serialized = '{"type": "int", "value": 42}'
             >>> value = security_manager._deserialize_value(serialized)
@@ -328,8 +352,8 @@ class ConfigSecurityManager:
             return raw_value  # 其他类型直接返回
 
         except (json.JSONDecodeError, KeyError, TypeError, ValueError) as error:
-            logger.warning("反序列化失败，返回原始字符串: %s", str(error))
-            return json_str
+            logger.error("反序列化失败: %s", str(error))
+            raise CryptoError(f"反序列化失败: {str(error)}") from error
 
     def perform_key_rotation(self, config: Dict[str, Any]) -> str:
         """执行密钥轮换的核心逻辑
@@ -351,19 +375,35 @@ class ConfigSecurityManager:
             "2"
         """
 
-        # 解密所有连接配置
-        decrypted_connections = self._decrypt_all_connections(config)
+        # 保存原始连接配置（用于回滚）
+        original_connections = config["connections"].copy()
+        original_key_version = config["metadata"].get("key_version")
 
-        # 生成新的加密密钥
-        self.key_manager.rotate_key()
+        try:
+            # 解密所有连接配置
+            decrypted_connections = self._decrypt_all_connections(config)
 
-        # 更新密钥版本
-        new_key_version = self._update_key_version(config)
+            # 生成新的加密密钥
+            self.key_manager.rotate_key()
 
-        # 重新加密所有连接配置
-        self._re_encrypt_all_connections(config, decrypted_connections)
+            # 更新密钥版本
+            new_key_version = self._update_key_version(config)
 
-        return new_key_version
+            # 重新加密所有连接配置
+            self._re_encrypt_all_connections(config, decrypted_connections)
+
+            return new_key_version
+        except Exception as error:
+            # 发生异常时回滚
+            logger.error("密钥轮换失败，执行回滚: %s", str(error))
+            # 恢复原始连接配置
+            config["connections"] = original_connections
+            # 恢复原始密钥版本
+            if original_key_version:
+                config["metadata"]["key_version"] = original_key_version
+            # 重新加载原始密钥
+            self.key_manager.load_or_create_key()
+            raise ConfigError(f"密钥轮换失败: {str(error)}") from error
 
     def _decrypt_all_connections(
         self, config: Dict[str, Any]
