@@ -16,6 +16,9 @@ Example:
 >>> db_manager.add_connection("mysql_db", config)
 >>> results = db_manager.execute_query("mysql_db", "SELECT * FROM users")
 >>> db_manager.close_connection("mysql_db")
+>>> with DatabaseManager("my_app") as dbm:
+...     dbm.add_connection("postgres_db", {"host": "localhost", "port": 5432})
+...     results = dbm.execute_query("postgres_db", "SELECT * FROM products")
 """
 
 import threading
@@ -36,6 +39,7 @@ class DatabaseManager:
     """数据库管理器类 (Database Manager)
 
     提供统一的数据库连接管理接口，实现连接池管理和生命周期控制。
+    支持上下文管理器协议，可使用 `with` 语句自动管理连接的关闭。
 
     Attributes:
         app_name (str): 应用名称，用于配置文件的命名空间和日志标识
@@ -57,6 +61,14 @@ class DatabaseManager:
         >>> db_manager.add_connection("mysql_db", config)
         >>> results = db_manager.execute_query("mysql_db", "SELECT * FROM users")
         >>> db_manager.close_connection("mysql_db")
+        >>> with DatabaseManager("my_app") as dbm:
+        ...     dbm.add_connection("postgres_db", {"host": "localhost", "port": 5432})
+        ...     results = dbm.execute_query("postgres_db", "SELECT * FROM products")
+        >>> db_manager = DatabaseManager("my_app")
+        >>> try:
+        ...     db_manager.add_connection("test_db", {"host": "localhost", "port": 5432})
+        ... finally:
+        ...     db_manager.close_all_connections()
     """
 
     def __init__(
@@ -64,17 +76,22 @@ class DatabaseManager:
     ) -> None:
         """初始化数据库管理器
 
+        创建新的数据库管理器实例，自动初始化配置系统和连接池。
+
         Args:
             app_name: 应用名称，用于配置文件的命名空间和日志标识
             config_file: 配置文件名，默认为"connections.toml"
 
         Raises:
-            ConfigError: 当配置管理器初始化失败时
+            DatabaseError: 数据库管理器初始化失败
+            OSError: 文件系统操作失败
 
         Example:
             >>> db_manager = DatabaseManager("my_app", "database.toml")
             >>> print(f"应用名称: {db_manager.app_name}")
             >>> db_manager = DatabaseManager()  # 使用默认参数
+            >>> with DatabaseManager("my_app") as dbm:
+            ...     dbm.add_connection("test_db", {"host": "localhost", "port": 5432})
         """
 
         try:
@@ -89,17 +106,17 @@ class DatabaseManager:
             raise DatabaseError(f"数据库管理器初始化失败: {str(error)}") from error
 
     def __str__(self) -> str:
-        """返回数据库管理器的字符串表示
+        """返回数据库管理器的用户友好字符串表示
 
         Returns:
-            str: 格式化的数据库管理器字符串表示
+            str: 格式为 "DatabaseManager('app_name', N connections)" 的字符串
         """
-        stats = self.pool_manager.get_statistics()
-        return (
-            f"DatabaseManager(app_name='{self.app_name}', "
-            f"active_connections={stats['active_connections']}, "
-            f"pool_size={stats['connection_pool_size']})"
-        )
+        try:
+            connection_count = len(self.list_connections())
+            return f"DatabaseManager('{self.app_name}', {connection_count} connections)"
+        except (DatabaseError, ConfigError):
+            # 如果获取连接数量失败，返回基本表示
+            return f"DatabaseManager('{self.app_name}', '{self.config_file}')"
 
     def __repr__(self) -> str:
         """返回数据库管理器的详细表示，用于调试
@@ -112,6 +129,7 @@ class DatabaseManager:
             "DatabaseManager(app_name='my_app', config_file='connections.toml', \
             connection_count=3, pool_size=5, statistics={...})"
         """
+
         stats = self.pool_manager.get_statistics()
         # 从配置管理器获取连接名称列表
         connection_names = self.list_connections()
@@ -128,23 +146,25 @@ class DatabaseManager:
         )
 
     def __enter__(self):
-        """进入上下文管理器，返回自身
+        """上下文管理器入口，返回自身实例
 
         Returns:
-            DatabaseManager: 数据库管理器实例
+            DatabaseManager: 当前数据库管理器实例
         """
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(
+        self, exc_type: type | None, exc_val: Exception | None, exc_tb: Any | None
+    ) -> None:
         """退出上下文管理器，清理所有连接
 
         Args:
-            exc_type: 异常类型
-            exc_val: 异常值
-            exc_tb: 异常回溯
+            exc_type: 异常类型（如果有异常发生）
+            exc_val: 异常值（如果有异常发生）
+            exc_tb: 异常回溯（如果有异常发生）
         """
         self.close_all_connections()
-        return False
+        logger.info("数据库管理器上下文已退出")
 
     def close_all_connections(self) -> None:
         """安全关闭所有数据库连接
@@ -191,6 +211,8 @@ class DatabaseManager:
             ...     "database": "test_db"
             ... }
             >>> db_manager.add_connection("mysql_db", config)
+            >>> with DatabaseManager("my_app") as dbm:
+            ...     dbm.add_connection("postgres_db", {"host": "localhost", "port": 5432})
         """
 
         def _add_connection():
@@ -210,7 +232,10 @@ class DatabaseManager:
         """获取所有可用的连接名称
 
         Returns:
-            List[str]: 连接名称列表
+            List[str]: 连接名称列表，按配置文件中的顺序排列
+
+        Raises:
+            DatabaseError: 列出连接失败
 
         Example:
             >>> connections = db_manager.list_connections()
@@ -219,7 +244,7 @@ class DatabaseManager:
 
         return self.config_manager.list_configs()
 
-    def _safe_operation(self, operation: str, name: str, func, *args, **kwargs):
+    def _safe_operation(self, operation: str, name: str, func, *args, **kwargs) -> Any:
         """安全执行操作的辅助方法，处理异常并转换为适当的错误类型
 
         Args:
@@ -230,7 +255,7 @@ class DatabaseManager:
             **kwargs: 函数关键字参数
 
         Returns:
-            函数执行的结果
+            Any: 函数执行的结果
 
         Raises:
             ConfigError: 如果执行过程中发生ConfigError
@@ -257,6 +282,8 @@ class DatabaseManager:
 
         Example:
             >>> db_manager.remove_connection("mysql_db")
+            >>> with DatabaseManager("my_app") as dbm:
+            ...     dbm.remove_connection("postgres_db")
         """
 
         def _remove_connection():
@@ -308,6 +335,8 @@ class DatabaseManager:
             ...     "database": "test_db"
             ... }
             >>> db_manager.update_connection("mysql_db", new_config)
+            >>> with DatabaseManager("my_app") as dbm:
+            ...     dbm.update_connection("postgres_db", {"host": "new_host", "port": 5432})
         """
 
         def _update_connection():
@@ -339,6 +368,8 @@ class DatabaseManager:
         Example:
             >>> config = db_manager.show_connection("mysql_db")
             >>> print(f"主机: {config['host']}")
+            >>> with DatabaseManager("my_app") as dbm:
+            ...     config = dbm.show_connection("postgres_db")
         """
 
         return self.config_manager.get_config(name)
@@ -366,6 +397,8 @@ class DatabaseManager:
             >>> result = driver.execute_query("SELECT * FROM users")
             >>> # 使用配置覆盖
             >>> driver = db_manager.get_connection("mysql_db", {"host": "127.0.0.1"})
+            >>> with DatabaseManager("my_app") as dbm:
+            ...     driver = dbm.get_connection("postgres_db")
         """
 
         with self._lock:
@@ -524,6 +557,8 @@ class DatabaseManager:
             ...     print("连接测试成功")
             ... else:
             ...     print("连接测试失败")
+            >>> with DatabaseManager("my_app") as dbm:
+            ...     success = dbm.test_connection("postgres_db")
         """
 
         try:
@@ -566,6 +601,8 @@ class DatabaseManager:
             ...     "SELECT * FROM users WHERE age > :age",
             ...     {"age": 18}
             ... )
+            >>> with DatabaseManager("my_app") as dbm:
+            ...     results = dbm.execute_query("postgres_db", "SELECT * FROM products")
         """
 
         def _execute_query():
@@ -617,6 +654,11 @@ class DatabaseManager:
             ...     "UPDATE users SET name = :name WHERE id = :id",
             ...     {"name": "Bob", "id": 1}
             ... )
+            >>> with DatabaseManager("my_app") as dbm:
+            ...     affected_rows = dbm.execute_command(
+            ...         "postgres_db",
+            ...         "DELETE FROM products WHERE id = 1"
+            ...     )
         """
 
         def _execute_command():
@@ -660,6 +702,8 @@ class DatabaseManager:
             >>> print(f"使用次数: {info['use_count']}")
             >>> print(f"最后使用时间: {info['last_used']}")
             >>> print(f"错误次数: {info['connection_errors']}")
+            >>> with DatabaseManager("my_app") as dbm:
+            ...     info = dbm.get_connection_info("postgres_db")
         """
 
         def _get_connection_info():
@@ -699,6 +743,8 @@ class DatabaseManager:
         Example:
             >>> cleaned_count = db_manager.cleanup_idle_connections(600)  # 10分钟
             >>> print(f"清理了 {cleaned_count} 个空闲连接")
+            >>> with DatabaseManager("my_app") as dbm:
+            ...     cleaned_count = dbm.cleanup_idle_connections()
         """
 
         with self._lock:
@@ -724,6 +770,8 @@ class DatabaseManager:
             >>> diagnosis = db_manager.diagnose_connection("mysql_db")
             >>> print(f"诊断结果: {diagnosis['status']}")
             >>> print(f"详细信息: {diagnosis['details']}")
+            >>> with DatabaseManager("my_app") as dbm:
+            ...     diagnosis = dbm.diagnose_connection("postgres_db")
         """
 
         diagnosis: Dict[str, Any] = {

@@ -505,6 +505,7 @@ class ConnectionPoolManager:
         Example:
             >>> cleaned_count = pool_manager._process_idle_connections(names, time.time(), 300)
         """
+
         cleaned_count = 0
 
         for name in connection_names:
@@ -571,14 +572,11 @@ class ConnectionPoolManager:
 
         计算连接池的统计信息，包含活跃连接数、总使用次数等。
 
-        Args:
-            current_time: 当前时间
-
         Returns:
             Dict[str, Any]: 连接池统计信息
 
         Example:
-            >>> stats = pool_manager._calculate_pool_stats(time.time())
+            >>> stats = pool_manager._calculate_pool_stats()
         """
         total_use_count = 0
         total_query_count = 0
@@ -685,6 +683,7 @@ class ConnectionPoolManager:
         Example:
             >>> response = pool_manager._build_pool_status_response(status_data)
         """
+
         active_count = 0
         for conn in self.connection_pool.values():
             if self._is_connection_valid(conn):
