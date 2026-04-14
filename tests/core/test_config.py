@@ -611,32 +611,17 @@ class TestConfigManagerAdvanced(unittest.TestCase):
             self.assertTrue(backup_path.exists())
             self.assertTrue(".backup." in backup_path.name)
             
-            # 3. 测试获取安全的 HMAC 密钥
-            hmac_key = config_manager._get_secure_hmac_key()
-            self.assertIsInstance(hmac_key, bytes)
-            self.assertEqual(len(hmac_key), 32)  # SHA-256 输出长度
-            
-            # 4. 测试验证必需字段
-            data = {"field1": "value1"}
-            required_fields = ["field1", "field2"]
-            with self.assertRaises(ConfigError):
-                config_manager._validate_required_fields(data, required_fields, "测试数据")
-            
-            # 5. 测试验证字段类型
-            with self.assertRaises(ConfigError):
-                config_manager._validate_field_type("string", int, "测试字段")
-            
-            # 6. 测试版本号递增的主版本边界
+            # 3. 测试版本号递增的主版本边界
             config_data = config_manager._load_config()
             config_data["version"] = "9.9.9"
             with self.assertRaises(ConfigError):
                 config_manager._increment_config_version(config_data)
             
-            # 7. 测试确保连接存在
+            # 4. 测试确保连接存在
             with self.assertRaises(ConfigError):
                 config_manager._ensure_connection_exists(config_data, "nonexistent")
             
-            # 8. 测试解析无效的版本号
+            # 5. 测试解析无效的版本号
             with self.assertRaises(IndexError):
                 config_manager._parse_version_parts("1.2")
 

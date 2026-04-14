@@ -1,180 +1,177 @@
-"""测试验证器模块
-
-测试重构后的验证器功能是否正常工作。
-"""
+import unittest
 
 from src.db_connector_tool.core.exceptions import ConfigError
 from src.db_connector_tool.core.validators import (
     ConfigValidator,
-    ConnectionValidator,
     GenericValidator,
     PasswordValidator,
 )
 
 
-def test_config_validator():
+class TestConfigValidator(unittest.TestCase):
     """测试配置验证器"""
-    print("\n=== 测试配置验证器 ===")
 
-    # 测试有效的配置
-    valid_config = {
-        "version": "1.0.0",
-        "app_name": "test_app",
-        "connections": {},
-        "metadata": {
-            "created": "2024-01-01T00:00:00",
-            "last_modified": "2024-01-01T00:00:00",
-            "key_version": "1",
-        },
-    }
+    def test_validate_config_valid(self) -> None:
+        """测试验证有效的配置"""
+        valid_config = {
+            "version": "1.0.0",
+            "app_name": "test_app",
+            "connections": {},
+            "metadata": {
+                "created": "2024-01-01T00:00:00",
+                "last_modified": "2024-01-01T00:00:00",
+                "key_version": "1",
+            },
+        }
 
-    try:
-        ConfigValidator.validate_config(valid_config)
-        print("✅ 配置验证成功")
-    except Exception as e:
-        print(f"❌ 配置验证失败: {e}")
-
-    # 测试版本号格式
-    print("\n测试版本号格式:")
-    test_versions = ["1.0.0", "1.10.20", "0.1.0", "1.0", "1.0.0.0", "1.0.a"]
-    for version in test_versions:
         try:
-            result = ConfigValidator.is_valid_version_format(version)
-            print(f"  {version}: {'✅ 有效' if result else '❌ 无效'}")
+            ConfigValidator.validate_config(valid_config)
         except Exception as e:
-            print(f"  {version}: ❌ 错误: {e}")
+            self.fail(f"验证有效配置时抛出了异常: {e}")
 
-    # 测试连接名称
-    print("\n测试连接名称:")
-    test_names = [
-        "valid_name",
-        "name123",
-        "name_123",
-        "",
-        "name with spaces",
-        "name@symbol",
-    ]
-    for name in test_names:
+    def test_validate_config_missing_fields(self) -> None:
+        """测试验证缺少字段的配置"""
+        invalid_config = {
+            "version": "1.0.0",
+            "app_name": "test_app",
+            # 缺少 connections 和 metadata
+        }
+
+        with self.assertRaises(ConfigError):
+            ConfigValidator.validate_config(invalid_config)
+
+    def test_is_valid_version_format(self) -> None:
+        """测试版本号格式验证"""
+        # 有效的版本号
+        self.assertTrue(ConfigValidator.is_valid_version_format("1.0.0"))
+        self.assertTrue(ConfigValidator.is_valid_version_format("1.10.20"))
+        self.assertTrue(ConfigValidator.is_valid_version_format("0.1.0"))
+
+        # 无效的版本号
+        self.assertFalse(ConfigValidator.is_valid_version_format("1.0"))
+        self.assertFalse(ConfigValidator.is_valid_version_format("1.0.0.0"))
+        self.assertFalse(ConfigValidator.is_valid_version_format("1.0.a"))
+        self.assertFalse(ConfigValidator.is_valid_version_format(None))  # type: ignore
+        self.assertFalse(ConfigValidator.is_valid_version_format(123))  # type: ignore
+        self.assertFalse(ConfigValidator.is_valid_version_format(""))
+
+    def test_validate_connection_name(self) -> None:
+        """测试连接名称验证"""
+        # 有效的连接名称
+        ConfigValidator.validate_connection_name("valid_name")
+        ConfigValidator.validate_connection_name("name123")
+        ConfigValidator.validate_connection_name("name_123")
+
+        # 无效的连接名称
+        with self.assertRaises(ValueError):
+            ConfigValidator.validate_connection_name("")
+        with self.assertRaises(ValueError):
+            ConfigValidator.validate_connection_name("name with spaces")
+        with self.assertRaises(ValueError):
+            ConfigValidator.validate_connection_name("name@symbol")
+        with self.assertRaises(ValueError):
+            ConfigValidator.validate_connection_name("a" * 51)  # 过长的名称
+
+
+class TestConfigValidatorConnectionMethods(unittest.TestCase):
+    """测试配置验证器的连接相关方法"""
+
+    def test_validate_connection_config_valid(self) -> None:
+        """测试验证有效的连接配置"""
+        valid_connection = {
+            "host": "localhost",
+            "port": 5432,
+            "username": "test",
+            "password": "test123",
+            "database": "test_db",
+        }
+
         try:
-            ConfigValidator.validate_connection_name(name)
-            print(f"  '{name}': ✅ 有效")
-        except ValueError as e:
-            print(f"  '{name}': ❌ {e}")
+            ConfigValidator.validate_connection_config(valid_connection)
+        except Exception as e:
+            self.fail(f"验证有效连接配置时抛出了异常: {e}")
+
+    def test_validate_connection_config_invalid(self) -> None:
+        """测试验证无效的连接配置"""
+        # 空配置
+        with self.assertRaises(ValueError):
+            ConfigValidator.validate_connection_config({})
+
+        # 非字典配置
+        with self.assertRaises(ValueError):
+            ConfigValidator.validate_connection_config("invalid")  # type: ignore
+
+        # 非字符串键
+        with self.assertRaises(ValueError):
+            ConfigValidator.validate_connection_config({123: "value"})  # type: ignore
 
 
-def test_connection_validator():
-    """测试连接验证器"""
-    print("\n=== 测试连接验证器 ===")
-
-    # 测试有效的连接配置
-    valid_connection = {
-        "type": "postgresql",
-        "host": "localhost",
-        "port": 5432,
-        "username": "test",
-        "password": "test123",
-        "database": "test_db",
-    }
-
-    try:
-        ConnectionValidator.validate_basic_config(valid_connection)
-        print("✅ 连接配置验证成功")
-    except Exception as e:
-        print(f"❌ 连接配置验证失败: {e}")
-
-    # 测试不支持的数据库类型
-    invalid_connection = {
-        "type": "unsupported",
-        "host": "localhost",
-        "username": "test",
-        "password": "test123",
-    }
-
-    try:
-        ConnectionValidator.validate_basic_config(invalid_connection)
-        print("❌ 不支持的数据库类型应该失败")
-    except ConfigError as e:
-        print(f"✅ 不支持的数据库类型验证失败: {e}")
-
-
-def test_password_validator():
+class TestPasswordValidator(unittest.TestCase):
     """测试密码验证器"""
-    print("\n=== 测试密码验证器 ===")
 
-    # 测试密码强度
-    test_passwords = [
-        "Weak123",  # 弱密码
-        "StrongP@ssw0rd123!",  # 强密码
-        "VeryStrongPassword123!@#",  # 非常强的密码
-        "Short1!",  # 太短
-        "NoSpecialChar123",  # 无特殊字符
-        "nouppercase123!",  # 无大写字母
-        "NOLOWERCASE123!",  # 无小写字母
-        "NoDigitPassword!",  # 无数字
-    ]
+    def test_get_strength(self) -> None:
+        """测试密码强度评估"""
+        # 弱密码
+        self.assertEqual(PasswordValidator.get_strength("weak"), "weak")
 
-    for password in test_passwords:
-        strength = PasswordValidator.get_strength(password)
-        is_valid = PasswordValidator.validate_strength(password)
-        print(
-            f"  '{password}' (长度: {len(password)}): 强度={strength}, 有效={is_valid}"
-        )
+        # 中等强度密码
+        self.assertEqual(PasswordValidator.get_strength("Short1!"), "medium")
+        self.assertEqual(PasswordValidator.get_strength("Weak123"), "medium")
+        self.assertEqual(PasswordValidator.get_strength("NoSpecialChar123"), "medium")
+        self.assertEqual(PasswordValidator.get_strength("nouppercase123!"), "medium")
+        self.assertEqual(PasswordValidator.get_strength("NOLOWERCASE123!"), "medium")
+        self.assertEqual(PasswordValidator.get_strength("NoDigitPassword!"), "medium")
+
+        # 强密码
+        self.assertEqual(PasswordValidator.get_strength("Medium1!"), "strong")  # 8字符+4种类型
+        self.assertEqual(PasswordValidator.get_strength("StrongP@ssw0rd123!"), "strong")
+
+        # 非常强的密码
+        self.assertEqual(PasswordValidator.get_strength("VeryStrongPassword123!@#"), "very_strong")
+
+    def test_validate_strength(self) -> None:
+        """测试密码强度验证"""
+        # 无效密码
+        self.assertFalse(PasswordValidator.validate_strength("Weak123"))
+        self.assertFalse(PasswordValidator.validate_strength("Short1!"))
+
+        # 有效密码
+        self.assertTrue(PasswordValidator.validate_strength("StrongP@ssw0rd123!"))
+        self.assertTrue(PasswordValidator.validate_strength("VeryStrongPassword123!@#"))
 
 
-def test_generic_validator():
+class TestGenericValidator(unittest.TestCase):
     """测试通用验证器"""
-    print("\n=== 测试通用验证器 ===")
 
-    # 测试必需字段验证
-    test_data = {"name": "test", "value": 123}
+    def test_validate_required_fields(self) -> None:
+        """测试必需字段验证"""
+        # 包含所有必需字段
+        test_data = {"name": "test", "value": 123}
+        try:
+            GenericValidator.validate_required_fields(test_data, ["name", "value"])
+        except Exception as e:
+            self.fail(f"验证必需字段时抛出了异常: {e}")
 
-    try:
-        GenericValidator.validate_required_fields(test_data, ["name", "value"])
-        print("✅ 必需字段验证成功")
-    except Exception as e:
-        print(f"❌ 必需字段验证失败: {e}")
+        # 缺少必需字段
+        with self.assertRaises(ConfigError) as context:
+            GenericValidator.validate_required_fields(test_data, ["name", "value", "missing"])
+        self.assertIn("缺少必需字段", str(context.exception))
 
-    # 测试字段类型验证
-    try:
-        GenericValidator.validate_field_type(123, int, "测试字段")
-        print("✅ 字段类型验证成功")
-    except Exception as e:
-        print(f"❌ 字段类型验证失败: {e}")
+    def test_validate_field_type(self) -> None:
+        """测试字段类型验证"""
+        # 类型正确
+        try:
+            GenericValidator.validate_field_type(123, int, "测试字段")
+            GenericValidator.validate_field_type("string", str, "测试字段")
+            GenericValidator.validate_field_type(True, bool, "测试字段")
+        except Exception as e:
+            self.fail(f"验证字段类型时抛出了异常: {e}")
 
-
-def test_module_imports():
-    """测试模块导入"""
-    print("\n=== 测试模块导入 ===")
-
-    try:
-        from db_connector_tool.core.config import ConfigManager
-
-        print("✅ ConfigManager 导入成功")
-    except Exception as e:
-        print(f"❌ ConfigManager 导入失败: {e}")
-
-    try:
-        from db_connector_tool.core.connections import DatabaseManager
-
-        print("✅ DatabaseManager 导入成功")
-    except Exception as e:
-        print(f"❌ DatabaseManager 导入失败: {e}")
-
-    try:
-        from db_connector_tool.core.crypto import CryptoManager
-
-        print("✅ CryptoManager 导入成功")
-    except Exception as e:
-        print(f"❌ CryptoManager 导入失败: {e}")
+        # 类型错误
+        with self.assertRaises(ConfigError) as context:
+            GenericValidator.validate_field_type("123", int, "测试字段")
+        self.assertIn("测试字段必须是int类型", str(context.exception))
 
 
 if __name__ == "__main__":
-    print("开始测试验证器模块...")
-
-    test_config_validator()
-    test_connection_validator()
-    test_password_validator()
-    test_generic_validator()
-    test_module_imports()
-
-    print("\n测试完成!")
+    unittest.main()

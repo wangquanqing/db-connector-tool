@@ -29,8 +29,12 @@ import sys
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 from .__about__ import __version__
-from .core.connections import SUPPORTED_DATABASE_TYPES, DatabaseManager
+from .core.connections import DatabaseManager
+from .drivers.sqlalchemy_driver import SQLAlchemyDriver
 from .utils.logging_utils import setup_logging
+
+# 支持的数据库类型
+SUPPORTED_DATABASE_TYPES = list(SQLAlchemyDriver.DB_CONFIGS.keys())
 
 logger = setup_logging(level="debug")
 
