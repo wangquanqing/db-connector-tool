@@ -253,50 +253,54 @@ class TestCryptoManager(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.crypto.encrypt_bytes("string")  # type: ignore
 
-    def test_validate_password_strength(self):
+    def test_password_strength_validation(self):
         """测试密码强度验证
 
         验证密码强度验证功能的正确性。
         """
+        from src.db_connector_tool.core.validators import PasswordValidator
+        
         # 强密码
         self.assertTrue(
-            CryptoManager.validate_password_strength("My$trongP@ssw0rd123!")
+            PasswordValidator.validate_strength("My$trongP@ssw0rd123!")
         )
 
         # 弱密码 - 太短
-        self.assertFalse(CryptoManager.validate_password_strength("Short1!"))
+        self.assertFalse(PasswordValidator.validate_strength("Short1!"))
 
         # 弱密码 - 缺少大写字母
-        self.assertFalse(CryptoManager.validate_password_strength("weakpassword123!"))
+        self.assertFalse(PasswordValidator.validate_strength("weakpassword123!"))
 
         # 弱密码 - 缺少小写字母
-        self.assertFalse(CryptoManager.validate_password_strength("WEAKPASSWORD123!"))
+        self.assertFalse(PasswordValidator.validate_strength("WEAKPASSWORD123!"))
 
         # 弱密码 - 缺少数字
-        self.assertFalse(CryptoManager.validate_password_strength("WeakPassword!!!"))
+        self.assertFalse(PasswordValidator.validate_strength("WeakPassword!!!"))
 
         # 弱密码 - 缺少特殊字符
-        self.assertFalse(CryptoManager.validate_password_strength("WeakPassword123"))
+        self.assertFalse(PasswordValidator.validate_strength("WeakPassword123"))
 
-    def test_get_password_strength(self):
+    def test_password_strength_evaluation(self):
         """测试密码强度等级评估
 
         验证密码强度等级评估功能的正确性。
         """
+        from src.db_connector_tool.core.validators import PasswordValidator
+        
         # 弱密码 - 长度不足8，缺少复杂度
-        self.assertEqual(CryptoManager.get_password_strength("weak"), "weak")
+        self.assertEqual(PasswordValidator.get_strength("weak"), "weak")
 
         # 中等强度 - 8字符(1分) + 4种字符类型(4分) = 5分，但长度不足16
         # "Medium1!" 实际得分：长度8(1分) + 大写(1) + 小写(1) + 数字(1) + 特殊(1) = 5分 -> strong
         # 使用更短的密码测试 medium
-        self.assertEqual(CryptoManager.get_password_strength("Med1!"), "medium")
+        self.assertEqual(PasswordValidator.get_strength("Med1!"), "medium")
 
         # 强密码 - 8字符(1分) + 4种字符类型(4分) = 5分
-        self.assertEqual(CryptoManager.get_password_strength("Medium1!"), "strong")
+        self.assertEqual(PasswordValidator.get_strength("Medium1!"), "strong")
 
         # 非常强密码 - 24字符以上(3分) + 4种字符类型(4分) = 7分
         self.assertEqual(
-            CryptoManager.get_password_strength("VeryStrongPassword1234!@#$"),  # 26字符
+            PasswordValidator.get_strength("VeryStrongPassword1234!@#$"),  # 26字符
             "very_strong",
         )
 

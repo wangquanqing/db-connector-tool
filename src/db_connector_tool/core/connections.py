@@ -240,33 +240,14 @@ class DatabaseManager:
 
         try:
             return func(*args, **kwargs)
-        except (OSError, DatabaseError) as error:
-            self._handle_exception(operation, name, error)
-            # 确保即使_handle_exception没有抛出异常，也会抛出异常
-            raise DatabaseError(f"{operation}失败") from error
-
-    def _handle_exception(
-        self, operation: str, name: str, exception: Exception
-    ) -> None:
-        """通用异常处理方法
-
-        Args:
-            operation: 操作名称，用于日志记录
-            name: 连接名称
-            exception: 捕获到的异常
-
-        Raises:
-            ConfigError: 如果原始异常是ConfigError
-            DBConnectionError: 如果原始异常是DBConnectionError
-            DatabaseError: 其他所有异常都会被转换为DatabaseError
-        """
-
-        if isinstance(exception, (ConfigError)):
-            raise exception
-
-        error_message = f"{operation}失败 {name}: {str(exception)}"
-        logger.error(error_message)
-        raise DatabaseError(f"{operation}失败: {str(exception)}")
+        except ConfigError:
+            raise
+        except DBConnectionError:
+            raise
+        except (OSError, DatabaseError, Exception) as error:
+            error_message = f"{operation}失败 {name}: {str(error)}"
+            logger.error(error_message)
+            raise DatabaseError(f"{operation}失败: {str(error)}") from error
 
     def remove_connection(self, name: str) -> None:
         """删除连接配置
@@ -607,12 +588,16 @@ class DatabaseManager:
 
         try:
             return _execute_query()
-        except (OSError, DBConnectionError) as error:
+        except ConfigError:
+            raise
+        except DBConnectionError:
+            raise
+        except (OSError, DatabaseError, Exception) as error:
             # 记录错误信息
             self.pool_manager.record_connection_error(connection_name, error)
-            self._handle_exception("查询执行", connection_name, error)
-            # 确保即使_handle_exception没有抛出异常，也会抛出异常
-            raise DBConnectionError("查询执行失败") from error
+            error_message = f"查询执行失败 {connection_name}: {str(error)}"
+            logger.error(error_message)
+            raise DatabaseError(f"查询执行失败: {str(error)}") from error
 
     def execute_command(
         self,
@@ -658,12 +643,16 @@ class DatabaseManager:
 
         try:
             return _execute_command()
-        except (OSError, DBConnectionError) as error:
+        except ConfigError:
+            raise
+        except DBConnectionError:
+            raise
+        except (OSError, DatabaseError, Exception) as error:
             # 记录错误信息
             self.pool_manager.record_connection_error(connection_name, error)
-            self._handle_exception("命令执行", connection_name, error)
-            # 确保即使_handle_exception没有抛出异常，也会抛出异常
-            raise DBConnectionError("命令执行失败") from error
+            error_message = f"命令执行失败 {connection_name}: {str(error)}"
+            logger.error(error_message)
+            raise DatabaseError(f"命令执行失败: {str(error)}") from error
 
     def get_connection_info(self, name: str) -> Dict[str, Any]:
         """获取连接详细信息（包含统计信息）

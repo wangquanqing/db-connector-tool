@@ -685,10 +685,15 @@ class ConnectionPoolManager:
         Example:
             >>> response = pool_manager._build_pool_status_response(status_data)
         """
+        active_count = 0
+        for conn in self.connection_pool.values():
+            if self._is_connection_valid(conn):
+                active_count += 1
+        
         return {
             "current_time": status_data["current_time"],
             "pool_size": status_data["pool_size"],
-            "active_connections": status_data["stats"].get("total_use_count", 0),
+            "active_connections": active_count,
             "average_response_time": status_data["average_response_time"],
             "error_rate": status_data["error_rate"],
             "connection_details": status_data["connection_details"],
