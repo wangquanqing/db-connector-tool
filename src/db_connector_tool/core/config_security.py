@@ -80,11 +80,12 @@ class ConfigSecurityManager:
             64
         """
 
-        # 生成数字签名（排除signature和audit_log字段）
+        # 生成数字签名（排除signature、audit_log和signature_timestamp字段）
         config_to_sign = config.copy()
         config_to_sign["metadata"] = config_to_sign["metadata"].copy()
         config_to_sign["metadata"].pop("signature", None)
         config_to_sign["metadata"].pop("audit_log", None)
+        config_to_sign["metadata"].pop("signature_timestamp", None)
 
         # 获取HMAC密钥
         hmac_key = self.key_manager.get_secure_hmac_key()
@@ -199,7 +200,13 @@ class ConfigSecurityManager:
             
             try:
                 signature_time = datetime.fromisoformat(signature_timestamp)
+                # 确保签名时间是带时区的
+                if signature_time.tzinfo is None:
+                    # 如果没有时区信息，假设是本地时间
+                    signature_time = signature_time.astimezone()
                 current_time = datetime.now(timezone.utc)
+                # 确保当前时间也是带时区的
+                current_time = current_time.astimezone()
                 # 允许1小时的时间差（防止时钟同步问题）
                 time_diff = (current_time - signature_time).total_seconds()
                 if abs(time_diff) > 3600:
@@ -355,9 +362,18 @@ class ConfigSecurityManager:
             "2"
         """
 
-        # 保存原始连接配置，用于回滚
+        # 保存原始配置的完整副本，用于回滚
+        original_config = {}
+        for key, value in config.items():
+            if isinstance(value, dict):
+                original_config[key] = value.copy()
+            else:
+                original_config[key] = value
         original_connections = config["connections"].copy()
         original_key_version = config["metadata"].get("key_version", "1")
+
+        # 保存原始密钥信息，用于回滚
+        original_key_info = self.key_manager.crypto.get_key_info() if self.key_manager.crypto else None
 
         try:
             # 解密所有连接配置
@@ -376,9 +392,25 @@ class ConfigSecurityManager:
         except Exception as error:
             # 发生异常时回滚
             logger.error("密钥轮换失败，执行回滚: %s", str(error))
+            # 恢复原始配置的所有字段
+            for key, value in original_config.items():
+                config[key] = value
             # 恢复原始连接配置
             config["connections"] = original_connections
             config["metadata"]["key_version"] = original_key_version
+            # 如果可能，恢复原始密钥
+            if original_key_info:
+                try:
+                    # 尝试恢复原始密钥
+                    from .crypto import CryptoManager
+                    self.key_manager.crypto = CryptoManager.from_saved_key(
+                        original_key_info["password"],
+                        original_key_info["salt"],
+                        original_key_info["iterations"]
+                    )
+                    logger.debug("已恢复原始加密密钥")
+                except Exception as key_restore_error:
+                    logger.warning("恢复原始密钥失败: %s", str(key_restore_error))
             raise ConfigError(f"密钥轮换失败: {str(error)}") from error
 
     def _decrypt_all_connections(

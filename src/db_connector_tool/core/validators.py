@@ -267,32 +267,29 @@ class PasswordValidator:
             "weak"
         """
 
-        score = 0
+        # 复杂度检查
+        has_uppercase = bool(re.search(r"[A-Z]", password))
+        has_lowercase = bool(re.search(r"[a-z]", password))
+        has_digit = bool(re.search(r"\d", password))
+        has_special = bool(re.search(r"[!@#$%^&*()_+\-=\[\]{}|;:,.<>?~`\"\'\\/]", password))
 
-        # 长度得分
-        if len(password) >= 24:
-            score += 3
-        elif len(password) >= 16:
-            score += 2
-        elif len(password) >= 8:
-            score += 1
+        # 计算复杂度类型数量
+        complexity_types = sum([has_uppercase, has_lowercase, has_digit, has_special])
 
-        # 使用统一的密码要求检查方法
-        requirements = PasswordValidator._check_password_requirements(password)
-
-        # 复杂度得分（排除长度检查）
-        for req_name, req_met in requirements.items():
-            if req_name != "length_ok" and req_met:
-                score += 1
+        # 长度检查
+        length = len(password)
 
         # 评估强度等级
-        if score >= 7:
+        if length >= 24 and complexity_types == 4:
             return "very_strong"
-        if score >= 5:
+        elif length >= 8 and complexity_types == 4:
             return "strong"
-        if score >= 3:
+        elif complexity_types >= 3:
             return "medium"
-        return "weak"
+        elif length >= 8 and complexity_types >= 2:
+            return "medium"
+        else:
+            return "weak"
 
     @staticmethod
     def _check_password_requirements(password: str) -> Dict[str, bool]:

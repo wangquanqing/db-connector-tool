@@ -182,7 +182,7 @@ class BatchDatabaseManager:
                 logger.info(f"关闭 {len(connection_names)} 个数据库连接")
                 for conn_name in connection_names:
                     try:
-                        self.db_manager.close_connection(conn_name)
+                        self.db_manager.pool_manager.remove_connection(conn_name)
                         logger.debug(f"连接 {conn_name} 已关闭")
                     except Exception as e:
                         logger.warning(f"关闭连接 {conn_name} 失败: {str(e)}")
@@ -226,7 +226,7 @@ class BatchDatabaseManager:
 
     def __del__(self):
         """析构函数，确保资源清理"""
-        if not self._is_cleaned:
+        if hasattr(self, '_is_cleaned') and not self._is_cleaned:
             try:
                 self.cleanup()
             except Exception:
@@ -249,15 +249,14 @@ class BatchDatabaseManager:
                 try:
                     self.db_manager.remove_connection(connection_name)
                     logger.debug(f"已从数据库管理器中删除连接配置: {connection_name}")
+                    # 只有当从数据库管理器删除成功时，才从连接名称列表中移除
+                    if connection_name in self._connection_names:
+                        self._connection_names.remove(connection_name)
+                        logger.debug(f"已从连接名称列表中移除: {connection_name}")
                 except Exception as remove_error:
                     logger.warning(
                         f"从数据库管理器删除连接配置失败 {connection_name}: {str(remove_error)}"
                     )
-
-                # 2. 从连接名称列表中移除
-                if connection_name in self._connection_names:
-                    self._connection_names.remove(connection_name)
-                    logger.debug(f"已从连接名称列表中移除: {connection_name}")
 
                 logger.info(f"连接 {connection_name} 删除完成")
 

@@ -114,7 +114,7 @@ class TestLoggingUtils(unittest.TestCase):
     def test_log_manager_add_file_handler(self):
         """测试LogManager添加文件handler"""
         log_manager = LogManager(self.app_name)
-        log_manager.setup(level="INFO", log_to_file=False, log_to_console=False)
+        log_manager.setup(level="INFO", log_to_file=False, log_to_console=True)
 
         # 添加文件handler
         test_log_file = os.path.join(self.temp_dir, "test.log")

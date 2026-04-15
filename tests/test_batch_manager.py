@@ -72,23 +72,20 @@ class TestBatchDatabaseManager(unittest.TestCase):
         with mock.patch.object(
             self.batch_manager.db_manager, "list_connections", return_value=["db_000"]
         ):
-            with mock.patch.object(self.batch_manager.db_manager, "close_connection"):
+            with mock.patch.object(self.batch_manager.db_manager.pool_manager, "remove_connection"):
                 with mock.patch.object(
-                    self.batch_manager.db_manager, "remove_connection"
+                    self.batch_manager.db_manager, "add_connection"
                 ):
-                    with mock.patch.object(
-                        self.batch_manager.db_manager, "add_connection"
-                    ):
-                        results = self.batch_manager.add_batch_connections(ip_list)
-                        self.assertEqual(len(results), 1)
-                        self.assertTrue(results["192.168.1.1"])
+                    results = self.batch_manager.add_batch_connections(ip_list)
+                    self.assertEqual(len(results), 1)
+                    self.assertTrue(results["192.168.1.1"])
 
     def test_cleanup(self):
         """测试清理批量管理器资源"""
         self.batch_manager.set_base_config(self.base_config)
 
         # 模拟数据库管理器的方法
-        with mock.patch.object(self.batch_manager.db_manager, "close_connection"):
+        with mock.patch.object(self.batch_manager.db_manager.pool_manager, "remove_connection"):
             with mock.patch(
                 "db_connector_tool.batch_manager.PathHelper.get_user_config_dir"
             ):

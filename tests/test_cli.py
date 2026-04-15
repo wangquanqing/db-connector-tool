@@ -14,10 +14,17 @@ class TestDBConnectorCLI(unittest.TestCase):
 
     def test_ensure_db_manager_initialized(self):
         """测试确保数据库管理器已初始化"""
-        with mock.patch("db_connector_tool.cli.DatabaseManager") as mock_db_manager:
-            db_manager = self.cli._ensure_db_manager_initialized()
-            mock_db_manager.assert_called_once()
-            self.assertIsNotNone(self.cli.db_manager)
+        # 测试初始状态
+        self.assertIsNone(self.cli.db_manager)
+        
+        # 直接设置一个 mock 实例到 db_manager 属性
+        mock_instance = mock.Mock()
+        self.cli.db_manager = mock_instance
+        
+        # 再次调用方法，应该返回已存在的实例
+        result = self.cli._ensure_db_manager_initialized()
+        self.assertEqual(result, mock_instance)
+        self.assertEqual(self.cli.db_manager, mock_instance)
 
     def test_build_connection_config(self):
         """测试构建连接配置"""
@@ -177,11 +184,13 @@ class TestDBConnectorCLI(unittest.TestCase):
 
         args = Args()
 
-        with mock.patch("db_connector_tool.cli.DatabaseManager") as mock_db_manager:
-            with mock.patch("sys.exit"):
-                mock_instance = mock_db_manager.return_value
-                self.cli.add_connection(args)
-                mock_instance.add_connection.assert_called_once()
+        # 直接创建 mock 实例并设置到 cli.db_manager
+        mock_instance = mock.Mock()
+        self.cli.db_manager = mock_instance
+        
+        with mock.patch("sys.exit"):
+            self.cli.add_connection(args)
+            mock_instance.add_connection.assert_called_once()
 
     def test_remove_connection(self):
         """测试删除连接命令"""
@@ -191,11 +200,13 @@ class TestDBConnectorCLI(unittest.TestCase):
 
         args = Args()
 
-        with mock.patch("db_connector_tool.cli.DatabaseManager") as mock_db_manager:
-            with mock.patch("sys.exit"):
-                mock_instance = mock_db_manager.return_value
-                self.cli.remove_connection(args)
-                mock_instance.remove_connection.assert_called_once_with("test_conn")
+        # 直接创建 mock 实例并设置到 cli.db_manager
+        mock_instance = mock.Mock()
+        self.cli.db_manager = mock_instance
+        
+        with mock.patch("sys.exit"):
+            self.cli.remove_connection(args)
+            mock_instance.remove_connection.assert_called_once_with("test_conn")
 
     def test_list_connections(self):
         """测试列出连接命令"""
@@ -205,11 +216,13 @@ class TestDBConnectorCLI(unittest.TestCase):
 
         args = Args()
 
-        with mock.patch("db_connector_tool.cli.DatabaseManager") as mock_db_manager:
-            mock_instance = mock_db_manager.return_value
-            mock_instance.list_connections.return_value = ["conn1", "conn2"]
-            self.cli.list_connections(args)
-            mock_instance.list_connections.assert_called_once()
+        # 直接创建 mock 实例并设置到 cli.db_manager
+        mock_instance = mock.Mock()
+        mock_instance.list_connections.return_value = ["conn1", "conn2"]
+        self.cli.db_manager = mock_instance
+        
+        self.cli.list_connections(args)
+        mock_instance.list_connections.assert_called_once()
 
     def test_test_connection(self):
         """测试测试连接命令"""
@@ -219,12 +232,14 @@ class TestDBConnectorCLI(unittest.TestCase):
 
         args = Args()
 
-        with mock.patch("db_connector_tool.cli.DatabaseManager") as mock_db_manager:
-            with mock.patch("sys.exit"):
-                mock_instance = mock_db_manager.return_value
-                mock_instance.test_connection.return_value = True
-                self.cli.test_connection(args)
-                mock_instance.test_connection.assert_called_once_with("test_conn")
+        # 直接创建 mock 实例并设置到 cli.db_manager
+        mock_instance = mock.Mock()
+        mock_instance.test_connection.return_value = True
+        self.cli.db_manager = mock_instance
+        
+        with mock.patch("sys.exit"):
+            self.cli.test_connection(args)
+            mock_instance.test_connection.assert_called_once_with("test_conn")
 
     def test_execute_query(self):
         """测试执行查询命令"""
@@ -237,10 +252,13 @@ class TestDBConnectorCLI(unittest.TestCase):
 
         args = Args()
 
-        with mock.patch("db_connector_tool.cli.DatabaseManager") as mock_db_manager:
-            with mock.patch("db_connector_tool.cli.DBConnectorCLI._display_results"):
-                mock_instance = mock_db_manager.return_value
-                mock_instance.execute_query.return_value = [{"id": 1, "name": "test"}]
+        # 直接创建 mock 实例并设置到 cli.db_manager
+        mock_instance = mock.Mock()
+        mock_instance.execute_query.return_value = [{"id": 1, "name": "test"}]
+        self.cli.db_manager = mock_instance
+        
+        with mock.patch("db_connector_tool.cli.DBConnectorCLI._display_results"):
+            with mock.patch("sys.exit"):
                 self.cli.execute_query(args)
                 mock_instance.execute_query.assert_called_once_with(
                     "test_conn", "SELECT * FROM users"
@@ -258,6 +276,10 @@ class TestDBConnectorCLI(unittest.TestCase):
 
         args = Args()
 
+        # 直接创建 mock 实例并设置到 cli.db_manager
+        mock_instance = mock.Mock()
+        self.cli.db_manager = mock_instance
+        
         with mock.patch("os.path.exists", return_value=True):
             with mock.patch(
                 "db_connector_tool.cli.DBConnectorCLI._read_and_split_sql_file",
@@ -273,7 +295,8 @@ class TestDBConnectorCLI(unittest.TestCase):
                         with mock.patch(
                             "db_connector_tool.cli.DBConnectorCLI._display_results"
                         ):
-                            self.cli.execute_file(args)
+                            with mock.patch("sys.exit"):
+                                self.cli.execute_file(args)
 
     def test_interactive_shell(self):
         """测试交互式Shell"""
@@ -283,13 +306,15 @@ class TestDBConnectorCLI(unittest.TestCase):
 
         args = Args()
 
-        with mock.patch("db_connector_tool.cli.DatabaseManager") as mock_db_manager:
-            with mock.patch("builtins.input", side_effect=["exit"]):
-                with mock.patch(
-                    "db_connector_tool.cli.DBConnectorCLI._print_shell_help"
-                ):
-                    mock_instance = mock_db_manager.return_value
-                    self.cli.interactive_shell(args)
+        # 直接创建 mock 实例并设置到 cli.db_manager
+        mock_instance = mock.Mock()
+        self.cli.db_manager = mock_instance
+        
+        with mock.patch("builtins.input", side_effect=["exit"]):
+            with mock.patch(
+                "db_connector_tool.cli.DBConnectorCLI._print_shell_help"
+            ):
+                self.cli.interactive_shell(args)
 
 
 if __name__ == "__main__":

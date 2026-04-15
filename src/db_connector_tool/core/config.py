@@ -362,22 +362,65 @@ class ConfigManager:
             logger.debug("使用缓存的配置")
             return self._config_cache
 
-        # 读取TOML文件
-        with open(self.config_path, "rb") as f:
-            config = tomllib.load(f)
+        try:
+            # 读取TOML文件
+            with open(self.config_path, "rb") as f:
+                config = tomllib.load(f)
 
-        # 验证配置文件结构
-        ConfigValidator.validate_config(config)
+            # 验证配置文件结构
+            ConfigValidator.validate_config(config)
 
-        # 验证数字签名
-        self.security_manager.verify_config_signature(config)
+            # 验证数字签名
+            self.security_manager.verify_config_signature(config)
 
-        # 更新缓存和修改时间
-        self._config_cache = config
-        self._config_mtime = current_mtime
-        logger.debug("配置已加载并缓存")
+            # 更新缓存和修改时间
+            self._config_cache = config
+            self._config_mtime = current_mtime
+            logger.debug("配置已加载并缓存")
 
-        return config
+            return config
+        except (tomllib.TOMLDecodeError, ConfigError, OSError) as e:
+            # 配置文件加载失败，创建默认配置
+            logger.error("配置文件加载失败: %s，创建默认配置", str(e))
+            # 确保加密管理器已初始化
+            if self.key_manager.crypto is None:
+                self.key_manager.load_or_create_key()
+            # 创建默认配置
+            default_config = {
+                "version": "1.0.0",
+                "app_name": self.app_name,
+                "connections": {},
+                "metadata": {
+                    "created": datetime.now().astimezone().isoformat(),
+                    "last_modified": datetime.now().astimezone().isoformat(),
+                    "config_file": str(self.config_path),
+                    "key_version": "1",
+                    "signature": "",
+                    "audit_log": [],
+                },
+            }
+            # 保存默认配置（会自动生成签名）
+            self._save_config(default_config)
+            # 直接返回默认配置，因为我们已经保存并生成了签名
+            # 下次加载时签名验证会通过
+            self._config_cache = default_config
+            self._config_mtime = self.config_path.stat().st_mtime
+            return default_config
+
+    def refresh_cache(self) -> None:
+        """手动刷新配置缓存
+
+        强制重新加载配置文件，更新缓存。
+
+        Example:
+            >>> config_manager.refresh_cache()
+        """
+        # 清除缓存
+        self._config_cache = None
+        self._config_mtime = None
+        # 重新加载配置
+        self._load_config()
+        logger.debug("配置缓存已手动刷新")
 
     def _increment_config_version(self, config: Dict[str, Any]) -> None:
         """递增配置文件版本号
@@ -410,14 +453,14 @@ class ConfigManager:
                 major_num, minor_num, patch_num
             )
 
-            # 检查主版本号是否合理（限制主版本号不超过9）
-            if major_num > 9:
+            # 移除主版本号限制，允许主版本号自由递增
+            # 检查主版本号是否合理（不再限制主版本号）
+            if major_num < 0:
                 raise ConfigError(
-                    "版本号递增导致主版本号发生不合理变化",
+                    "版本号递增导致主版本号为负数",
                     details={
                         "current_version": current_version,
                         "would_become": f"{major_num}.{minor_num}.{patch_num}",
-                        "max_major_version": 9,
                     },
                 )
 
@@ -727,13 +770,17 @@ class ConfigManager:
                     check=False,
                 )
                 if result.returncode != 0:
-                    logger.warning("Windows权限设置警告: %s", result.stderr)
+                    logger.error("Windows权限设置失败: %s", result.stderr)
+                    logger.warning("配置文件权限设置失败，可能导致安全风险，请手动设置权限")
+                else:
+                    logger.debug("Windows权限设置成功: %s", self.config_path)
             else:
                 # Unix/Linux系统权限设置
                 self.config_path.chmod(stat.S_IRUSR | stat.S_IWUSR)
-            logger.debug("配置文件权限已设置: %s", self.config_path)
+                logger.debug("Unix/Linux权限设置成功: %s", self.config_path)
         except Exception as e:
-            logger.warning("设置配置文件权限失败: %s", str(e))
+            logger.error("设置配置文件权限失败: %s", str(e))
+            logger.warning("配置文件权限设置失败，可能导致安全风险，请手动设置权限")
 
     def backup_config(self, backup_path: Path | None = None) -> Path:
         """备份配置文件
