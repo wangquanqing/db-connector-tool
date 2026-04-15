@@ -325,8 +325,13 @@ class ConnectionPoolManager:
 
             # 执行实际查询测试
             if hasattr(driver, 'test_connection'):
-                return driver.test_connection()
-            return False
+                try:
+                    return driver.test_connection()
+                except Exception as test_error:
+                    logger.debug("连接测试失败: %s", str(test_error))
+                    return False
+            # 对于没有test_connection方法的驱动，至少检查基本属性
+            return True
 
         except (OSError, DatabaseError) as error:
             logger.debug("连接有效性检查失败: %s", str(error))
@@ -365,6 +370,21 @@ class ConnectionPoolManager:
             >>> pool_manager.add_connection('mysql_db', driver_instance)
         """
         with self._lock:
+            # 验证驱动实例的有效性
+            if not self._check_driver_basic_status(driver):
+                logger.error("驱动实例无效，缺少必要的方法或属性")
+                raise DatabaseError("驱动实例无效，缺少必要的方法或属性")
+
+            # 验证驱动实例是否可连接
+            try:
+                if hasattr(driver, 'test_connection'):
+                    if not driver.test_connection():
+                        logger.error("驱动实例连接测试失败")
+                        raise DatabaseError("驱动实例连接测试失败")
+            except Exception as e:
+                logger.error("驱动实例连接测试异常: %s", str(e))
+                raise DatabaseError(f"驱动实例连接测试异常: {str(e)}") from e
+
             self.connection_pool[name] = driver
 
             self._connection_metadata[name] = {

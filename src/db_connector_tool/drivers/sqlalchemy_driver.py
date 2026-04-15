@@ -363,7 +363,7 @@ class SQLAlchemyDriver:
 
             connection_url = self._build_connection_url()
 
-            # 配置连接池参数（基于生产环境最佳实践）
+            # 基础连接池配置（基于生产环境最佳实践）
             pool_config = {
                 "pool_size": 5,  # 连接池常驻连接数，保持适度的并发能力
                 "max_overflow": 10,  # 最大溢出连接数，应对突发流量
@@ -372,6 +372,35 @@ class SQLAlchemyDriver:
                 "pool_recycle": 3600,  # 连接回收时间（秒），防止长时间闲置连接失效
                 "echo": False,  # 关闭SQL日志，生产环境建议关闭
             }
+
+            # 根据数据库类型调整连接池配置
+            database_type = self.config.get("type", "").lower()
+            if database_type == "mysql":
+                # MySQL 特定配置
+                pool_config.update({
+                    "pool_recycle": 280,  # MySQL默认wait_timeout为28800秒，设置较小值避免连接失效
+                })
+            elif database_type == "postgresql":
+                # PostgreSQL 特定配置
+                pool_config.update({
+                    "pool_recycle": 3600,  # PostgreSQL默认连接超时较长
+                })
+            elif database_type == "oracle":
+                # Oracle 特定配置
+                pool_config.update({
+                    "pool_recycle": 1800,  # Oracle建议的连接回收时间
+                })
+            elif database_type == "sqlserver":
+                # SQL Server 特定配置
+                pool_config.update({
+                    "pool_recycle": 3600,  # SQL Server连接回收时间
+                })
+
+            # 允许用户通过配置覆盖连接池参数
+            if "pool_config" in self.config:
+                user_pool_config = self.config["pool_config"]
+                pool_config.update(user_pool_config)
+                logger.debug("使用用户自定义连接池配置: %s", user_pool_config)
 
             self.engine = create_engine(connection_url, **pool_config)
             self.session_factory = sessionmaker(bind=self.engine)
@@ -660,6 +689,12 @@ class SQLAlchemyDriver:
             (r'(?i)WAITFOR\s+DELAY\s+[\'"]\d+', "时间盲注"),
             (r"(?i);\s*SHUTDOWN\s*;?", "数据库关闭命令"),
             (r"(?i);\s*--", "语句截断尝试"),
+            # 增强的注入检测
+            (r"(?i)\bOR\s+1\s*=\s*1", "OR 1=1 注入"),
+            (r"(?i)\bAND\s+1\s*=\s*1", "AND 1=1 注入"),
+            (r"(?i)\bUNION\s+SELECT\s+", "UNION SELECT 注入"),
+            (r"(?i)\bFROM\s+information_schema", "信息模式查询"),
+            (r"(?i)\bFROM\s+sys\.", "系统表查询"),
         ]
 
         for pattern, description in dangerous_patterns:

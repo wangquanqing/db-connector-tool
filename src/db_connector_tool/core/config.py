@@ -410,6 +410,17 @@ class ConfigManager:
                 major_num, minor_num, patch_num
             )
 
+            # 检查主版本号是否合理（限制主版本号不超过9）
+            if major_num > 9:
+                raise ConfigError(
+                    "版本号递增导致主版本号发生不合理变化",
+                    details={
+                        "current_version": current_version,
+                        "would_become": f"{major_num}.{minor_num}.{patch_num}",
+                        "max_major_version": 9,
+                    },
+                )
+
             new_version = f"{major_num}.{minor_num}.{patch_num}"
 
             # 验证新版本号格式
@@ -484,12 +495,6 @@ class ConfigManager:
             if minor >= 10:
                 minor = 0
                 major += 1
-
-                # 确保主版本号不超过限制
-                if major > 9:
-                    major = 9
-                    minor = 9
-                    patch = 9
 
         return major, minor, patch
 

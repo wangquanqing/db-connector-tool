@@ -166,8 +166,8 @@ class ConfigSecurityManager:
             try:
                 self.key_manager.get_crypto_manager()
             except ConfigError:
-                logger.warning("加密管理器未初始化，跳过签名验证")
-                return True
+                logger.error("加密管理器未初始化，无法验证签名")
+                raise ConfigError("加密管理器未初始化，无法验证配置文件签名")
 
             # 生成待验证的配置数据（排除signature和audit_log字段）
             config_to_verify = config.copy()
@@ -193,18 +193,21 @@ class ConfigSecurityManager:
 
             # 验证时间戳，防止重放攻击
             signature_timestamp = config.get("metadata", {}).get("signature_timestamp")
-            if signature_timestamp:
-                try:
-                    signature_time = datetime.fromisoformat(signature_timestamp)
-                    current_time = datetime.now(timezone.utc)
-                    # 允许1小时的时间差（防止时钟同步问题）
-                    time_diff = (current_time - signature_time).total_seconds()
-                    if abs(time_diff) > 3600:
-                        logger.error("配置文件签名时间戳过期，可能是重放攻击")
-                        raise ConfigError("配置文件签名时间戳过期，可能是重放攻击")
-                except (ValueError, TypeError) as e:
-                    logger.error("时间戳验证失败: %s", str(e))
-                    raise ConfigError(f"时间戳验证失败: {str(e)}")
+            if not signature_timestamp:
+                logger.error("配置文件缺少签名时间戳，可能是重放攻击")
+                raise ConfigError("配置文件缺少签名时间戳，可能是重放攻击")
+            
+            try:
+                signature_time = datetime.fromisoformat(signature_timestamp)
+                current_time = datetime.now(timezone.utc)
+                # 允许1小时的时间差（防止时钟同步问题）
+                time_diff = (current_time - signature_time).total_seconds()
+                if abs(time_diff) > 3600:
+                    logger.error("配置文件签名时间戳过期，可能是重放攻击")
+                    raise ConfigError("配置文件签名时间戳过期，可能是重放攻击")
+            except (ValueError, TypeError) as e:
+                logger.error("时间戳验证失败: %s", str(e))
+                raise ConfigError(f"时间戳验证失败: {str(e)}")
 
             logger.debug("配置文件数字签名验证成功")
             return True

@@ -443,15 +443,8 @@ class DatabaseManager:
         connection_config = {**base_config, **config_overrides}
 
         # 根据数据库类型选择合适的驱动
-        db_type = connection_config.get("type", "mysql")
-        if db_type in ["mysql", "postgresql", "oracle", "sqlserver", "sqlite"]:
-            from ..drivers.sqlalchemy_driver import SQLAlchemyDriver
-            driver = SQLAlchemyDriver(connection_config)
-        elif db_type == "gbase":
-            from ..drivers.sqlalchemy_driver import SQLAlchemyDriver
-            driver = SQLAlchemyDriver(connection_config)
-        else:
-            raise DBConnectionError(f"不支持的数据库类型: {db_type}")
+        driver = self._create_driver_for_type(connection_config)
+
 
         try:
             driver.connect()
@@ -461,8 +454,10 @@ class DatabaseManager:
                 f"连接建立失败: {str(connect_error)}"
             ) from connect_error
 
-        # 注意：临时配置的连接不加入连接池，避免配置冲突
-        logger.info("使用临时配置建立数据库连接: %s", name)
+        # 临时配置的连接也加入连接池，但使用特殊标记
+        temp_connection_name = f"{name}_temp_{hash(str(config_overrides))}"
+        self.pool_manager.add_connection(temp_connection_name, driver)
+        logger.info("使用临时配置建立数据库连接: %s (临时连接: %s)", name, temp_connection_name)
         return driver
 
     def _get_connection_from_pool(self, name: str) -> Any:
@@ -487,6 +482,26 @@ class DatabaseManager:
         # 创建新连接
         return self._create_new_connection(name)
 
+    def _create_driver_for_type(self, connection_config: Dict[str, Any]) -> Any:
+        """根据数据库类型创建相应的驱动实例
+
+        Args:
+            connection_config: 连接配置字典
+
+        Returns:
+            Any: 数据库驱动实例
+
+        Raises:
+            DBConnectionError: 当数据库类型不支持时
+        """
+        # 根据数据库类型选择合适的驱动
+        db_type = connection_config.get("type", "mysql")
+        if db_type in ["mysql", "postgresql", "oracle", "sqlserver", "sqlite", "gbase"]:
+            from ..drivers.sqlalchemy_driver import SQLAlchemyDriver
+            return SQLAlchemyDriver(connection_config)
+        else:
+            raise DBConnectionError(f"不支持的数据库类型: {db_type}")
+
     def _create_new_connection(self, name: str) -> Any:
         """创建新的数据库连接
 
@@ -504,15 +519,7 @@ class DatabaseManager:
         connection_config = self.show_connection(name)
         
         # 根据数据库类型选择合适的驱动
-        db_type = connection_config.get("type", "mysql")
-        if db_type in ["mysql", "postgresql", "oracle", "sqlserver", "sqlite"]:
-            from ..drivers.sqlalchemy_driver import SQLAlchemyDriver
-            driver = SQLAlchemyDriver(connection_config)
-        elif db_type == "gbase":
-            from ..drivers.sqlalchemy_driver import SQLAlchemyDriver
-            driver = SQLAlchemyDriver(connection_config)
-        else:
-            raise DBConnectionError(f"不支持的数据库类型: {db_type}")
+        driver = self._create_driver_for_type(connection_config)
         
         try:
             driver.connect()
