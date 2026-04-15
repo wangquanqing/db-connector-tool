@@ -362,22 +362,50 @@ class ConfigManager:
             logger.debug("使用缓存的配置")
             return self._config_cache
 
-        # 读取TOML文件
-        with open(self.config_path, "rb") as f:
-            config = tomllib.load(f)
+        try:
+            # 读取TOML文件
+            with open(self.config_path, "rb") as f:
+                config = tomllib.load(f)
 
-        # 验证配置文件结构
-        ConfigValidator.validate_config(config)
+            # 验证配置文件结构
+            ConfigValidator.validate_config(config)
 
-        # 验证数字签名
-        self.security_manager.verify_config_signature(config)
+            # 验证数字签名
+            self.security_manager.verify_config_signature(config)
 
-        # 更新缓存和修改时间
-        self._config_cache = config
-        self._config_mtime = current_mtime
-        logger.debug("配置已加载并缓存")
+            # 更新缓存和修改时间
+            self._config_cache = config
+            self._config_mtime = current_mtime
+            logger.debug("配置已加载并缓存")
 
-        return config
+            return config
+        except (tomllib.TOMLDecodeError, ConfigError, OSError) as e:
+            # 配置文件加载失败，创建默认配置
+            logger.error("配置文件加载失败: %s，创建默认配置", str(e))
+            # 确保加密管理器已初始化
+            if self.key_manager.crypto is None:
+                self.key_manager.load_or_create_key()
+            # 创建默认配置
+            default_config = {
+                "version": "1.0.0",
+                "app_name": self.app_name,
+                "connections": {},
+                "metadata": {
+                    "created": datetime.now().astimezone().isoformat(),
+                    "last_modified": datetime.now().astimezone().isoformat(),
+                    "config_file": str(self.config_path),
+                    "key_version": "1",
+                    "signature": "",
+                    "audit_log": [],
+                },
+            }
+            # 保存默认配置（会自动生成签名）
+            self._save_config(default_config)
+            # 直接返回默认配置，因为我们已经保存并生成了签名
+            # 下次加载时签名验证会通过
+            self._config_cache = default_config
+            self._config_mtime = self.config_path.stat().st_mtime
+            return default_config
 
     def refresh_cache(self) -> None:
         """手动刷新配置缓存

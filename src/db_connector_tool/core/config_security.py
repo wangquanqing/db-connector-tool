@@ -80,11 +80,12 @@ class ConfigSecurityManager:
             64
         """
 
-        # 生成数字签名（排除signature和audit_log字段）
+        # 生成数字签名（排除signature、audit_log和signature_timestamp字段）
         config_to_sign = config.copy()
         config_to_sign["metadata"] = config_to_sign["metadata"].copy()
         config_to_sign["metadata"].pop("signature", None)
         config_to_sign["metadata"].pop("audit_log", None)
+        config_to_sign["metadata"].pop("signature_timestamp", None)
 
         # 获取HMAC密钥
         hmac_key = self.key_manager.get_secure_hmac_key()
@@ -371,12 +372,12 @@ class ConfigSecurityManager:
         original_connections = config["connections"].copy()
         original_key_version = config["metadata"].get("key_version", "1")
 
+        # 保存原始密钥信息，用于回滚
+        original_key_info = self.key_manager.crypto.get_key_info() if self.key_manager.crypto else None
+
         try:
             # 解密所有连接配置
             decrypted_connections = self._decrypt_all_connections(config)
-
-            # 保存当前密钥信息，用于回滚
-            current_key_info = self.key_manager.crypto.get_key_info() if self.key_manager.crypto else None
 
             # 生成新的加密密钥
             self.key_manager.rotate_key()
@@ -398,14 +399,14 @@ class ConfigSecurityManager:
             config["connections"] = original_connections
             config["metadata"]["key_version"] = original_key_version
             # 如果可能，恢复原始密钥
-            if current_key_info:
+            if original_key_info:
                 try:
                     # 尝试恢复原始密钥
                     from .crypto import CryptoManager
                     self.key_manager.crypto = CryptoManager.from_saved_key(
-                        current_key_info["password"],
-                        current_key_info["salt"],
-                        current_key_info["iterations"]
+                        original_key_info["password"],
+                        original_key_info["salt"],
+                        original_key_info["iterations"]
                     )
                     logger.debug("已恢复原始加密密钥")
                 except Exception as key_restore_error:

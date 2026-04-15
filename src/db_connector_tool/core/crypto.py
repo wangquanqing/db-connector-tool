@@ -372,8 +372,25 @@ class CryptoManager:
             logger.debug("强制生成的密码强度不足，第%s次重新生成", attempt + 1)
         
         # 达到最大尝试次数后，确保密码符合要求并返回
-        logger.warning("达到最大尝试次数(%s)，返回最后生成的密码", max_attempts)
-        return generated_password
+        # 确保返回的密码一定符合强度要求
+        logger.warning("达到最大尝试次数(%s)，确保返回符合强度要求的密码", max_attempts)
+        # 直接返回一个符合强度要求的密码，确保包含所有必要的字符类型
+        final_password = "".join([
+            secrets.choice(string.ascii_uppercase),
+            secrets.choice(string.ascii_uppercase),
+            secrets.choice(string.ascii_lowercase),
+            secrets.choice(string.ascii_lowercase),
+            secrets.choice(string.digits),
+            secrets.choice(string.digits),
+            secrets.choice(self.SPECIAL_CHARACTERS),
+            secrets.choice(self.SPECIAL_CHARACTERS),
+            *[secrets.choice(string.ascii_letters + string.digits + self.SPECIAL_CHARACTERS) for _ in range(length - 8)]
+        ])
+        # 再次打乱
+        final_password_list = list(final_password)
+        secrets.SystemRandom().shuffle(final_password_list)
+        final_password = "".join(final_password_list)
+        return final_password
 
     def _generate_secure_salt(self, length: int | None = None) -> bytes:
         """生成安全的随机盐值

@@ -347,7 +347,26 @@ class ConnectionPoolManager:
                 except Exception as ping_error:
                     logger.debug("连接ping测试失败: %s", str(ping_error))
                     return False
-            # 对于没有test_connection方法的驱动，至少检查基本属性
+            # 对于SQLAlchemy驱动，尝试使用engine的connect方法验证
+            elif hasattr(driver, "engine"):
+                try:
+                    with driver.engine.connect() as conn:
+                        # 执行简单的查询测试
+                        if hasattr(conn, "execute"):
+                            # 尝试执行一个简单的查询
+                            result = conn.execute("SELECT 1")
+                            return True
+                except Exception as sqlalchemy_error:
+                    logger.debug("SQLAlchemy连接测试失败: %s", str(sqlalchemy_error))
+                    return False
+            # 对于其他类型的驱动，检查是否有is_connected方法
+            elif hasattr(driver, "is_connected"):
+                try:
+                    return driver.is_connected()
+                except Exception as is_connected_error:
+                    logger.debug("is_connected测试失败: %s", str(is_connected_error))
+                    return False
+            # 对于没有特定验证方法的驱动，至少检查基本属性
             return True
 
         except (OSError, DatabaseError) as error:

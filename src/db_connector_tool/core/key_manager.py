@@ -116,6 +116,13 @@ class KeyManager:
         self.crypto: Optional[CryptoManager] = None
 
         # 检查依赖可用性（类级别，只执行一次，线程安全）
+        self._ensure_dependencies_checked()
+
+    def _ensure_dependencies_checked(self) -> None:
+        """确保依赖检查已完成（线程安全）
+
+        确保类级别的依赖检查只执行一次，使用双重检查锁定模式确保线程安全。
+        """
         if not KeyManager._dependencies_checked:
             # 使用双重检查锁定模式确保线程安全
             if KeyManager._dependency_check_lock is None:

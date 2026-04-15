@@ -182,7 +182,7 @@ class BatchDatabaseManager:
                 logger.info(f"关闭 {len(connection_names)} 个数据库连接")
                 for conn_name in connection_names:
                     try:
-                        self.db_manager.close_connection(conn_name)
+                        self.db_manager.pool_manager.remove_connection(conn_name)
                         logger.debug(f"连接 {conn_name} 已关闭")
                     except Exception as e:
                         logger.warning(f"关闭连接 {conn_name} 失败: {str(e)}")
@@ -226,7 +226,7 @@ class BatchDatabaseManager:
 
     def __del__(self):
         """析构函数，确保资源清理"""
-        if not self._is_cleaned:
+        if hasattr(self, '_is_cleaned') and not self._is_cleaned:
             try:
                 self.cleanup()
             except Exception:
