@@ -16,7 +16,7 @@ import threading
 import time
 from typing import Any, Dict, List, Optional
 
-from ..drivers.sqlalchemy_driver import SQLAlchemyDriver
+from typing import Any
 from ..utils.logging_utils import get_logger
 from .exceptions import DatabaseError
 
@@ -270,7 +270,7 @@ class ConnectionPoolManager:
         except (OSError, DatabaseError) as error:
             logger.error("从连接池中移除连接 %s 时发生异常: %s", name, str(error))
 
-    def get_connection(self, name: str) -> Optional[SQLAlchemyDriver]:
+    def get_connection(self, name: str) -> Optional[Any]:
         """从连接池获取连接
 
         从连接池获取指定名称的连接，如果连接无效则返回None。
@@ -279,7 +279,7 @@ class ConnectionPoolManager:
             name: 连接名称
 
         Returns:
-            Optional[SQLAlchemyDriver]: 数据库驱动实例，如果连接无效则返回None
+            Optional[Any]: 数据库驱动实例，如果连接无效则返回None
 
         Example:
             >>> driver = pool_manager.get_connection('mysql_db')
@@ -331,6 +331,9 @@ class ConnectionPoolManager:
         except (OSError, DatabaseError) as error:
             logger.debug("连接有效性检查失败: %s", str(error))
             return False
+        except Exception as error:
+            logger.debug("连接有效性检查发生未知错误: %s", str(error))
+            return False
 
     def record_connection_error(self, connection_name: str, error: Exception) -> None:
         """记录连接错误
@@ -349,7 +352,7 @@ class ConnectionPoolManager:
             self._connection_metadata[connection_name]["last_error"] = str(error)
         self._statistics["connection_errors"] += 1
 
-    def add_connection(self, name: str, driver: SQLAlchemyDriver) -> None:
+    def add_connection(self, name: str, driver: Any) -> None:
         """添加连接到连接池
 
         将数据库驱动实例添加到连接池，并初始化元数据。

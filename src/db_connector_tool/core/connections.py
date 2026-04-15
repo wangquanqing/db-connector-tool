@@ -865,7 +865,7 @@ class DatabaseManager:
             }
 
     def _diagnose_connection_test(
-        self, driver: SQLAlchemyDriver, diagnosis: Dict[str, Any]
+        self, driver: Any, diagnosis: Dict[str, Any]
     ) -> None:
         """诊断连接测试
 

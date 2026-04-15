@@ -13,6 +13,7 @@ Example:
 >>> new_version = config_manager.rotate_encryption_key()
 """
 
+import getpass
 import shutil
 import tomllib
 from datetime import datetime
@@ -236,6 +237,8 @@ class ConfigManager:
             },
         }
         self._save_config(default_config)
+        # 设置安全的文件权限
+        self._set_secure_file_permissions()
         logger.info("默认配置文件已创建: %s", self.config_path)
 
     @KeyManager.handle_config_operation("配置文件保存")
@@ -332,11 +335,11 @@ class ConfigManager:
         )
         config["connections"][name] = encrypted_config
 
-            # 更新配置文件版本号（每次调用增加修订号）
-            self._increment_config_version(config)
+        # 更新配置文件版本号（每次调用增加修订号）
+        self._increment_config_version(config)
 
-            self._save_config(config, self.OPERATION_ADD)
-            self._log_operation_success("添加", name)
+        self._save_config(config, self.OPERATION_ADD)
+        self._log_operation_success("添加", name)
 
     @KeyManager.handle_config_operation("配置文件加载")
     def _load_config(self) -> Dict[str, Any]:
@@ -484,13 +487,9 @@ class ConfigManager:
 
                 # 确保主版本号不超过限制
                 if major > 9:
-                    raise ConfigError(
-                        "版本号递增导致主版本号超过限制",
-                        details={
-                            "current_major": major,
-                            "max_major": 9
-                        }
-                    )
+                    major = 9
+                    minor = 9
+                    patch = 9
 
         return major, minor, patch
 
@@ -576,11 +575,11 @@ class ConfigManager:
         )
         config["connections"][name] = encrypted_config
 
-            # 更新配置文件版本号（每次调用增加修订号）
-            self._increment_config_version(config)
+        # 更新配置文件版本号（每次调用增加修订号）
+        self._increment_config_version(config)
 
-            self._save_config(config, self.OPERATION_UPDATE)
-            self._log_operation_success("更新", name)
+        self._save_config(config, self.OPERATION_UPDATE)
+        self._log_operation_success("更新", name)
 
     def get_config(self, name: str) -> Dict[str, Any]:
         """获取数据库连接配置（自动解密）
@@ -693,6 +692,44 @@ class ConfigManager:
         return config.get("metadata", {}).get("audit_log", [])
 
     @KeyManager.handle_config_operation("配置文件备份")
+    def _set_secure_file_permissions(self) -> None:
+        """设置配置文件的安全权限
+
+        设置配置文件的安全权限，确保只有所有者可以访问。
+        """
+        import stat
+        import platform
+        
+        try:
+            system = platform.system().lower()
+            
+            if system == "windows":
+                # Windows系统权限设置
+                import subprocess
+                username = getpass.getuser()
+                result = subprocess.run(
+                    [
+                        "icacls",
+                        str(self.config_path),
+                        "/inheritance:r",
+                        "/grant:r",
+                        f"{username}:(R,W)",
+                        "/remove",
+                        "*S-1-1-0",
+                    ],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                if result.returncode != 0:
+                    logger.warning("Windows权限设置警告: %s", result.stderr)
+            else:
+                # Unix/Linux系统权限设置
+                self.config_path.chmod(stat.S_IRUSR | stat.S_IWUSR)
+            logger.debug("配置文件权限已设置: %s", self.config_path)
+        except Exception as e:
+            logger.warning("设置配置文件权限失败: %s", str(e))
+
     def backup_config(self, backup_path: Path | None = None) -> Path:
         """备份配置文件
 
@@ -718,6 +755,12 @@ class ConfigManager:
             backup_path = self.config_dir / f"{self.config_file}.backup.{timestamp}"
 
         shutil.copy2(self.config_path, backup_path)
+        # 设置备份文件的安全权限
+        try:
+            import stat
+            backup_path.chmod(stat.S_IRUSR | stat.S_IWUSR)
+        except Exception as e:
+            logger.warning("设置备份文件权限失败: %s", str(e))
         logger.debug("配置文件已备份: %s", backup_path)
         return backup_path
 

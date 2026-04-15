@@ -203,16 +203,18 @@ class ConfigSecurityManager:
                         logger.error("配置文件签名时间戳过期，可能是重放攻击")
                         raise ConfigError("配置文件签名时间戳过期，可能是重放攻击")
                 except (ValueError, TypeError) as e:
-                    logger.warning("时间戳验证失败: %s", str(e))
-                    # 时间戳验证失败不影响签名验证结果
+                    logger.error("时间戳验证失败: %s", str(e))
+                    raise ConfigError(f"时间戳验证失败: {str(e)}")
 
             logger.debug("配置文件数字签名验证成功")
             return True
 
+        except ConfigError:
+            # 重新抛出ConfigError
+            raise
         except (ValueError, AttributeError, RuntimeError) as e:
-            logger.warning("配置文件签名验证失败: %s", str(e))
-            # 不抛出异常，允许加载但记录警告
-            return False
+            logger.error("配置文件签名验证失败: %s", str(e))
+            raise ConfigError(f"配置文件签名验证失败: {str(e)}") from e
 
     def encrypt_dict_values(self, data_dict: Dict[str, Any]) -> Dict[str, str]:
         """加密字典中的所有值
