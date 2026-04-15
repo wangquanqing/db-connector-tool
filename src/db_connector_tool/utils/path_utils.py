@@ -297,22 +297,10 @@ class PathHelper:
         Note:
             此方法仅检查字符有效性，不检查路径是否存在
         """
-        # Unix 系统非法字符（完整列表）
+        # Unix 系统真正的非法字符只有 NUL 和路径分隔符
+        # 其他字符虽然不推荐但在技术上是允许的
         illegal_chars = [
-            "<",
-            ">",
-            ":",
-            '"',
-            "|",
-            "?",
-            "*",  # 基本非法字符
-            "\\",  # 路径分隔符（Unix使用正斜杠）
-            "\0",
-            "\n",
-            "\r",
-            "\t",
-            "\b",
-            "\f",  # 控制字符
+            "\0",  # NUL字符
         ]
         return not any(char in path_str for char in illegal_chars)
 

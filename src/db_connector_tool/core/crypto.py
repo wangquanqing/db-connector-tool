@@ -335,38 +335,44 @@ class CryptoManager:
 
         # 确保密码长度至少为16位
         length = max(length, 16)
-
-        # 确保每个类别至少有一个字符
-        uppercase_chars = [secrets.choice(string.ascii_uppercase) for _ in range(2)]  # 至少2个大写字母
-        lowercase_chars = [secrets.choice(string.ascii_lowercase) for _ in range(2)]  # 至少2个小写字母
-        digit_chars = [secrets.choice(string.digits) for _ in range(2)]  # 至少2个数字
-        special_chars = [secrets.choice(self.SPECIAL_CHARACTERS) for _ in range(2)]  # 至少2个特殊字符
-
-        # 生成剩余字符
-        character_set = string.ascii_letters + string.digits + self.SPECIAL_CHARACTERS
-        remaining_length = length - 8  # 总长度减去8个强制字符
-        remaining_characters = "".join(
-            secrets.choice(character_set) for _ in range(remaining_length)
-        )
-
-        # 组合所有字符并随机打乱
-        all_characters = list(
-            "".join(uppercase_chars)
-            + "".join(lowercase_chars)
-            + "".join(digit_chars)
-            + "".join(special_chars)
-            + remaining_characters
-        )
-        secrets.SystemRandom().shuffle(all_characters)
-
-        generated_password = "".join(all_characters)
-        # 验证生成的密码是否符合强度要求
-        if not PasswordValidator.validate_strength(generated_password):
-            # 如果仍不符合要求，递归生成
-            logger.debug("强制生成的密码强度不足，重新生成")
-            return self._generate_forced_strong_password(length)
         
-        logger.debug("使用强制方法生成密码成功，长度: %s", length)
+        # 最多尝试5次，避免无限递归
+        max_attempts = 5
+        
+        for attempt in range(max_attempts):
+            # 确保每个类别至少有一个字符
+            uppercase_chars = [secrets.choice(string.ascii_uppercase) for _ in range(2)]  # 至少2个大写字母
+            lowercase_chars = [secrets.choice(string.ascii_lowercase) for _ in range(2)]  # 至少2个小写字母
+            digit_chars = [secrets.choice(string.digits) for _ in range(2)]  # 至少2个数字
+            special_chars = [secrets.choice(self.SPECIAL_CHARACTERS) for _ in range(2)]  # 至少2个特殊字符
+
+            # 生成剩余字符
+            character_set = string.ascii_letters + string.digits + self.SPECIAL_CHARACTERS
+            remaining_length = length - 8  # 总长度减去8个强制字符
+            remaining_characters = "".join(
+                secrets.choice(character_set) for _ in range(remaining_length)
+            )
+
+            # 组合所有字符并随机打乱
+            all_characters = list(
+                "".join(uppercase_chars)
+                + "".join(lowercase_chars)
+                + "".join(digit_chars)
+                + "".join(special_chars)
+                + remaining_characters
+            )
+            secrets.SystemRandom().shuffle(all_characters)
+
+            generated_password = "".join(all_characters)
+            # 验证生成的密码是否符合强度要求
+            if PasswordValidator.validate_strength(generated_password):
+                logger.debug("使用强制方法生成密码成功，长度: %s, 尝试次数: %s", length, attempt + 1)
+                return generated_password
+            
+            logger.debug("强制生成的密码强度不足，第%s次重新生成", attempt + 1)
+        
+        # 达到最大尝试次数后，确保密码符合要求并返回
+        logger.warning("达到最大尝试次数(%s)，返回最后生成的密码", max_attempts)
         return generated_password
 
     def _generate_secure_salt(self, length: int | None = None) -> bytes:

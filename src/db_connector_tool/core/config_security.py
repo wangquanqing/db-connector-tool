@@ -401,7 +401,7 @@ class ConfigSecurityManager:
             if current_key_info:
                 try:
                     # 尝试恢复原始密钥
-                    from ..core.crypto import CryptoManager
+                    from .crypto import CryptoManager
                     self.key_manager.crypto = CryptoManager.from_saved_key(
                         current_key_info["password"],
                         current_key_info["salt"],
