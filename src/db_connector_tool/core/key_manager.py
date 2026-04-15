@@ -350,14 +350,18 @@ class KeyManager:
 
         key_file_path = self.config_dir / "encryption.key"
         if key_file_path.exists():
-            self._load_existing_key(key_file_path)
-            logger.warning(
-                "警告: 使用文件存储加密密钥（安全性较低）。\n"
-                "安全风险: 文件存储的密钥可能被本地攻击者获取，导致加密数据被解密。\n"
-                "建议: 1. 安装keyring库 (pip install keyring)，使用操作系统密钥环存储\n"
-                "      2. 或设置环境变量 DB_CONNECTOR_TOOL_ENCRYPTION_KEY，使用环境变量存储\n"
-                "      3. 确保密钥文件权限设置正确，仅允许所有者访问"
-            )
+            try:
+                self._load_existing_key(key_file_path)
+                logger.warning(
+                    "警告: 使用文件存储加密密钥（安全性较低）。\n"
+                    "安全风险: 文件存储的密钥可能被本地攻击者获取，导致加密数据被解密。\n"
+                    "建议: 1. 安装keyring库 (pip install keyring)，使用操作系统密钥环存储\n"
+                    "      2. 或设置环境变量 DB_CONNECTOR_TOOL_ENCRYPTION_KEY，使用环境变量存储\n"
+                    "      3. 确保密钥文件权限设置正确，仅允许所有者访问"
+                )
+            except Exception as e:
+                logger.error("加载密钥文件失败: %s，创建新的密钥文件", str(e))
+                self._create_new_key(key_file_path)
         else:
             self._create_new_key(key_file_path)
             logger.warning(

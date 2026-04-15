@@ -458,6 +458,17 @@ class DatabaseManager:
         temp_connection_name = f"{name}_temp_{hash(str(config_overrides))}"
         self.pool_manager.add_connection(temp_connection_name, driver)
         logger.info("使用临时配置建立数据库连接: %s (临时连接: %s)", name, temp_connection_name)
+        
+        # 注册临时连接清理函数，在连接不再使用时清理
+        import atexit
+        def cleanup_temp_connection():
+            try:
+                self.pool_manager.remove_connection(temp_connection_name)
+                logger.debug("临时连接已清理: %s", temp_connection_name)
+            except Exception as e:
+                logger.debug("清理临时连接失败: %s", str(e))
+        
+        atexit.register(cleanup_temp_connection)
         return driver
 
     def _get_connection_from_pool(self, name: str) -> Any:
