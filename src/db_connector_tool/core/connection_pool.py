@@ -16,7 +16,7 @@ import threading
 import time
 from typing import Any, Dict, List, Optional
 
-from ..drivers.sqlalchemy_driver import SQLAlchemyDriver
+from typing import Any
 from ..utils.logging_utils import get_logger
 from .exceptions import DatabaseError
 
@@ -52,7 +52,7 @@ class ConnectionPoolManager:
         Example:
             >>> pool_manager = ConnectionPoolManager()
         """
-        self.connection_pool: Dict[str, SQLAlchemyDriver] = {}
+        self.connection_pool: Dict[str, Any] = {}
         self._lock = threading.RLock()
         self._statistics = {
             "connections_created": 0,
@@ -218,7 +218,7 @@ class ConnectionPoolManager:
             return False
         return True
 
-    def _check_driver_basic_status(self, driver: SQLAlchemyDriver) -> bool:
+    def _check_driver_basic_status(self, driver: Any) -> bool:
         """检查驱动实例的基本状态
 
         检查数据库驱动实例的基本状态是否有效。
@@ -232,13 +232,18 @@ class ConnectionPoolManager:
         Example:
             >>> is_valid = pool_manager._check_driver_basic_status(driver)
         """
-        # 检查驱动实例是否有engine属性
-        if not hasattr(driver, "engine"):
-            logger.debug("驱动实例缺少engine属性")
+        # 检查驱动实例是否有效
+        if driver is None:
+            logger.debug("驱动实例为None")
             return False
 
-        # 检查engine是否存在
-        if not driver.engine:
+        # 检查驱动实例是否有必要的方法
+        if not hasattr(driver, "test_connection"):
+            logger.debug("驱动实例缺少test_connection方法")
+            return False
+
+        # 对于SQLAlchemyDriver，检查engine属性
+        if hasattr(driver, "engine") and not driver.engine:
             logger.debug("驱动实例标记为未连接状态")
             return False
 
@@ -265,7 +270,7 @@ class ConnectionPoolManager:
         except (OSError, DatabaseError) as error:
             logger.error("从连接池中移除连接 %s 时发生异常: %s", name, str(error))
 
-    def get_connection(self, name: str) -> Optional[SQLAlchemyDriver]:
+    def get_connection(self, name: str) -> Optional[Any]:
         """从连接池获取连接
 
         从连接池获取指定名称的连接，如果连接无效则返回None。
@@ -274,7 +279,7 @@ class ConnectionPoolManager:
             name: 连接名称
 
         Returns:
-            Optional[SQLAlchemyDriver]: 数据库驱动实例，如果连接无效则返回None
+            Optional[Any]: 数据库驱动实例，如果连接无效则返回None
 
         Example:
             >>> driver = pool_manager.get_connection('mysql_db')
@@ -299,7 +304,7 @@ class ConnectionPoolManager:
             self._remove_connection_from_pool(name)
             return None
 
-    def _is_connection_valid(self, driver: SQLAlchemyDriver) -> bool:
+    def _is_connection_valid(self, driver: Any) -> bool:
         """检查连接是否有效
 
         检查数据库连接是否有效，包括基本状态检查和实际查询测试。
@@ -319,10 +324,20 @@ class ConnectionPoolManager:
                 return False
 
             # 执行实际查询测试
-            return driver.test_connection()
+            if hasattr(driver, 'test_connection'):
+                try:
+                    return driver.test_connection()
+                except Exception as test_error:
+                    logger.debug("连接测试失败: %s", str(test_error))
+                    return False
+            # 对于没有test_connection方法的驱动，至少检查基本属性
+            return True
 
         except (OSError, DatabaseError) as error:
             logger.debug("连接有效性检查失败: %s", str(error))
+            return False
+        except Exception as error:
+            logger.debug("连接有效性检查发生未知错误: %s", str(error))
             return False
 
     def record_connection_error(self, connection_name: str, error: Exception) -> None:
@@ -342,7 +357,7 @@ class ConnectionPoolManager:
             self._connection_metadata[connection_name]["last_error"] = str(error)
         self._statistics["connection_errors"] += 1
 
-    def add_connection(self, name: str, driver: SQLAlchemyDriver) -> None:
+    def add_connection(self, name: str, driver: Any) -> None:
         """添加连接到连接池
 
         将数据库驱动实例添加到连接池，并初始化元数据。
@@ -355,6 +370,21 @@ class ConnectionPoolManager:
             >>> pool_manager.add_connection('mysql_db', driver_instance)
         """
         with self._lock:
+            # 验证驱动实例的有效性
+            if not self._check_driver_basic_status(driver):
+                logger.error("驱动实例无效，缺少必要的方法或属性")
+                raise DatabaseError("驱动实例无效，缺少必要的方法或属性")
+
+            # 验证驱动实例是否可连接
+            try:
+                if hasattr(driver, 'test_connection'):
+                    if not driver.test_connection():
+                        logger.error("驱动实例连接测试失败")
+                        raise DatabaseError("驱动实例连接测试失败")
+            except Exception as e:
+                logger.error("驱动实例连接测试异常: %s", str(e))
+                raise DatabaseError(f"驱动实例连接测试异常: {str(e)}") from e
+
             self.connection_pool[name] = driver
 
             self._connection_metadata[name] = {
@@ -512,11 +542,14 @@ class ConnectionPoolManager:
             if not self._is_connection_in_pool(name):
                 continue
 
-            if name in self._connection_metadata:
+            if name in self._connection_metadata and "last_used" in self._connection_metadata[name]:
                 idle_time = current_time - self._connection_metadata[name]["last_used"]
             else:
-                # 如果没有元数据，使用当前时间作为默认值
-                idle_time = 0
+                # 如果没有元数据或last_used字段，使用创建时间或当前时间作为默认值
+                if name in self._connection_metadata and "created_at" in self._connection_metadata[name]:
+                    idle_time = current_time - self._connection_metadata[name]["created_at"]
+                else:
+                    idle_time = 0
 
             if idle_time > max_idle_time:
                 logger.debug(

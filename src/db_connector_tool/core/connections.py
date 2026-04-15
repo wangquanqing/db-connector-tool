@@ -376,7 +376,7 @@ class DatabaseManager:
 
     def get_connection(
         self, name: str, config_overrides: Dict[str, Any] | None = None
-    ) -> SQLAlchemyDriver:
+    ) -> Any:
         """获取数据库连接（连接池管理）
 
         Args:
@@ -385,7 +385,7 @@ class DatabaseManager:
                             例如：{"host": "127.0.0.1", "port": 3306}
 
         Returns:
-            SQLAlchemyDriver: SQLAlchemyDriver实例，用于执行数据库操作
+            Any: 数据库驱动实例，用于执行数据库操作
 
         Raises:
             DatabaseError: 当获取连接失败时
@@ -421,7 +421,7 @@ class DatabaseManager:
 
     def _get_connection_with_overrides(
         self, name: str, config_overrides: Dict[str, Any]
-    ) -> SQLAlchemyDriver:
+    ) -> Any:
         """使用配置覆盖创建临时连接
 
         Args:
@@ -429,7 +429,7 @@ class DatabaseManager:
             config_overrides: 配置覆盖字典
 
         Returns:
-            SQLAlchemyDriver: SQLAlchemyDriver实例
+            Any: 数据库驱动实例
 
         Raises:
             DBConnectionError: 当连接建立失败时
@@ -442,8 +442,10 @@ class DatabaseManager:
         base_config = self.show_connection(name)
         connection_config = {**base_config, **config_overrides}
 
-        # 创建新连接，处理连接超时
-        driver = SQLAlchemyDriver(connection_config)
+        # 根据数据库类型选择合适的驱动
+        driver = self._create_driver_for_type(connection_config)
+
+
         try:
             driver.connect()
         except (OSError, DBConnectionError) as connect_error:
@@ -452,18 +454,20 @@ class DatabaseManager:
                 f"连接建立失败: {str(connect_error)}"
             ) from connect_error
 
-        # 注意：临时配置的连接不加入连接池，避免配置冲突
-        logger.info("使用临时配置建立数据库连接: %s", name)
+        # 临时配置的连接也加入连接池，但使用特殊标记
+        temp_connection_name = f"{name}_temp_{hash(str(config_overrides))}"
+        self.pool_manager.add_connection(temp_connection_name, driver)
+        logger.info("使用临时配置建立数据库连接: %s (临时连接: %s)", name, temp_connection_name)
         return driver
 
-    def _get_connection_from_pool(self, name: str) -> SQLAlchemyDriver:
+    def _get_connection_from_pool(self, name: str) -> Any:
         """从连接池获取或创建连接
 
         Args:
             name: 连接名称
 
         Returns:
-            SQLAlchemyDriver: SQLAlchemyDriver实例
+            Any: 数据库驱动实例
 
         Raises:
             DBConnectionError: 当连接建立失败时
@@ -478,14 +482,34 @@ class DatabaseManager:
         # 创建新连接
         return self._create_new_connection(name)
 
-    def _create_new_connection(self, name: str) -> SQLAlchemyDriver:
+    def _create_driver_for_type(self, connection_config: Dict[str, Any]) -> Any:
+        """根据数据库类型创建相应的驱动实例
+
+        Args:
+            connection_config: 连接配置字典
+
+        Returns:
+            Any: 数据库驱动实例
+
+        Raises:
+            DBConnectionError: 当数据库类型不支持时
+        """
+        # 根据数据库类型选择合适的驱动
+        db_type = connection_config.get("type", "mysql")
+        if db_type in ["mysql", "postgresql", "oracle", "sqlserver", "sqlite", "gbase"]:
+            from ..drivers.sqlalchemy_driver import SQLAlchemyDriver
+            return SQLAlchemyDriver(connection_config)
+        else:
+            raise DBConnectionError(f"不支持的数据库类型: {db_type}")
+
+    def _create_new_connection(self, name: str) -> Any:
         """创建新的数据库连接
 
         Args:
             name: 连接名称
 
         Returns:
-            SQLAlchemyDriver: SQLAlchemyDriver实例
+            Any: 数据库驱动实例
 
         Raises:
             DBConnectionError: 当连接建立失败时
@@ -493,7 +517,10 @@ class DatabaseManager:
 
         # 创建新连接，处理网络超时和服务不可用
         connection_config = self.show_connection(name)
-        driver = SQLAlchemyDriver(connection_config)
+        
+        # 根据数据库类型选择合适的驱动
+        driver = self._create_driver_for_type(connection_config)
+        
         try:
             driver.connect()
         except (OSError, DBConnectionError) as connect_error:
@@ -569,13 +596,15 @@ class DatabaseManager:
             else:
                 logger.warning("连接测试失败: %s", name)
 
-            # 测试完成后立即清理连接，避免连接池污染
-            self.pool_manager.remove_connection(name)
+            # 测试完成后不立即清理连接，保留在连接池中供后续使用
+            # 连接池会通过空闲连接清理机制自动管理
 
             return success
         except (OSError, DBConnectionError) as connect_error:
             self.pool_manager.record_connection_error(name, connect_error)
             logger.error("连接测试失败 %s: %s", name, str(connect_error))
+            # 测试失败时清理连接，避免连接池中有无效连接
+            self.pool_manager.remove_connection(name)
             return False
 
     def execute_query(
@@ -843,7 +872,7 @@ class DatabaseManager:
             }
 
     def _diagnose_connection_test(
-        self, driver: SQLAlchemyDriver, diagnosis: Dict[str, Any]
+        self, driver: Any, diagnosis: Dict[str, Any]
     ) -> None:
         """诊断连接测试
 

@@ -229,9 +229,18 @@ class KeyManager:
         # 尝试使用keyring库（如果可用）
         if keyring_available and keyring_module is not None:
             self._load_or_create_key_from_keyring()
+        elif KeyManager._env_key_available and KeyManager._env_key:
+            # 环境变量密钥可用，使用环境变量
+            try:
+                key_data = json.loads(KeyManager._env_key)
+                self._load_crypto_from_key_data(key_data)
+                logger.debug("使用环境变量中的加密密钥")
+            except (json.JSONDecodeError, TypeError, ConfigError) as e:
+                logger.warning("环境变量密钥加载失败: %s，使用文件存储方案", str(e))
+                self._load_or_create_key_from_file()
         else:
-            # keyring不可用，回退到文件权限方案
-            logger.warning("keyring库不可用，使用文件权限保护方案")
+            # 回退到文件权限方案
+            logger.warning("keyring库和环境变量都不可用，使用文件权限保护方案")
             self._load_or_create_key_from_file()
 
     def _load_or_create_key_from_keyring(self) -> None:
@@ -327,9 +336,9 @@ class KeyManager:
             >>> key_manager._load_or_create_key_from_file()
         """
 
-        if self._env_key:
+        if KeyManager._env_key:
             # 使用环境变量中的密钥
-            self._load_crypto_from_key_data(json.loads(self._env_key))
+            self._load_crypto_from_key_data(json.loads(KeyManager._env_key))
             logger.debug("使用环境变量中的加密密钥")
         else:
             key_file_path = self.config_dir / "encryption.key"
@@ -599,7 +608,7 @@ class KeyManager:
             return
 
         # 2. 如果keyring不可用，检查是否应该使用环境变量
-        if self._env_key_available:
+        if KeyManager._env_key_available:
             # 环境变量方案需要用户手动设置，这里只记录建议
             logger.warning(
                 "建议将新密钥设置为环境变量: %s",
@@ -634,9 +643,19 @@ class KeyManager:
 
         # 检查环境变量密钥
         cls._env_key = os.environ.get("DB_CONNECTOR_TOOL_ENCRYPTION_KEY")
-        cls._env_key_available = bool(cls._env_key)
-        if cls._env_key_available:
-            logger.debug("环境变量中的加密密钥可用")
+        cls._env_key_available = False
+        
+        if cls._env_key:
+            try:
+                # 验证环境变量格式
+                key_data = json.loads(cls._env_key)
+                if "password" in key_data and "salt" in key_data:
+                    cls._env_key_available = True
+                    logger.debug("环境变量中的加密密钥可用")
+                else:
+                    logger.warning("环境变量中的加密密钥格式无效，缺少必要字段")
+            except (json.JSONDecodeError, TypeError) as e:
+                logger.warning("环境变量中的加密密钥格式无效: %s", str(e))
         else:
             logger.debug("环境变量中无加密密钥")
 

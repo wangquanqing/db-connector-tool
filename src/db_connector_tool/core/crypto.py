@@ -224,6 +224,7 @@ class CryptoManager:
         # 标记清理状态
         self._cleaned = True
 
+        # 清理密码
         if hasattr(self, "password") and self.password:
             # 使用固定字符覆盖密码字符串，确保长度一致
             original_length = len(self.password)
@@ -232,6 +233,8 @@ class CryptoManager:
             self.password = secrets.token_hex(original_length)[:original_length]
             # 最终清零
             self.password = ""
+        
+        # 清理盐值
         if hasattr(self, "salt") and self.salt:
             # 使用零字节覆盖盐值，确保长度一致
             salt_length = len(self.salt)
@@ -240,19 +243,26 @@ class CryptoManager:
             self.salt = secrets.token_bytes(salt_length)
             # 最终清零
             self.salt = b""
+        
+        # 清理 Fernet 实例
         if hasattr(self, "fernet"):
-            # 清除 Fernet 实例
             self.fernet = None
+        
+        # 清理其他可能的敏感属性
+        if hasattr(self, "iterations"):
+            self.iterations = 0
+        
         logger.debug("敏感数据已安全清理")
 
-    def _generate_secure_password(self, max_attempts: int = 10) -> str:
+    def _generate_secure_password(self, max_attempts: int = 20, length: int = 32) -> str:
         """生成安全的随机密码
 
         使用密码学安全的随机数生成器创建符合强度要求的密码。
         采用更丰富的字符集提高密码熵值，使用迭代代替递归优化性能。
 
         Args:
-            max_attempts: 最大尝试次数，防止无限循环，默认10次
+            max_attempts: 最大尝试次数，防止无限循环，默认20次
+            length: 密码长度，默认32位
 
         Returns:
             str: 符合安全标准的随机密码
@@ -280,43 +290,39 @@ class CryptoManager:
             + self.SPECIAL_CHARACTERS  # 特殊字符 (32)
         )
 
-        # 使用迭代代替递归
+        # 确保密码长度至少为16位
+        length = max(length, 16)
+
+        # 使用迭代生成密码
         for attempt in range(max_attempts):
             # 方法1: 直接选择字符（更优的熵值）
             generated_password = "".join(
-                secrets.choice(character_set) for _ in range(24)
+                secrets.choice(character_set) for _ in range(length)
             )
 
             # 验证密码强度
             if PasswordValidator.validate_strength(generated_password):
-                logger.debug("密码生成成功，尝试次数: %s", attempt + 1)
+                logger.debug("密码生成成功，尝试次数: %s, 长度: %s", attempt + 1, length)
                 return generated_password
-
-            # 方法2: 如果方法1失败，使用Base64后备方案
-            if attempt == max_attempts // 2:  # 中途切换策略
-                random_bytes = secrets.token_bytes(24)
-                generated_password = base64.urlsafe_b64encode(random_bytes).decode(
-                    "utf-8"
-                )
-                # 移除可能存在的填充字符
-                generated_password = generated_password.rstrip("=")
-
-                if PasswordValidator.validate_strength(generated_password):
-                    logger.debug("Base64方法生成成功，尝试次数: %s", attempt + 1)
-                    return generated_password
 
             logger.debug("密码强度不足，第%s次重新生成", attempt + 1)
 
         # 达到最大尝试次数，使用强制生成方法
         logger.warning("达到最大尝试次数(%s)，使用强制生成的密码", max_attempts)
-        return self._generate_forced_strong_password()
+        return self._generate_forced_strong_password(length)
 
-    def _generate_forced_strong_password(self) -> str:
+    def _generate_forced_strong_password(self, length: int = 32) -> str:
         """强制生成符合强度要求的密码
+
+        Args:
+            length: 密码长度，默认32位
 
         Returns:
             str: 强制生成的符合强度要求的密码
         """
+
+        # 确保密码长度至少为16位
+        length = max(length, 16)
 
         # 确保每个类别至少有一个字符
         uppercase_char = secrets.choice(string.ascii_uppercase)
@@ -326,7 +332,7 @@ class CryptoManager:
 
         # 生成剩余字符
         character_set = string.ascii_letters + string.digits + self.SPECIAL_CHARACTERS
-        remaining_length = 20  # 总长度24 - 4个强制字符
+        remaining_length = length - 4  # 总长度减去4个强制字符
         remaining_characters = "".join(
             secrets.choice(character_set) for _ in range(remaining_length)
         )
@@ -342,7 +348,7 @@ class CryptoManager:
         secrets.SystemRandom().shuffle(all_characters)
 
         generated_password = "".join(all_characters)
-        logger.debug("使用强制方法生成密码成功")
+        logger.debug("使用强制方法生成密码成功，长度: %s", length)
         return generated_password
 
     def _generate_secure_salt(self, length: int | None = None) -> bytes:

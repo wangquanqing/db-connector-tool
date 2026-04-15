@@ -245,16 +245,7 @@ class BatchDatabaseManager:
         """
         with self._lock:
             try:
-                # 1. 先关闭连接
-                try:
-                    self.db_manager.close_connection(connection_name)
-                    logger.debug(f"连接 {connection_name} 已关闭")
-                except Exception as close_error:
-                    logger.warning(
-                        f"关闭连接 {connection_name} 失败: {str(close_error)}"
-                    )
-
-                # 2. 从数据库管理器中删除连接配置
+                # 1. 先从数据库管理器中删除连接配置（会自动关闭连接）
                 try:
                     self.db_manager.remove_connection(connection_name)
                     logger.debug(f"已从数据库管理器中删除连接配置: {connection_name}")
@@ -263,7 +254,7 @@ class BatchDatabaseManager:
                         f"从数据库管理器删除连接配置失败 {connection_name}: {str(remove_error)}"
                     )
 
-                # 3. 从连接名称列表中移除
+                # 2. 从连接名称列表中移除
                 if connection_name in self._connection_names:
                     self._connection_names.remove(connection_name)
                     logger.debug(f"已从连接名称列表中移除: {connection_name}")
@@ -477,7 +468,23 @@ class BatchDatabaseManager:
                 )
                 # 如果某条SQL失败，尝试回滚
                 if rollback_sqls:
-                    self._execute_rollback(conn_name, rollback_sqls)
+                    try:
+                        self._execute_rollback(conn_name, rollback_sqls)
+                        logger.info(f"连接 {conn_name} 执行回滚成功")
+                    except Exception as rollback_error:
+                        logger.error(f"连接 {conn_name} 执行回滚失败: {str(rollback_error)}")
+                break
+            except Exception as e:
+                execution_results.append(
+                    {"sql": sql, "success": False, "error": f"未知错误: {str(e)}"}
+                )
+                # 如果某条SQL失败，尝试回滚
+                if rollback_sqls:
+                    try:
+                        self._execute_rollback(conn_name, rollback_sqls)
+                        logger.info(f"连接 {conn_name} 执行回滚成功")
+                    except Exception as rollback_error:
+                        logger.error(f"连接 {conn_name} 执行回滚失败: {str(rollback_error)}")
                 break
 
         return execution_results
