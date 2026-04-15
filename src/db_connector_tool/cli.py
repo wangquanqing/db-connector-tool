@@ -793,7 +793,9 @@ class DBConnectorCLI:
         """
         if len(sql) <= max_length:
             return sql
-        return sql[:max_length] + "..."
+        # 截断并去除末尾的空格
+        truncated = sql[:max_length].rstrip()
+        return truncated + "..."
 
     def _print_execution_summary(self, success_count: int, error_count: int) -> None:
         """

@@ -162,8 +162,13 @@ class ConfigManager:
             exc_tb: 异常回溯（如果有异常发生）
         """
 
-        self._clear_sensitive_data()
-        logger.info("配置管理器上下文已退出")
+        try:
+            self._clear_sensitive_data()
+            if exc_val:
+                logger.warning("配置管理器上下文退出时发生异常: %s", str(exc_val))
+            logger.info("配置管理器上下文已退出")
+        except Exception as e:
+            logger.error("清理敏感数据时发生异常: %s", str(e))
 
     @property
     def config_dir(self) -> Path:
@@ -236,6 +241,8 @@ class ConfigManager:
             },
         }
         self._save_config(default_config)
+        # 设置安全的文件权限
+        self._set_secure_file_permissions(self.config_path)
         logger.info("默认配置文件已创建: %s", self.config_path)
 
     @KeyManager.handle_config_operation("配置文件保存")
@@ -281,6 +288,16 @@ class ConfigManager:
 
         # 验证配置结构
         ConfigValidator.validate_config(config)
+        # 验证连接配置的有效性
+        for name, conn_config in config.get("connections", {}).items():
+            try:
+                # 尝试解密连接配置以验证其有效性
+                decrypted_config = self.security_manager.decrypt_dict_values(conn_config)
+                # 验证解密后的配置
+                ConfigValidator.validate_connection_config(decrypted_config)
+            except Exception as e:
+                logger.warning("连接配置验证失败 %s: %s", name, str(e))
+                # 继续验证其他连接，不中断整个验证过程
 
         with open(self.config_path, "wb") as f:
             f.write(tomli_w.dumps(config).encode("utf-8"))
@@ -328,18 +345,18 @@ class ConfigManager:
             self.key_manager.get_crypto_manager()
         except ConfigError:
             self.key_manager.load_or_create_key()
-        finally:
-            # 使用统一的加密方法
-            encrypted_config = self.security_manager.encrypt_dict_values(
-                connection_config
-            )
-            config["connections"][name] = encrypted_config
+        
+        # 使用统一的加密方法
+        encrypted_config = self.security_manager.encrypt_dict_values(
+            connection_config
+        )
+        config["connections"][name] = encrypted_config
 
-            # 更新配置文件版本号（每次调用增加修订号）
-            self._increment_config_version(config)
+        # 更新配置文件版本号（每次调用增加修订号）
+        self._increment_config_version(config)
 
-            self._save_config(config, self.OPERATION_ADD)
-            self._log_operation_success("添加", name)
+        self._save_config(config, self.OPERATION_ADD)
+        self._log_operation_success("添加", name)
 
     @KeyManager.handle_config_operation("配置文件加载")
     def _load_config(self) -> Dict[str, Any]:
@@ -370,7 +387,9 @@ class ConfigManager:
         ConfigValidator.validate_config(config)
 
         # 验证数字签名
-        self.security_manager.verify_config_signature(config)
+        is_valid = self.security_manager.verify_config_signature(config)
+        if not is_valid:
+            raise ConfigError("配置文件数字签名验证失败，可能被篡改")
 
         # 更新缓存和修改时间
         self._config_cache = config
@@ -410,10 +429,10 @@ class ConfigManager:
                 major_num, minor_num, patch_num
             )
 
-            # 检查主版本号是否合理（限制主版本号不超过99）
+            # 检查主版本号是否合理（限制主版本号不超过9）
             if major_num > 9:
                 raise ConfigError(
-                    "版本号递增导致第一位发生变化，变更过于频繁，请手动检查",
+                    "版本号递增导致主版本号超过限制，请手动检查",
                     details={
                         "current_version": current_version,
                         "would_become": f"{major_num}.{minor_num}.{patch_num}",
@@ -439,6 +458,9 @@ class ConfigManager:
         except (ValueError, AttributeError, RuntimeError) as e:
             logger.warning("版本号递增失败，保持原版本号: %s", str(e))
             # 如果版本号递增失败，不影响主要功能，继续使用原版本号
+        except Exception as e:
+            logger.error("版本号递增过程中发生未知错误: %s", str(e))
+            # 未知错误也不影响主要功能，继续使用原版本号
 
     def _parse_version_parts(self, version: str) -> tuple[int, int, int]:
         """解析版本号各部分
@@ -480,6 +502,8 @@ class ConfigManager:
             (1, 3, 0)
             >>> self._increment_version_parts(1, 9, 9)
             (2, 0, 0)
+            >>> self._increment_version_parts(9, 9, 9)
+            (9, 9, 9)  # 达到最大版本号
         """
 
         patch += 1
@@ -491,9 +515,67 @@ class ConfigManager:
 
             if minor >= 10:
                 minor = 0
-                major += 1
+                # 主版本号限制为9，不再进位
+                if major < 9:
+                    major += 1
 
         return major, minor, patch
+
+    def _set_secure_file_permissions(self, file_path: Path) -> None:
+        """设置文件安全权限（最小权限原则）
+
+        设置文件的安全权限，确保只有所有者可以访问。
+
+        Args:
+            file_path: 文件路径
+
+        Raises:
+            ConfigError: 权限设置失败
+
+        Example:
+            >>> config_file = Path("/path/to/config.toml")
+            >>> config_manager._set_secure_file_permissions(config_file)
+        """
+
+        try:
+            import platform
+            import stat
+
+            system = platform.system().lower()
+
+            if system == "windows":
+                # Windows系统权限设置
+                import subprocess
+                import getpass
+                
+                username = getpass.getuser()
+                result = subprocess.run(
+                    [
+                        "icacls",
+                        str(file_path),
+                        "/inheritance:r",
+                        "/grant:r",
+                        f"{username}:(R,W)",
+                        "/remove",
+                        "*S-1-1-0",  # 移除Everyone组
+                    ],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                
+                if result.returncode != 0:
+                    logger.warning("icacls设置权限警告: %s", result.stderr)
+                else:
+                    logger.debug("Windows: 已设置配置文件权限为仅当前用户读写")
+            else:
+                # Unix/Linux系统权限设置
+                file_path.chmod(stat.S_IRUSR | stat.S_IWUSR)
+                logger.debug("Unix/Linux: 已设置配置文件权限为600（仅所有者可读写）")
+
+        except (OSError, AttributeError) as e:
+            logger.warning("设置文件权限失败 %s: %s", file_path, str(e))
+            # 权限设置失败不应阻止程序运行，但记录警告
 
     def _log_operation_success(self, operation: str, name: str) -> None:
         """记录操作成功日志
@@ -573,18 +655,18 @@ class ConfigManager:
             self.key_manager.get_crypto_manager()
         except ConfigError:
             self.key_manager.load_or_create_key()
-        finally:
-            # 使用统一的加密方法
-            encrypted_config = self.security_manager.encrypt_dict_values(
-                connection_config
-            )
-            config["connections"][name] = encrypted_config
+        
+        # 使用统一的加密方法
+        encrypted_config = self.security_manager.encrypt_dict_values(
+            connection_config
+        )
+        config["connections"][name] = encrypted_config
 
-            # 更新配置文件版本号（每次调用增加修订号）
-            self._increment_config_version(config)
+        # 更新配置文件版本号（每次调用增加修订号）
+        self._increment_config_version(config)
 
-            self._save_config(config, self.OPERATION_UPDATE)
-            self._log_operation_success("更新", name)
+        self._save_config(config, self.OPERATION_UPDATE)
+        self._log_operation_success("更新", name)
 
     def get_config(self, name: str) -> Dict[str, Any]:
         """获取数据库连接配置（自动解密）
@@ -620,7 +702,7 @@ class ConfigManager:
             self.key_manager.get_crypto_manager()
         except ConfigError:
             self.key_manager.load_or_create_key()
-
+        
         # 使用统一的解密方法
         decrypted_config = self.security_manager.decrypt_dict_values(connection_config)
         logger.debug("连接配置已获取: %s", name)
@@ -724,6 +806,8 @@ class ConfigManager:
             backup_path = self.config_dir / f"{self.config_file}.backup.{timestamp}"
 
         shutil.copy2(self.config_path, backup_path)
+        # 设置安全的文件权限
+        self._set_secure_file_permissions(backup_path)
         logger.debug("配置文件已备份: %s", backup_path)
         return backup_path
 

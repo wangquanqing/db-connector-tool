@@ -417,3 +417,105 @@ class GBase8sJDBCDialect(OracleDialect, ABC):
 registry.register(
     "jdbcgbase8s", "db_connector_tool.drivers.gbase8s_jdbc", "GBase8sJDBCDialect"
 )
+
+
+class GBase8sJDBCDriver:
+    """GBase 8s JDBC 驱动类
+
+    提供与 SQLAlchemyDriver 一致的接口，用于 GBase 8s 数据库连接。
+    """
+
+    def __init__(self, config: dict) -> None:
+        """初始化 GBase 8s JDBC 驱动
+
+        Args:
+            config: 数据库连接配置
+        """
+        self.config = config
+        self.engine = None
+        self._validate_config()
+
+    def _validate_config(self) -> None:
+        """验证配置
+
+        验证必要的配置参数是否存在。
+        """
+        required_params = ["host", "port", "database", "server", "username", "password"]
+        for param in required_params:
+            if param not in self.config or not self.config[param]:
+                raise ValueError(f"缺少必需参数: {param}")
+
+    def connect(self) -> None:
+        """建立数据库连接
+
+        使用 SQLAlchemy 创建连接。
+        """
+        from sqlalchemy import create_engine
+
+        # 构建连接 URL
+        url = f"jdbcgbase8s://{self.config['host']}:{self.config['port']}/{self.config['database']}:GBASEDBTSERVER={self.config['server']}?user={self.config['username']}&password={self.config['password']}"
+        
+        # 创建引擎
+        self.engine = create_engine(url)
+
+    def disconnect(self) -> None:
+        """断开数据库连接
+
+        关闭 SQLAlchemy 引擎。
+        """
+        if self.engine:
+            self.engine.dispose()
+            self.engine = None
+
+    def execute_query(self, query: str, parameters: dict = None) -> list:
+        """执行查询
+
+        Args:
+            query: SQL 查询语句
+            parameters: 查询参数
+
+        Returns:
+            查询结果列表
+        """
+        if not self.engine:
+            self.connect()
+
+        with self.engine.connect() as conn:
+            from sqlalchemy import text
+            result = conn.execute(text(query), parameters or {})
+            return [dict(row) for row in result.mappings()]
+
+    def execute_command(self, command: str, parameters: dict = None) -> int:
+        """执行命令
+
+        Args:
+            command: SQL 命令
+            parameters: 命令参数
+
+        Returns:
+            影响的行数
+        """
+        if not self.engine:
+            self.connect()
+
+        with self.engine.connect() as conn:
+            from sqlalchemy import text
+            result = conn.execute(text(command), parameters or {})
+            conn.commit()
+            return result.rowcount
+
+    def test_connection(self) -> bool:
+        """测试连接
+
+        Returns:
+            连接是否成功
+        """
+        try:
+            self.connect()
+            # 执行测试查询
+            self.execute_query("SELECT 1 FROM dual")
+            return True
+        except Exception:
+            return False
+        finally:
+            self.disconnect()

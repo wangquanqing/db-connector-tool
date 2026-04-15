@@ -277,18 +277,32 @@ class PasswordValidator:
         elif len(password) >= 8:
             score += 1
 
-        # 使用统一的密码要求检查方法
-        requirements = PasswordValidator._check_password_requirements(password)
-
-        # 复杂度得分（排除长度检查）
-        for req_name, req_met in requirements.items():
-            if req_name != "length_ok" and req_met:
-                score += 1
+        # 复杂度得分
+        if re.search(r"[A-Z]", password):
+            score += 1
+        if re.search(r"[a-z]", password):
+            score += 1
+        if re.search(r"\d", password):
+            score += 1
+        if re.search(r"[!@#$%^&*()_+\-=\[\]{}|;:,.<>?~`\"\'\\/]", password):
+            score += 1
 
         # 评估强度等级
+        has_uppercase = bool(re.search(r"[A-Z]", password))
+        has_lowercase = bool(re.search(r"[a-z]", password))
+        has_digit = bool(re.search(r"\d", password))
+        has_special = bool(re.search(r"[!@#$%^&*()_+\-=\[\]{}|;:,.<>?~`\"\'\\/]", password))
+        
+        # 计算复杂度等级
+        complexity = 0
+        if has_uppercase: complexity += 1
+        if has_lowercase: complexity += 1
+        if has_digit: complexity += 1
+        if has_special: complexity += 1
+        
         if score >= 7:
             return "very_strong"
-        if score >= 5:
+        if score >= 5 and complexity >= 4:
             return "strong"
         if score >= 3:
             return "medium"

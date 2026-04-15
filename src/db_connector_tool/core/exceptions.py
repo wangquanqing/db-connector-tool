@@ -66,6 +66,7 @@ class DBConnectorError(Exception):
         message: str,
         error_code: str | None = None,
         details: Dict[str, Any] | None = None,
+        cause: Exception | None = None,
     ) -> None:
         """初始化基础异常
 
@@ -75,6 +76,7 @@ class DBConnectorError(Exception):
             message: 异常描述信息，应清晰描述错误原因
             error_code: 错误代码，用于错误分类和识别，格式建议为"模块_编号"
             details: 详细的错误信息字典，包含相关上下文信息
+            cause: 导致此异常的原始异常
 
         Notes:
             - 错误代码应保持唯一性和一致性
@@ -90,6 +92,11 @@ class DBConnectorError(Exception):
         self.message = message
         self.error_code = error_code
         self.details = details or {}
+        self.cause = cause
+        
+        # 保留异常链
+        if cause:
+            self.__cause__ = cause
 
     def __str__(self) -> str:
         """返回异常的字符串表示
@@ -128,12 +135,21 @@ class DBConnectorError(Exception):
             }
         """
 
-        return {
+        result = {
             "error_type": self.__class__.__name__,
             "message": self.message,
             "error_code": self.error_code,
             "details": self.details,
         }
+        
+        # 添加原始异常信息（如果存在）
+        if self.cause:
+            result["cause"] = {
+                "type": self.cause.__class__.__name__,
+                "message": str(self.cause)
+            }
+        
+        return result
 
 
 class ConfigError(DBConnectorError):
@@ -162,6 +178,7 @@ class ConfigError(DBConnectorError):
         message: str,
         error_code: str | None = None,
         details: Dict[str, Any] | None = None,
+        cause: Exception | None = None,
         **kwargs,
     ) -> None:
         """初始化配置异常
@@ -172,6 +189,7 @@ class ConfigError(DBConnectorError):
             message: 异常描述信息
             error_code: 错误代码
             details: 详细的错误信息
+            cause: 导致此异常的原始异常
             **kwargs: 其他配置相关信息，如 config_file, config_section, config_key
 
         Notes:
@@ -188,7 +206,7 @@ class ConfigError(DBConnectorError):
             "配置文件格式错误"
         """
 
-        super().__init__(message, error_code, details)
+        super().__init__(message, error_code, details, cause)
         self.config_file = kwargs.get("config_file")
         self.config_section = kwargs.get("config_section")
         self.config_key = kwargs.get("config_key")
@@ -226,6 +244,7 @@ class CryptoError(DBConnectorError):
         message: str,
         error_code: str | None = None,
         details: Dict[str, Any] | None = None,
+        cause: Exception | None = None,
         **kwargs,
     ) -> None:
         """初始化加密异常
@@ -236,6 +255,7 @@ class CryptoError(DBConnectorError):
             message: 异常描述信息
             error_code: 错误代码
             details: 详细的错误信息
+            cause: 导致此异常的原始异常
             **kwargs: 其他加密相关信息，如 operation, algorithm
 
         Notes:
@@ -253,7 +273,7 @@ class CryptoError(DBConnectorError):
             "加密失败"
         """
 
-        super().__init__(message, error_code, details)
+        super().__init__(message, error_code, details, cause)
         self.operation = kwargs.get("operation")
         self.algorithm = kwargs.get("algorithm")
 
@@ -288,6 +308,7 @@ class DatabaseError(DBConnectorError):
         message: str,
         error_code: str | None = None,
         details: Dict[str, Any] | None = None,
+        cause: Exception | None = None,
         **kwargs,
     ) -> None:
         """初始化数据库异常
@@ -298,6 +319,7 @@ class DatabaseError(DBConnectorError):
             message: 异常描述信息
             error_code: 错误代码
             details: 详细的错误信息
+            cause: 导致此异常的原始异常
             **kwargs: 其他数据库相关信息，如 database_type, operation
 
         Notes:
@@ -315,7 +337,7 @@ class DatabaseError(DBConnectorError):
             "数据库操作失败"
         """
 
-        super().__init__(message, error_code, details)
+        super().__init__(message, error_code, details, cause)
         self.database_type = kwargs.get("database_type")
         self.operation = kwargs.get("operation")
 
@@ -354,6 +376,7 @@ class DBConnectionError(DatabaseError):
         message: str,
         error_code: str | None = None,
         details: Dict[str, Any] | None = None,
+        cause: Exception | None = None,
         **kwargs,
     ) -> None:
         """初始化连接异常
@@ -364,6 +387,7 @@ class DBConnectionError(DatabaseError):
             message: 异常描述信息
             error_code: 错误代码
             details: 详细的错误信息
+            cause: 导致此异常的原始异常
             **kwargs: 其他连接相关信息，如 connection_name, host, port, database
 
         Notes:
@@ -383,7 +407,7 @@ class DBConnectionError(DatabaseError):
             "数据库连接失败"
         """
 
-        super().__init__(message, error_code, details=details)
+        super().__init__(message, error_code, details, cause)
         self.connection_name = kwargs.get("connection_name")
         self.host = kwargs.get("host")
         self.port = kwargs.get("port")
@@ -424,6 +448,7 @@ class DriverError(DatabaseError):
         message: str,
         error_code: str | None = None,
         details: Dict[str, Any] | None = None,
+        cause: Exception | None = None,
         **kwargs,
     ) -> None:
         """初始化驱动异常
@@ -434,6 +459,7 @@ class DriverError(DatabaseError):
             message: 异常描述信息
             error_code: 错误代码
             details: 详细的错误信息
+            cause: 导致此异常的原始异常
             **kwargs: 其他驱动相关信息，如 driver_name, driver_version
 
         Notes:
@@ -451,7 +477,7 @@ class DriverError(DatabaseError):
             "驱动加载失败"
         """
 
-        super().__init__(message, error_code, details=details)
+        super().__init__(message, error_code, details, cause)
         self.driver_name = kwargs.get("driver_name")
         self.driver_version = kwargs.get("driver_version")
 
@@ -488,6 +514,7 @@ class QueryError(DatabaseError):
         message: str,
         error_code: str | None = None,
         details: Dict[str, Any] | None = None,
+        cause: Exception | None = None,
         **kwargs,
     ) -> None:
         """初始化查询异常
@@ -498,6 +525,7 @@ class QueryError(DatabaseError):
             message: 异常描述信息
             error_code: 错误代码
             details: 详细的错误信息
+            cause: 导致此异常的原始异常
             **kwargs: 其他查询相关信息，如 query, query_type, parameters
 
         Notes:
@@ -516,7 +544,7 @@ class QueryError(DatabaseError):
             "查询语法错误"
         """
 
-        super().__init__(message, error_code, details=details)
+        super().__init__(message, error_code, details, cause)
         self.query = kwargs.get("query")
         self.query_type = kwargs.get("query_type")
         self.parameters = kwargs.get("parameters")
@@ -584,6 +612,7 @@ class ValidationError(DBConnectorError):
         message: str,
         error_code: str | None = None,
         details: Dict[str, Any] | None = None,
+        cause: Exception | None = None,
         **kwargs,
     ) -> None:
         """初始化验证异常
@@ -594,6 +623,7 @@ class ValidationError(DBConnectorError):
             message: 异常描述信息
             error_code: 错误代码
             details: 详细的错误信息
+            cause: 导致此异常的原始异常
             **kwargs: 其他验证相关信息，如 field_name, expected_type, actual_value, validation_rules
 
         Notes:
@@ -612,7 +642,7 @@ class ValidationError(DBConnectorError):
             "参数验证失败"
         """
 
-        super().__init__(message, error_code, details)
+        super().__init__(message, error_code, details, cause)
         self.field_name = kwargs.get("field_name")
         self.expected_type = kwargs.get("expected_type")
         self.actual_value = kwargs.get("actual_value")
@@ -652,6 +682,7 @@ class FileSystemError(DBConnectorError):
         message: str,
         error_code: str | None = None,
         details: Dict[str, Any] | None = None,
+        cause: Exception | None = None,
         **kwargs,
     ) -> None:
         """初始化文件系统异常
@@ -662,6 +693,7 @@ class FileSystemError(DBConnectorError):
             message: 异常描述信息
             error_code: 错误代码
             details: 详细的错误信息
+            cause: 导致此异常的原始异常
             **kwargs: 其他文件系统相关信息，如 file_path, operation
 
         Notes:
@@ -679,7 +711,7 @@ class FileSystemError(DBConnectorError):
             "文件读取失败"
         """
 
-        super().__init__(message, error_code, details)
+        super().__init__(message, error_code, details, cause)
         self.file_path = kwargs.get("file_path")
         self.operation = kwargs.get("operation")
 
@@ -713,6 +745,7 @@ class DBTimeoutError(DBConnectorError):
         message: str,
         error_code: str | None = None,
         details: Dict[str, Any] | None = None,
+        cause: Exception | None = None,
         **kwargs,
     ) -> None:
         """初始化超时异常
@@ -723,6 +756,7 @@ class DBTimeoutError(DBConnectorError):
             message: 异常描述信息
             error_code: 错误代码
             details: 详细的错误信息
+            cause: 导致此异常的原始异常
             **kwargs: 其他超时相关信息，如 timeout_seconds, operation
 
         Notes:
@@ -740,7 +774,7 @@ class DBTimeoutError(DBConnectorError):
             "数据库查询超时"
         """
 
-        super().__init__(message, error_code, details)
+        super().__init__(message, error_code, details, cause)
         self.timeout_seconds = kwargs.get("timeout_seconds")
         self.operation = kwargs.get("operation")
 

@@ -85,9 +85,7 @@ class KeyManager:
     >>> key_manager.close()
     """
 
-    _env_key = None
     # 类级别的依赖检查结果（全局依赖，与应用名无关）
-    _env_key_available = None
     _dependencies_checked = False
     # 线程安全锁，确保依赖检查只执行一次
     _dependency_check_lock = None
@@ -327,21 +325,29 @@ class KeyManager:
             >>> key_manager._load_or_create_key_from_file()
         """
 
-        if self._env_key:
+        # 检查环境变量
+        env_key = os.environ.get("DB_CONNECTOR_TOOL_ENCRYPTION_KEY")
+        if env_key:
             # 使用环境变量中的密钥
-            self._load_crypto_from_key_data(json.loads(self._env_key))
-            logger.debug("使用环境变量中的加密密钥")
+            try:
+                key_data = json.loads(env_key)
+                self._load_crypto_from_key_data(key_data)
+                logger.debug("使用环境变量中的加密密钥")
+                return
+            except (json.JSONDecodeError, ValueError) as error:
+                logger.warning("环境变量中的密钥格式无效: %s，使用文件存储", str(error))
+
+        # 回退到文件存储
+        key_file_path = self.config_dir / "encryption.key"
+        if key_file_path.exists():
+            self._load_existing_key(key_file_path)
         else:
-            key_file_path = self.config_dir / "encryption.key"
-            if key_file_path.exists():
-                self._load_existing_key(key_file_path)
-            else:
-                self._create_new_key(key_file_path)
-                logger.warning(
-                    "警告: 使用文件存储加密密钥（安全性较低）。\n"
-                    "建议: 1. 安装keyring库 (pip install keyring)\n"
-                    "      2. 或设置环境变量 DB_CONNECTOR_TOOL_ENCRYPTION_KEY"
-                )
+            self._create_new_key(key_file_path)
+            logger.warning(
+                "警告: 使用文件存储加密密钥（安全性较低）。\n"
+                "建议: 1. 安装keyring库 (pip install keyring)\n"
+                "      2. 或设置环境变量 DB_CONNECTOR_TOOL_ENCRYPTION_KEY"
+            )
 
     def _load_existing_key(self, key_file_path: Path) -> None:
         """加载现有的加密密钥文件
@@ -598,14 +604,16 @@ class KeyManager:
             logger.info("轮换加密密钥已安全存储到操作系统密钥环")
             return
 
-        # 2. 如果keyring不可用，检查是否应该使用环境变量
-        if self._env_key_available:
-            # 环境变量方案需要用户手动设置，这里只记录建议
+        # 2. 检查环境变量是否可用
+        env_key = os.environ.get("DB_CONNECTOR_TOOL_ENCRYPTION_KEY")
+        if env_key:
+            # 环境变量方案需要用户手动更新，这里只记录建议
             logger.warning(
-                "建议将新密钥设置为环境变量: %s",
+                "建议更新环境变量中的新密钥: %s",
                 f"DB_CONNECTOR_TOOL_ENCRYPTION_KEY={json.dumps(key_data)}",
             )
-            # 继续使用文件存储作为后备
+            # 注意：环境变量方案不会自动更新，用户需要手动操作
+            return
 
         # 3. 最后回退到文件存储
         key_file = self.config_dir / "encryption.key"
@@ -633,15 +641,15 @@ class KeyManager:
         """
 
         # 检查环境变量密钥
-        cls._env_key = os.environ.get("DB_CONNECTOR_TOOL_ENCRYPTION_KEY")
-        cls._env_key_available = bool(cls._env_key)
-        if cls._env_key_available:
+        env_key = os.environ.get("DB_CONNECTOR_TOOL_ENCRYPTION_KEY")
+        env_key_available = bool(env_key)
+        if env_key_available:
             logger.debug("环境变量中的加密密钥可用")
         else:
             logger.debug("环境变量中无加密密钥")
 
         # 检查是否有可用的密钥存储
-        if not keyring_available and not cls._env_key_available:
+        if not keyring_available and not env_key_available:
             logger.warning(
                 "警告: 未找到安全的密钥存储方案。\n"
                 "建议: 1. 安装keyring库 (pip install keyring)\n"

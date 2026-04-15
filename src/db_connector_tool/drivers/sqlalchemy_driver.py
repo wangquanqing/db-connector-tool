@@ -329,15 +329,15 @@ class SQLAlchemyDriver:
         config_copy.setdefault("port", database_config["default_port"])
 
         # 对连接参数进行URL编码
-        if "host" in config_copy:
+        if "host" in config_copy and config_copy["host"] is not None:
             # 主机名可能包含特殊字符（如IPv6地址、域名等）
             config_copy["host"] = quote_plus(str(config_copy["host"]))
 
-        if "username" in config_copy:
+        if "username" in config_copy and config_copy["username"] is not None:
             # 用户名可能包含特殊字符（如邮箱地址、包含空格的用户名等）
             config_copy["username"] = quote_plus(str(config_copy["username"]))
 
-        if "password" in config_copy:
+        if "password" in config_copy and config_copy["password"] is not None:
             # 密码通常包含特殊字符，必须进行编码
             config_copy["password"] = quote_plus(str(config_copy["password"]))
 

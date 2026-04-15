@@ -376,7 +376,7 @@ class DatabaseManager:
 
     def get_connection(
         self, name: str, config_overrides: Dict[str, Any] | None = None
-    ) -> SQLAlchemyDriver:
+    ) -> Any:
         """获取数据库连接（连接池管理）
 
         Args:
@@ -385,7 +385,7 @@ class DatabaseManager:
                             例如：{"host": "127.0.0.1", "port": 3306}
 
         Returns:
-            SQLAlchemyDriver: SQLAlchemyDriver实例，用于执行数据库操作
+            Any: 数据库驱动实例，用于执行数据库操作
 
         Raises:
             DatabaseError: 当获取连接失败时
@@ -421,7 +421,7 @@ class DatabaseManager:
 
     def _get_connection_with_overrides(
         self, name: str, config_overrides: Dict[str, Any]
-    ) -> SQLAlchemyDriver:
+    ) -> Any:
         """使用配置覆盖创建临时连接
 
         Args:
@@ -429,7 +429,7 @@ class DatabaseManager:
             config_overrides: 配置覆盖字典
 
         Returns:
-            SQLAlchemyDriver: SQLAlchemyDriver实例
+            Any: 数据库驱动实例
 
         Raises:
             DBConnectionError: 当连接建立失败时
@@ -441,29 +441,39 @@ class DatabaseManager:
         # 获取基础配置并应用覆盖
         base_config = self.show_connection(name)
         connection_config = {**base_config, **config_overrides}
+        driver_type = connection_config.get("type", "mysql")
 
-        # 创建新连接，处理连接超时
-        driver = SQLAlchemyDriver(connection_config)
+        # 根据配置类型创建相应的驱动实例
         try:
+            if driver_type == "gbase8s_jdbc":
+                from ..drivers.gbase8s_jdbc import GBase8sJDBCDriver
+                driver = GBase8sJDBCDriver(connection_config)
+            else:
+                # 默认使用 SQLAlchemyDriver
+                driver = SQLAlchemyDriver(connection_config)
+
             driver.connect()
         except (OSError, DBConnectionError) as connect_error:
             logger.error("使用临时配置建立连接失败 %s: %s", name, str(connect_error))
             raise DBConnectionError(
                 f"连接建立失败: {str(connect_error)}"
             ) from connect_error
+        except ImportError as import_error:
+            logger.error("导入驱动模块失败 %s: %s", name, str(import_error))
+            raise DBConnectionError(f"驱动模块导入失败: {str(import_error)}") from import_error
 
         # 注意：临时配置的连接不加入连接池，避免配置冲突
         logger.info("使用临时配置建立数据库连接: %s", name)
         return driver
 
-    def _get_connection_from_pool(self, name: str) -> SQLAlchemyDriver:
+    def _get_connection_from_pool(self, name: str) -> Any:
         """从连接池获取或创建连接
 
         Args:
             name: 连接名称
 
         Returns:
-            SQLAlchemyDriver: SQLAlchemyDriver实例
+            Any: 数据库驱动实例
 
         Raises:
             DBConnectionError: 当连接建立失败时
@@ -478,14 +488,14 @@ class DatabaseManager:
         # 创建新连接
         return self._create_new_connection(name)
 
-    def _create_new_connection(self, name: str) -> SQLAlchemyDriver:
+    def _create_new_connection(self, name: str) -> Any:
         """创建新的数据库连接
 
         Args:
             name: 连接名称
 
         Returns:
-            SQLAlchemyDriver: SQLAlchemyDriver实例
+            Any: 数据库驱动实例
 
         Raises:
             DBConnectionError: 当连接建立失败时
@@ -493,14 +503,27 @@ class DatabaseManager:
 
         # 创建新连接，处理网络超时和服务不可用
         connection_config = self.show_connection(name)
-        driver = SQLAlchemyDriver(connection_config)
+        driver_type = connection_config.get("type", "mysql")
+
+        # 根据配置类型创建相应的驱动实例
         try:
+            if driver_type == "gbase8s_jdbc":
+                from ..drivers.gbase8s_jdbc import GBase8sJDBCDriver
+                driver = GBase8sJDBCDriver(connection_config)
+            else:
+                # 默认使用 SQLAlchemyDriver
+                driver = SQLAlchemyDriver(connection_config)
+
             driver.connect()
         except (OSError, DBConnectionError) as connect_error:
             self.pool_manager.record_connection_error(name, connect_error)
             logger.error("建立数据库连接失败 %s: %s", name, str(connect_error))
             # 分析错误类型，提供更详细的错误信息
             self._handle_connection_error(connect_error)
+        except ImportError as import_error:
+            self.pool_manager.record_connection_error(name, import_error)
+            logger.error("导入驱动模块失败 %s: %s", name, str(import_error))
+            raise DBConnectionError(f"驱动模块导入失败: {str(import_error)}") from import_error
 
         # 加入连接池
         self.pool_manager.add_connection(name, driver)
@@ -561,22 +584,23 @@ class DatabaseManager:
             ...     success = dbm.test_connection("postgres_db")
         """
 
-        try:
-            driver = self.get_connection(name)
-            success = driver.test_connection()
-            if success:
-                logger.info("连接测试成功: %s", name)
-            else:
-                logger.warning("连接测试失败: %s", name)
+        with self._lock:
+            try:
+                driver = self.get_connection(name)
+                success = driver.test_connection()
+                if success:
+                    logger.info("连接测试成功: %s", name)
+                else:
+                    logger.warning("连接测试失败: %s", name)
 
-            # 测试完成后立即清理连接，避免连接池污染
-            self.pool_manager.remove_connection(name)
+                # 测试完成后立即清理连接，避免连接池污染
+                self.pool_manager.remove_connection(name)
 
-            return success
-        except (OSError, DBConnectionError) as connect_error:
-            self.pool_manager.record_connection_error(name, connect_error)
-            logger.error("连接测试失败 %s: %s", name, str(connect_error))
-            return False
+                return success
+            except (OSError, DBConnectionError) as connect_error:
+                self.pool_manager.record_connection_error(name, connect_error)
+                logger.error("连接测试失败 %s: %s", name, str(connect_error))
+                return False
 
     def execute_query(
         self, connection_name: str, query: str, params: Dict[str, Any] | None = None
@@ -619,14 +643,15 @@ class DatabaseManager:
 
             return result
 
-        try:
-            return _execute_query()
-        except (OSError, DatabaseError) as error:
-            # 记录错误信息
-            self.pool_manager.record_connection_error(connection_name, error)
-            error_message = f"查询执行失败 {connection_name}: {str(error)}"
-            logger.error(error_message)
-            raise DatabaseError(f"查询执行失败: {str(error)}") from error
+        with self._lock:
+            try:
+                return _execute_query()
+            except (OSError, DatabaseError) as error:
+                # 记录错误信息
+                self.pool_manager.record_connection_error(connection_name, error)
+                error_message = f"查询执行失败 {connection_name}: {str(error)}"
+                logger.error(error_message)
+                raise DatabaseError(f"查询执行失败: {str(error)}") from error
 
     def execute_command(
         self,
@@ -675,14 +700,15 @@ class DatabaseManager:
 
             return result
 
-        try:
-            return _execute_command()
-        except (OSError, DatabaseError) as error:
-            # 记录错误信息
-            self.pool_manager.record_connection_error(connection_name, error)
-            error_message = f"命令执行失败 {connection_name}: {str(error)}"
-            logger.error(error_message)
-            raise DatabaseError(f"命令执行失败: {str(error)}") from error
+        with self._lock:
+            try:
+                return _execute_command()
+            except (OSError, DatabaseError) as error:
+                # 记录错误信息
+                self.pool_manager.record_connection_error(connection_name, error)
+                error_message = f"命令执行失败 {connection_name}: {str(error)}"
+                logger.error(error_message)
+                raise DatabaseError(f"命令执行失败: {str(error)}") from error
 
     def get_connection_info(self, name: str) -> Dict[str, Any]:
         """获取连接详细信息（包含统计信息）
@@ -843,7 +869,7 @@ class DatabaseManager:
             }
 
     def _diagnose_connection_test(
-        self, driver: SQLAlchemyDriver, diagnosis: Dict[str, Any]
+        self, driver: Any, diagnosis: Dict[str, Any]
     ) -> None:
         """诊断连接测试
 

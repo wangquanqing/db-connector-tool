@@ -419,9 +419,24 @@ class LogManager:
             >>> log_manager = LogManager("my_app")
             >>> logger = log_manager.setup(level="DEBUG", log_to_file=True)
         """
-        logger = setup_logging(self.app_name, **kwargs)
-        self.logger.info(f"LogManager为应用 '{self.app_name}' 配置了日志系统")
-        return logger
+        # 如果没有指定输出方式，默认启用控制台输出
+        if 'log_to_console' not in kwargs and 'log_to_file' not in kwargs:
+            kwargs['log_to_console'] = True
+        # 如果明确设置了两种输出都为False，不抛出异常
+        elif kwargs.get('log_to_console') is False and kwargs.get('log_to_file') is False:
+            # 创建一个基本的logger，不添加任何handler
+            logger = logging.getLogger(self.app_name)
+            logger.setLevel(_validate_log_level(kwargs.get('level', 'INFO')))
+            # 清除已有的handler
+            for handler in logger.handlers[:]:
+                logger.removeHandler(handler)
+                handler.close()
+            self.logger.info(f"LogManager为应用 '{self.app_name}' 创建了基本logger")
+            return logger
+        else:
+            logger = setup_logging(self.app_name, **kwargs)
+            self.logger.info(f"LogManager为应用 '{self.app_name}' 配置了日志系统")
+            return logger
 
     def add_file_handler(
         self,

@@ -224,25 +224,32 @@ class CryptoManager:
         # 标记清理状态
         self._cleaned = True
 
-        if hasattr(self, "password") and self.password:
-            # 使用固定字符覆盖密码字符串，确保长度一致
-            original_length = len(self.password)
-            self.password = "0" * original_length
-            # 再次覆盖，使用随机字符
-            self.password = secrets.token_hex(original_length)[:original_length]
+        # 清理密码
+        if hasattr(self, "password"):
+            if self.password:
+                # 使用固定字符覆盖密码字符串，确保长度一致
+                original_length = len(self.password)
+                self.password = "0" * original_length
+                # 再次覆盖，使用随机字符
+                self.password = secrets.token_hex(original_length)[:original_length]
             # 最终清零
             self.password = ""
-        if hasattr(self, "salt") and self.salt:
-            # 使用零字节覆盖盐值，确保长度一致
-            salt_length = len(self.salt)
-            self.salt = bytes(salt_length)
-            # 再次覆盖，使用随机字节
-            self.salt = secrets.token_bytes(salt_length)
+        
+        # 清理盐值
+        if hasattr(self, "salt"):
+            if self.salt:
+                # 使用零字节覆盖盐值，确保长度一致
+                salt_length = len(self.salt)
+                self.salt = bytes(salt_length)
+                # 再次覆盖，使用随机字节
+                self.salt = secrets.token_bytes(salt_length)
             # 最终清零
             self.salt = b""
+        
+        # 清除 Fernet 实例
         if hasattr(self, "fernet"):
-            # 清除 Fernet 实例
             self.fernet = None
+        
         logger.debug("敏感数据已安全清理")
 
     def _generate_secure_password(self, max_attempts: int = 10) -> str:
@@ -284,7 +291,7 @@ class CryptoManager:
         for attempt in range(max_attempts):
             # 方法1: 直接选择字符（更优的熵值）
             generated_password = "".join(
-                secrets.choice(character_set) for _ in range(24)
+                secrets.choice(character_set) for _ in range(self.DEFAULT_PASSWORD_LENGTH)
             )
 
             # 验证密码强度
@@ -294,7 +301,7 @@ class CryptoManager:
 
             # 方法2: 如果方法1失败，使用Base64后备方案
             if attempt == max_attempts // 2:  # 中途切换策略
-                random_bytes = secrets.token_bytes(24)
+                random_bytes = secrets.token_bytes(self.DEFAULT_PASSWORD_LENGTH)
                 generated_password = base64.urlsafe_b64encode(random_bytes).decode(
                     "utf-8"
                 )
@@ -326,7 +333,7 @@ class CryptoManager:
 
         # 生成剩余字符
         character_set = string.ascii_letters + string.digits + self.SPECIAL_CHARACTERS
-        remaining_length = 20  # 总长度24 - 4个强制字符
+        remaining_length = self.DEFAULT_PASSWORD_LENGTH - 4  # 总长度 - 4个强制字符
         remaining_characters = "".join(
             secrets.choice(character_set) for _ in range(remaining_length)
         )
@@ -393,10 +400,8 @@ class CryptoManager:
         estimated_iterations = int((target_time / elapsed_time) * test_iterations)
 
         # 确保迭代次数在合理范围内
-        min_iterations = 100000
-        max_iterations = 1000000
         adjusted_iterations = max(
-            min_iterations, min(estimated_iterations, max_iterations)
+            self.MIN_ITERATIONS, min(estimated_iterations, 1000000)
         )
 
         # 调整为 10000 的倍数，使数值更整洁
@@ -629,6 +634,11 @@ class CryptoManager:
             }
         """
 
+        # 检查加密管理器是否已被清理
+        if getattr(self, "_cleaned", False):
+            logger.warning("加密管理器已被清理，无法获取密钥信息")
+            raise CryptoError("加密管理器已被清理，无法获取密钥信息")
+
         return {
             "salt": base64.urlsafe_b64encode(self.salt).decode("utf-8"),
             "password": self.password,
@@ -670,6 +680,11 @@ class CryptoManager:
             bool: 如果加密解密过程正常返回 True，否则返回 False
         """
 
+        # 检查加密管理器是否已被清理
+        if getattr(self, "_cleaned", False):
+            logger.warning("加密管理器已被清理，无法执行验证操作")
+            return False
+
         try:
             encrypted = self.encrypt(test_data)
             decrypted = self.decrypt(encrypted)
@@ -709,6 +724,7 @@ class CryptoManager:
             self.salt = current_salt
             self.iterations = current_iterations
             self.fernet = self._create_fernet_instance()
+            self._cleaned = False  # 重置清理状态
 
             logger.info("密码更改成功")
         except Exception as error:
@@ -765,7 +781,13 @@ class CryptoManager:
 
         try:
             salt_bytes = base64.urlsafe_b64decode(salt.encode("utf-8"))
+            # 验证盐值长度
+            if len(salt_bytes) < cls.MIN_SALT_LENGTH:
+                raise CryptoError(f"盐值长度必须至少为 {cls.MIN_SALT_LENGTH} 字节")
             return cls(password, salt_bytes, iterations, skip_password_validation=True)
+        except (ValueError, base64.binascii.Error) as error:
+            logger.error("盐值格式无效: %s", str(error))
+            raise CryptoError(f"盐值格式无效: {str(error)}") from error
         except Exception as error:
             logger.error("从保存的密钥创建实例失败: %s", str(error))
             raise CryptoError(f"密钥恢复失败: {str(error)}") from error

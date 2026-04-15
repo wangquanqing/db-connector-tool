@@ -226,7 +226,7 @@ class BatchDatabaseManager:
 
     def __del__(self):
         """析构函数，确保资源清理"""
-        if not self._is_cleaned:
+        if hasattr(self, '_is_cleaned') and not self._is_cleaned:
             try:
                 self.cleanup()
             except Exception:

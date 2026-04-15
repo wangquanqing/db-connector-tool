@@ -52,7 +52,7 @@ class ConnectionPoolManager:
         Example:
             >>> pool_manager = ConnectionPoolManager()
         """
-        self.connection_pool: Dict[str, SQLAlchemyDriver] = {}
+        self.connection_pool: Dict[str, Any] = {}
         self._lock = threading.RLock()
         self._statistics = {
             "connections_created": 0,
@@ -218,7 +218,7 @@ class ConnectionPoolManager:
             return False
         return True
 
-    def _check_driver_basic_status(self, driver: SQLAlchemyDriver) -> bool:
+    def _check_driver_basic_status(self, driver: Any) -> bool:
         """检查驱动实例的基本状态
 
         检查数据库驱动实例的基本状态是否有效。
@@ -232,13 +232,15 @@ class ConnectionPoolManager:
         Example:
             >>> is_valid = pool_manager._check_driver_basic_status(driver)
         """
-        # 检查驱动实例是否有engine属性
-        if not hasattr(driver, "engine"):
-            logger.debug("驱动实例缺少engine属性")
-            return False
+        # 检查驱动实例是否有必要的属性和方法
+        required_attrs = ["connect", "disconnect", "test_connection"]
+        for attr in required_attrs:
+            if not hasattr(driver, attr):
+                logger.debug(f"驱动实例缺少{attr}属性或方法")
+                return False
 
-        # 检查engine是否存在
-        if not driver.engine:
+        # 检查驱动是否已连接（如果有engine属性）
+        if hasattr(driver, "engine") and not driver.engine:
             logger.debug("驱动实例标记为未连接状态")
             return False
 
@@ -265,16 +267,16 @@ class ConnectionPoolManager:
         except (OSError, DatabaseError) as error:
             logger.error("从连接池中移除连接 %s 时发生异常: %s", name, str(error))
 
-    def get_connection(self, name: str) -> Optional[SQLAlchemyDriver]:
+    def get_connection(self, name: str) -> Optional[Any]:
         """从连接池获取连接
 
-        从连接池获取指定名称的连接，如果连接无效则返回None。
+        从连接池获取指定名称的连接，如果连接无效则尝试重新连接。
 
         Args:
             name: 连接名称
 
         Returns:
-            Optional[SQLAlchemyDriver]: 数据库驱动实例，如果连接无效则返回None
+            Optional[Any]: 数据库驱动实例，如果连接无效则返回None
 
         Example:
             >>> driver = pool_manager.get_connection('mysql_db')
@@ -295,11 +297,28 @@ class ConnectionPoolManager:
                 logger.debug("使用缓存的数据库连接: %s", name)
                 return driver
 
-            # 连接无效，清理并返回None
+            # 连接无效，尝试重新连接
+            try:
+                logger.debug("连接 %s 无效，尝试重新连接", name)
+                driver.connect()
+                # 重新验证连接
+                if self._is_connection_valid(driver):
+                    # 更新使用时间
+                    if name in self._connection_metadata:
+                        self._connection_metadata[name]["last_used"] = time.time()
+                        self._connection_metadata[name]["use_count"] += 1
+                    logger.debug("连接 %s 重新连接成功", name)
+                    return driver
+                else:
+                    logger.warning("连接 %s 重新连接失败", name)
+            except Exception as e:
+                logger.error("连接 %s 重新连接时发生异常: %s", name, str(e))
+
+            # 重新连接失败，清理并返回None
             self._remove_connection_from_pool(name)
             return None
 
-    def _is_connection_valid(self, driver: SQLAlchemyDriver) -> bool:
+    def _is_connection_valid(self, driver: Any) -> bool:
         """检查连接是否有效
 
         检查数据库连接是否有效，包括基本状态检查和实际查询测试。
@@ -337,12 +356,13 @@ class ConnectionPoolManager:
         Example:
             >>> pool_manager.record_connection_error('mysql_db', error)
         """
-        if connection_name in self._connection_metadata:
-            self._connection_metadata[connection_name]["connection_errors"] += 1
-            self._connection_metadata[connection_name]["last_error"] = str(error)
-        self._statistics["connection_errors"] += 1
+        with self._lock:
+            if connection_name in self._connection_metadata:
+                self._connection_metadata[connection_name]["connection_errors"] += 1
+                self._connection_metadata[connection_name]["last_error"] = str(error)
+            self._statistics["connection_errors"] += 1
 
-    def add_connection(self, name: str, driver: SQLAlchemyDriver) -> None:
+    def add_connection(self, name: str, driver: Any) -> None:
         """添加连接到连接池
 
         将数据库驱动实例添加到连接池，并初始化元数据。
@@ -355,6 +375,17 @@ class ConnectionPoolManager:
             >>> pool_manager.add_connection('mysql_db', driver_instance)
         """
         with self._lock:
+            # 验证驱动实例是否有效
+            if not self._check_driver_basic_status(driver):
+                logger.error("无效的驱动实例，无法添加到连接池")
+                raise DatabaseError("无效的驱动实例")
+
+            # 验证连接是否已经存在
+            if name in self.connection_pool:
+                logger.warning("连接名称 %s 已存在，将覆盖原有连接", name)
+                # 先清理原有连接
+                self.remove_connection(name)
+
             self.connection_pool[name] = driver
 
             self._connection_metadata[name] = {
@@ -384,11 +415,12 @@ class ConnectionPoolManager:
         Example:
             >>> pool_manager.update_query_metadata('mysql_db', 0.1)
         """
-        if connection_name in self._connection_metadata:
-            self._connection_metadata[connection_name]["last_used"] = time.time()
-            self._connection_metadata[connection_name]["last_query_time"] = time.time()
-            self._connection_metadata[connection_name]["response_time"] = response_time
-            self._connection_metadata[connection_name]["query_count"] += 1
+        with self._lock:
+            if connection_name in self._connection_metadata:
+                self._connection_metadata[connection_name]["last_used"] = time.time()
+                self._connection_metadata[connection_name]["last_query_time"] = time.time()
+                self._connection_metadata[connection_name]["response_time"] = response_time
+                self._connection_metadata[connection_name]["query_count"] += 1
 
     def update_command_metadata(
         self, connection_name: str, response_time: float
@@ -404,11 +436,12 @@ class ConnectionPoolManager:
         Example:
             >>> pool_manager.update_command_metadata('mysql_db', 0.1)
         """
-        if connection_name in self._connection_metadata:
-            self._connection_metadata[connection_name]["last_used"] = time.time()
-            self._connection_metadata[connection_name]["last_query_time"] = time.time()
-            self._connection_metadata[connection_name]["response_time"] = response_time
-            self._connection_metadata[connection_name]["transaction_count"] += 1
+        with self._lock:
+            if connection_name in self._connection_metadata:
+                self._connection_metadata[connection_name]["last_used"] = time.time()
+                self._connection_metadata[connection_name]["last_query_time"] = time.time()
+                self._connection_metadata[connection_name]["response_time"] = response_time
+                self._connection_metadata[connection_name]["transaction_count"] += 1
 
     def get_connection_info(self, name: str) -> Dict[str, Any]:
         """获取连接详细信息（包含统计信息）
@@ -513,7 +546,8 @@ class ConnectionPoolManager:
                 continue
 
             if name in self._connection_metadata:
-                idle_time = current_time - self._connection_metadata[name]["last_used"]
+                last_used = self._connection_metadata[name].get("last_used", current_time)
+                idle_time = current_time - last_used
             else:
                 # 如果没有元数据，使用当前时间作为默认值
                 idle_time = 0
