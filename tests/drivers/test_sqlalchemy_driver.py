@@ -407,6 +407,261 @@ class TestSQLAlchemyDriver(unittest.TestCase):
             result = driver.test_connection()
             self.assertFalse(result)
 
+    def test_test_connection_os_error(self) -> None:
+        """测试连接测试时的OS错误"""
+        driver = SQLAlchemyDriver(self.base_config)
+        driver.engine = MagicMock()
+        with patch.object(driver, "_perform_connection_test", side_effect=OSError("网络错误")):
+            result = driver.test_connection()
+            self.assertFalse(result)
+
+    def test_test_connection_value_error(self) -> None:
+        """测试连接测试时的值错误"""
+        driver = SQLAlchemyDriver(self.base_config)
+        driver.engine = MagicMock()
+        with patch.object(driver, "_perform_connection_test", side_effect=ValueError("配置错误")):
+            result = driver.test_connection()
+            self.assertFalse(result)
+
+    def test_test_connection_attribute_error(self) -> None:
+        """测试连接测试时的属性错误"""
+        driver = SQLAlchemyDriver(self.base_config)
+        driver.engine = MagicMock()
+        with patch.object(driver, "_perform_connection_test", side_effect=AttributeError("属性错误")):
+            result = driver.test_connection()
+            self.assertFalse(result)
+
+    def test_test_connection_type_error(self) -> None:
+        """测试连接测试时的类型错误"""
+        driver = SQLAlchemyDriver(self.base_config)
+        driver.engine = MagicMock()
+        with patch.object(driver, "_perform_connection_test", side_effect=TypeError("类型错误")):
+            result = driver.test_connection()
+            self.assertFalse(result)
+
+    def test_connect_with_existing_engine(self) -> None:
+        """测试连接时引擎已存在的情况"""
+        driver = SQLAlchemyDriver(self.base_config)
+        driver.engine = MagicMock()
+        with patch.object(driver, "disconnect") as mock_disconnect:
+            with patch("src.db_connector_tool.drivers.sqlalchemy_driver.create_engine") as mock_create_engine:
+                mock_create_engine.return_value = MagicMock()
+                driver.connect()
+                mock_disconnect.assert_called_once()
+
+    def test_connect_sqlite(self) -> None:
+        """测试SQLite连接池配置"""
+        sqlite_config = {
+            "type": "sqlite",
+            "database": ":memory:",
+        }
+        driver = SQLAlchemyDriver(sqlite_config)
+        with patch("src.db_connector_tool.drivers.sqlalchemy_driver.create_engine") as mock_create_engine:
+            mock_create_engine.return_value = MagicMock()
+            driver.connect()
+            # 验证调用参数中包含SQLite特定配置
+            args, kwargs = mock_create_engine.call_args
+            self.assertIn("pool_size", kwargs)
+            self.assertNotIn("max_overflow", kwargs)
+
+    def test_connect_mysql(self) -> None:
+        """测试MySQL连接池配置"""
+        mysql_config = {
+            "type": "mysql",
+            "host": "localhost",
+            "port": 3306,
+            "username": "root",
+            "password": "password",
+            "database": "test_db",
+        }
+        driver = SQLAlchemyDriver(mysql_config)
+        with patch("src.db_connector_tool.drivers.sqlalchemy_driver.create_engine") as mock_create_engine:
+            mock_create_engine.return_value = MagicMock()
+            driver.connect()
+            args, kwargs = mock_create_engine.call_args
+            self.assertEqual(kwargs["pool_recycle"], 280)
+
+    def test_connect_postgresql(self) -> None:
+        """测试PostgreSQL连接池配置"""
+        pg_config = {
+            "type": "postgresql",
+            "host": "localhost",
+            "port": 5432,
+            "username": "postgres",
+            "password": "password",
+            "database": "test_db",
+        }
+        driver = SQLAlchemyDriver(pg_config)
+        with patch("src.db_connector_tool.drivers.sqlalchemy_driver.create_engine") as mock_create_engine:
+            mock_create_engine.return_value = MagicMock()
+            driver.connect()
+            args, kwargs = mock_create_engine.call_args
+            self.assertEqual(kwargs["pool_recycle"], 3600)
+
+    def test_connect_oracle(self) -> None:
+        """测试Oracle连接池配置"""
+        oracle_config = {
+            "type": "oracle",
+            "host": "localhost",
+            "port": 1521,
+            "username": "system",
+            "password": "password",
+            "service_name": "ORCL",
+        }
+        driver = SQLAlchemyDriver(oracle_config)
+        with patch("src.db_connector_tool.drivers.sqlalchemy_driver.create_engine") as mock_create_engine:
+            mock_create_engine.return_value = MagicMock()
+            driver.connect()
+            args, kwargs = mock_create_engine.call_args
+            self.assertEqual(kwargs["pool_recycle"], 1800)
+
+    def test_connect_sqlserver(self) -> None:
+        """测试SQL Server连接池配置"""
+        sqlserver_config = {
+            "type": "sqlserver",
+            "host": "localhost",
+            "port": 1433,
+            "username": "sa",
+            "password": "password",
+            "database": "test_db",
+        }
+        driver = SQLAlchemyDriver(sqlserver_config)
+        with patch("src.db_connector_tool.drivers.sqlalchemy_driver.create_engine") as mock_create_engine:
+            mock_create_engine.return_value = MagicMock()
+            driver.connect()
+            args, kwargs = mock_create_engine.call_args
+            self.assertEqual(kwargs["pool_recycle"], 3600)
+
+    def test_connect_with_user_pool_config(self) -> None:
+        """测试使用用户自定义连接池配置"""
+        config_with_pool = {
+            "type": "mysql",
+            "host": "localhost",
+            "port": 3306,
+            "username": "root",
+            "password": "password",
+            "database": "test_db",
+            "pool_config": {"pool_size": 10, "max_overflow": 20},
+        }
+        driver = SQLAlchemyDriver(config_with_pool)
+        with patch("src.db_connector_tool.drivers.sqlalchemy_driver.create_engine") as mock_create_engine:
+            mock_create_engine.return_value = MagicMock()
+            driver.connect()
+            args, kwargs = mock_create_engine.call_args
+            self.assertEqual(kwargs["pool_size"], 10)
+            self.assertEqual(kwargs["max_overflow"], 20)
+
+    def test_connect_sqlalchemy_error(self) -> None:
+        """测试连接时的SQLAlchemy错误"""
+        driver = SQLAlchemyDriver(self.base_config)
+        from sqlalchemy.exc import SQLAlchemyError
+        with patch("src.db_connector_tool.drivers.sqlalchemy_driver.create_engine", side_effect=SQLAlchemyError("连接错误")):
+            from src.db_connector_tool.core.exceptions import DBConnectionError
+            with self.assertRaises(DBConnectionError):
+                driver.connect()
+
+    def test_connect_generic_error(self) -> None:
+        """测试连接时的通用错误"""
+        driver = SQLAlchemyDriver(self.base_config)
+        with patch("src.db_connector_tool.drivers.sqlalchemy_driver.create_engine", side_effect=Exception("未知错误")):
+            from src.db_connector_tool.core.exceptions import DBConnectionError
+            with self.assertRaises(DBConnectionError):
+                driver.connect()
+
+    def test_disconnect_with_sqlalchemy_error(self) -> None:
+        """测试断开连接时的SQLAlchemy错误"""
+        driver = SQLAlchemyDriver(self.base_config)
+        driver.engine = MagicMock()
+        driver.session = MagicMock()
+        from sqlalchemy.exc import SQLAlchemyError
+        driver.engine.dispose.side_effect = SQLAlchemyError("断开错误")
+        # 应该不会抛出异常
+        driver.disconnect()
+
+    def test_disconnect_with_generic_error(self) -> None:
+        """测试断开连接时的通用错误"""
+        driver = SQLAlchemyDriver(self.base_config)
+        driver.engine = MagicMock()
+        driver.session = MagicMock()
+        driver.engine.dispose.side_effect = Exception("未知错误")
+        # 应该会抛出异常
+        with self.assertRaises(Exception):
+            driver.disconnect()
+
+    def test_execute_sql_value_error(self) -> None:
+        """测试执行SQL时的值错误"""
+        driver = SQLAlchemyDriver(self.base_config)
+        driver.engine = MagicMock()
+        mock_connection = MagicMock()
+        mock_connection.execute.side_effect = ValueError("验证错误")
+        driver.engine.connect.return_value.__enter__.return_value = mock_connection
+        from src.db_connector_tool.core.exceptions import QueryError
+        with self.assertRaises(QueryError):
+            driver._execute_sql("SELECT * FROM users")
+
+    def test_execute_sql_generic_error(self) -> None:
+        """测试执行SQL时的通用错误"""
+        driver = SQLAlchemyDriver(self.base_config)
+        driver.engine = MagicMock()
+        mock_connection = MagicMock()
+        mock_connection.execute.side_effect = Exception("未知错误")
+        driver.engine.connect.return_value.__enter__.return_value = mock_connection
+        from src.db_connector_tool.core.exceptions import QueryError
+        with self.assertRaises(QueryError):
+            driver._execute_sql("SELECT * FROM users")
+
+    def test_validate_sql_query_too_long(self) -> None:
+        """测试验证过长的SQL查询"""
+        driver = SQLAlchemyDriver(self.base_config)
+        long_query = "SELECT * FROM users WHERE " + "a = 1 AND " * 1000
+        with self.assertRaises(ValueError):
+            driver._validate_sql_query(long_query)
+
+    def test_validate_sql_query_safe_ddl(self) -> None:
+        """测试验证安全的DDL查询"""
+        driver = SQLAlchemyDriver(self.base_config)
+        # 这些应该不会抛出异常
+        driver._validate_sql_query("CREATE TABLE users (id INT)")
+        driver._validate_sql_query("ALTER TABLE users ADD COLUMN name VARCHAR(100)")
+        driver._validate_sql_query("CREATE INDEX idx_name ON users(name)")
+        driver._validate_sql_query("CREATE VIEW user_view AS SELECT * FROM users")
+        driver._validate_sql_query("CREATE PROCEDURE get_user() BEGIN SELECT * FROM users; END")
+        driver._validate_sql_query("CREATE FUNCTION get_id() RETURNS INT BEGIN RETURN 1; END")
+        driver._validate_sql_query("CREATE TRIGGER user_trigger AFTER INSERT ON users BEGIN END")
+
+    def test_validate_sql_query_suspicious_comment(self) -> None:
+        """测试验证包含可疑注释的查询"""
+        driver = SQLAlchemyDriver(self.base_config)
+        with self.assertRaises(ValueError):
+            driver._validate_sql_query("SELECT * FROM users WHERE id = 1' --")
+        with self.assertRaises(ValueError):
+            driver._validate_sql_query("SELECT * FROM users /*!50000 SELECT */")
+        with self.assertRaises(ValueError):
+            driver._validate_sql_query("SELECT * FROM users; /* comment */ SELECT * FROM orders")
+
+    def test_context_manager(self) -> None:
+        """测试上下文管理器"""
+        driver = SQLAlchemyDriver(self.base_config)
+        with patch.object(driver, "connect") as mock_connect:
+            with patch.object(driver, "disconnect") as mock_disconnect:
+                with driver:
+                    pass
+                mock_connect.assert_called_once()
+                mock_disconnect.assert_called_once()
+
+    def test_context_manager_with_exception(self) -> None:
+        """测试上下文管理器在异常情况下的行为"""
+        driver = SQLAlchemyDriver(self.base_config)
+        with patch.object(driver, "connect") as mock_connect:
+            with patch.object(driver, "disconnect") as mock_disconnect:
+                try:
+                    with driver:
+                        raise Exception("测试异常")
+                except Exception:
+                    pass
+                mock_connect.assert_called_once()
+                mock_disconnect.assert_called_once()
+
 
 class TestSQLAlchemyDriverAdvanced(unittest.TestCase):
     """测试 SQLAlchemyDriver 的高级功能"""

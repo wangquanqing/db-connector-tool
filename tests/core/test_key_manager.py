@@ -1,6 +1,7 @@
 import os
 import tempfile
 import unittest
+import json
 from unittest import mock
 from pathlib import Path
 
@@ -276,6 +277,305 @@ class TestKeyManager(unittest.TestCase):
         key_manager = KeyManager(self.app_name)
         key_manager.load_or_create_key()
         self.assertIsInstance(key_manager.crypto, CryptoManager)
+        key_manager.close()
+
+    def test_load_or_create_key_from_keyring(self) -> None:
+        """测试从keyring加载或创建密钥"""
+        # 创建mock keyring模块
+        mock_keyring = mock.Mock()
+        crypto = CryptoManager()
+        key_data = crypto.get_key_info()
+        crypto.close()
+        
+        with mock.patch("src.db_connector_tool.core.key_manager.keyring_available", True):
+            with mock.patch("src.db_connector_tool.core.key_manager.keyring_module", mock_keyring):
+                # 测试从keyring创建新密钥（没有现有密钥）
+                mock_keyring.get_password.return_value = None
+                key_manager = KeyManager(self.app_name)
+                key_manager._load_or_create_key_from_keyring()
+                self.assertIsInstance(key_manager.crypto, CryptoManager)
+                mock_keyring.set_password.assert_called_once()
+                key_manager.close()
+                
+                # 测试从keyring加载现有密钥
+                mock_keyring.get_password.reset_mock()
+                mock_keyring.set_password.reset_mock()
+                mock_keyring.get_password.return_value = json.dumps(key_data)
+                key_manager2 = KeyManager(self.app_name)
+                key_manager2._load_or_create_key_from_keyring()
+                self.assertIsInstance(key_manager2.crypto, CryptoManager)
+                mock_keyring.get_password.assert_called_once()
+                mock_keyring.set_password.assert_not_called()
+                key_manager2.close()
+
+    def test_load_or_create_key_env_config_error(self) -> None:
+        """测试环境变量密钥加载ConfigError的情况"""
+        # 创建有效的密钥数据但模拟ConfigError
+        crypto = CryptoManager()
+        key_data = crypto.get_key_info()
+        crypto.close()
+        
+        os.environ["DB_CONNECTOR_TOOL_ENCRYPTION_KEY"] = json.dumps(key_data)
+        # 重置依赖检查状态
+        KeyManager._dependencies_checked = False
+        KeyManager._env_key = None
+        KeyManager._env_key_available = None
+        
+        with mock.patch("src.db_connector_tool.core.key_manager.KeyManager._check_dependencies"):
+            KeyManager._env_key = os.environ["DB_CONNECTOR_TOOL_ENCRYPTION_KEY"]
+            KeyManager._env_key_available = True
+            with mock.patch("src.db_connector_tool.core.key_manager.keyring_available", False):
+                with mock.patch("src.db_connector_tool.core.key_manager.CryptoManager.from_saved_key", 
+                               side_effect=ConfigError("Invalid key")):
+                    key_manager = KeyManager(self.app_name)
+                    key_manager.load_or_create_key()
+                    self.assertIsInstance(key_manager.crypto, CryptoManager)
+                    key_manager.close()
+
+    def test_set_windows_permissions(self) -> None:
+        """测试Windows权限设置"""
+        key_manager = KeyManager(self.app_name)
+        test_file = Path(self.temp_dir.name) / "test_perm.txt"
+        test_file.write_text("test")
+        
+        with mock.patch("src.db_connector_tool.core.key_manager.platform.system") as mock_platform:
+            mock_platform.return_value = "Windows"
+            with mock.patch("src.db_connector_tool.core.key_manager.getpass.getuser") as mock_getuser:
+                mock_getuser.return_value = "test_user"
+                with mock.patch("src.db_connector_tool.core.key_manager.subprocess.run") as mock_subprocess:
+                    # 测试成功情况
+                    mock_subprocess.return_value = mock.Mock(returncode=0)
+                    key_manager._set_windows_permissions(test_file)
+                    mock_subprocess.assert_called_once()
+                    
+                    # 测试失败情况
+                    mock_subprocess.reset_mock()
+                    mock_subprocess.return_value = mock.Mock(returncode=1, stderr="error")
+                    key_manager._set_windows_permissions(test_file)
+                    mock_subprocess.assert_called_once()
+        
+        key_manager.close()
+
+    def test_set_secure_file_permissions_failure(self) -> None:
+        """测试设置文件权限失败的情况"""
+        key_manager = KeyManager(self.app_name)
+        test_file = Path(self.temp_dir.name) / "test_perm_fail.txt"
+        test_file.write_text("test")
+        
+        with mock.patch("src.db_connector_tool.core.key_manager.platform.system") as mock_platform:
+            mock_platform.return_value = "Linux"
+            with mock.patch("src.db_connector_tool.core.key_manager.KeyManager._set_unix_permissions", 
+                           side_effect=OSError("Permission denied")):
+                key_manager._set_secure_file_permissions(test_file)
+        
+        key_manager.close()
+
+    def test_handle_crypto_error_delete_failure(self) -> None:
+        """测试处理加密错误时删除文件失败的情况"""
+        key_manager = KeyManager(self.app_name)
+        key_file = key_manager.config_dir / "encryption.key"
+        key_file.parent.mkdir(parents=True, exist_ok=True)
+        key_file.write_text("invalid")
+        
+        with mock.patch("src.db_connector_tool.core.key_manager.Path.unlink", 
+                       side_effect=OSError("Delete failed")):
+            with self.assertRaises(ConfigError):
+                key_manager._handle_crypto_error(key_file, CryptoError("Decryption failed"))
+        
+        key_manager.close()
+
+    def test_save_new_key_secure_keyring(self) -> None:
+        """测试使用keyring安全保存新密钥"""
+        key_manager = KeyManager(self.app_name)
+        key_data = {"password": "test", "salt": "test_salt"}
+        
+        mock_keyring = mock.Mock()
+        with mock.patch("src.db_connector_tool.core.key_manager.keyring_available", True):
+            with mock.patch("src.db_connector_tool.core.key_manager.keyring_module", mock_keyring):
+                key_manager._save_new_key_secure(key_data)
+                mock_keyring.set_password.assert_called_once()
+        
+        key_manager.close()
+
+    def test_save_new_key_secure_env_available(self) -> None:
+        """测试环境变量可用时保存新密钥"""
+        key_manager = KeyManager(self.app_name)
+        key_data = {"password": "test", "salt": "test_salt"}
+        
+        with mock.patch("src.db_connector_tool.core.key_manager.keyring_available", False):
+            with mock.patch("src.db_connector_tool.core.key_manager.KeyManager._env_key_available", True):
+                key_manager._save_new_key_secure(key_data)
+        
+        key_file = key_manager.config_dir / "encryption.key"
+        self.assertTrue(key_file.exists())
+        key_manager.close()
+
+    def test_check_dependencies_invalid_env_key_format(self) -> None:
+        """测试依赖检查时环境变量密钥格式无效的情况"""
+        KeyManager._dependencies_checked = False
+        KeyManager._env_key = None
+        KeyManager._env_key_available = None
+        
+        # 测试缺少password或salt的情况
+        os.environ["DB_CONNECTOR_TOOL_ENCRYPTION_KEY"] = json.dumps({"only_password": "test"})
+        KeyManager._check_dependencies()
+        self.assertFalse(KeyManager._env_key_available)
+        
+        # 重置
+        KeyManager._dependencies_checked = False
+        KeyManager._env_key = None
+        KeyManager._env_key_available = None
+        
+        # 测试无效JSON的情况
+        os.environ["DB_CONNECTOR_TOOL_ENCRYPTION_KEY"] = "not json"
+        KeyManager._check_dependencies()
+        self.assertFalse(KeyManager._env_key_available)
+        
+        # 清理
+        del os.environ["DB_CONNECTOR_TOOL_ENCRYPTION_KEY"]
+
+    def test_load_existing_key_crypto_error(self) -> None:
+        """测试加载现有密钥时发生CryptoError的情况"""
+        key_manager = KeyManager(self.app_name)
+        key_file = key_manager.config_dir / "encryption.key"
+        key_file.parent.mkdir(parents=True, exist_ok=True)
+        
+        crypto = CryptoManager()
+        key_data = crypto.get_key_info()
+        crypto.close()
+        
+        import tomli_w
+        key_file.write_bytes(tomli_w.dumps(key_data).encode("utf-8"))
+        
+        with mock.patch("src.db_connector_tool.core.key_manager.CryptoManager.from_saved_key", 
+                       side_effect=CryptoError("Decryption failed")):
+            with mock.patch("src.db_connector_tool.core.key_manager.KeyManager._handle_crypto_error") as mock_handle:
+                key_manager._load_existing_key(key_file)
+                mock_handle.assert_called_once()
+        
+        key_manager.close()
+
+    def test_load_crypto_from_invalid_key_data(self) -> None:
+        """测试加载无效的密钥数据"""
+        key_manager = KeyManager(self.app_name)
+        
+        with self.assertRaises(ConfigError):
+            key_manager._load_crypto_from_key_data({"invalid": "data"})
+        
+        key_manager.close()
+
+    def test_handle_config_operation_exceptions(self) -> None:
+        """测试handle_config_operation装饰器的各种异常处理"""
+        key_manager = KeyManager(self.app_name)
+        
+        @KeyManager.handle_config_operation("test_operation")
+        def raise_os_error(self):
+            raise OSError("OS error")
+        
+        @KeyManager.handle_config_operation("test_operation")
+        def raise_json_error(self):
+            raise json.JSONDecodeError("Invalid JSON", "", 0)
+        
+        @KeyManager.handle_config_operation("test_operation")
+        def raise_type_error(self):
+            raise TypeError("Type error")
+        
+        @KeyManager.handle_config_operation("test_operation")
+        def raise_value_error(self):
+            raise ValueError("Value error")
+        
+        @KeyManager.handle_config_operation("test_operation")
+        def raise_attribute_error(self):
+            raise AttributeError("Attribute error")
+        
+        @KeyManager.handle_config_operation("test_operation")
+        def raise_runtime_error(self):
+            raise RuntimeError("Runtime error")
+        
+        @KeyManager.handle_config_operation("test_operation")
+        def raise_memory_error(self):
+            raise MemoryError("Memory error")
+        
+        @KeyManager.handle_config_operation("test_operation")
+        def raise_generic_error(self):
+            raise Exception("Generic error")
+        
+        with self.assertRaises(ConfigError):
+            raise_os_error(key_manager)
+        
+        with self.assertRaises(ConfigError):
+            raise_json_error(key_manager)
+        
+        with self.assertRaises(ConfigError):
+            raise_type_error(key_manager)
+        
+        with self.assertRaises(ConfigError):
+            raise_value_error(key_manager)
+        
+        with self.assertRaises(ConfigError):
+            raise_attribute_error(key_manager)
+        
+        with self.assertRaises(ConfigError):
+            raise_runtime_error(key_manager)
+        
+        with self.assertRaises(ConfigError):
+            raise_memory_error(key_manager)
+        
+        with self.assertRaises(ConfigError):
+            raise_generic_error(key_manager)
+        
+        key_manager.close()
+
+    def test_keyring_module_available(self) -> None:
+        """测试keyring模块可用的情况"""
+        # 这个测试主要是为了覆盖导入keyring的代码
+        import src.db_connector_tool.core.key_manager as km
+        # 只是确认模块导入正常
+        self.assertTrue(hasattr(km, 'keyring_available'))
+
+    def test_ensure_dependencies_checked_locks(self) -> None:
+        """测试依赖检查的锁机制"""
+        KeyManager._dependencies_checked = False
+        KeyManager._dependency_check_lock = None
+        
+        key_manager1 = KeyManager(self.app_name)
+        key_manager1._ensure_dependencies_checked()
+        
+        # 再次调用应该不会重新检查
+        KeyManager._dependencies_checked = False
+        key_manager2 = KeyManager(self.app_name)
+        key_manager2._ensure_dependencies_checked()
+        
+        key_manager1.close()
+        key_manager2.close()
+
+    def test_load_existing_key_file_exception(self) -> None:
+        """测试加载现有密钥文件时发生异常的情况"""
+        key_manager = KeyManager(self.app_name)
+        key_file = key_manager.config_dir / "encryption.key"
+        key_file.parent.mkdir(parents=True, exist_ok=True)
+        key_file.write_text("invalid content")
+        
+        with mock.patch("src.db_connector_tool.core.key_manager.tomllib.load", 
+                       side_effect=Exception("Load failed")):
+            with mock.patch("src.db_connector_tool.core.key_manager.KeyManager._create_new_key") as mock_create:
+                key_manager._load_or_create_key_from_file()
+                mock_create.assert_called_once()
+        
+        key_manager.close()
+
+    def test_set_secure_file_permissions_windows(self) -> None:
+        """测试Windows系统下设置文件权限（通过_set_secure_file_permissions）"""
+        key_manager = KeyManager(self.app_name)
+        test_file = Path(self.temp_dir.name) / "test_win_perm.txt"
+        test_file.write_text("test")
+        
+        with mock.patch("src.db_connector_tool.core.key_manager.platform.system") as mock_platform:
+            mock_platform.return_value = "Windows"
+            with mock.patch("src.db_connector_tool.core.key_manager.KeyManager._set_windows_permissions") as mock_set_win:
+                key_manager._set_secure_file_permissions(test_file)
+                mock_set_win.assert_called_once()
+        
         key_manager.close()
 
 

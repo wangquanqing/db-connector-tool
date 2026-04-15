@@ -3,6 +3,8 @@
 测试 GBase 8s JDBC 驱动的功能。
 """
 
+import os
+import warnings
 from unittest import TestCase, mock
 
 from db_connector_tool.drivers.gbase8s_jdbc import (
@@ -13,63 +15,80 @@ from db_connector_tool.drivers.gbase8s_jdbc import (
 class TestGBase8sCursor(TestCase):
     """测试 GBase 8s 游标类"""
 
+    def test_init(self):
+        """测试游标初始化"""
+        mock_connection = mock.Mock()
+        mock_converters = {}
+        with mock.patch('jaydebeapi.Cursor.__init__', return_value=None):
+            cursor = GBase8sCursor(mock_connection, mock_converters)
+            self.assertIsNotNone(cursor)
+
     def test_unknown_sql_type_converter(self):
         """测试未知 SQL 类型转换器"""
-        # 创建模拟的 result_set
         mock_result_set = mock.Mock()
         mock_result_set.getObject.return_value = "test_value"
 
-        # 创建游标实例
         mock_connection = mock.Mock()
         mock_converters = {}
-        cursor = GBase8sCursor(mock_connection, mock_converters)
+        with mock.patch('jaydebeapi.Cursor.__init__', return_value=None):
+            cursor = GBase8sCursor(mock_connection, mock_converters)
 
-        # 测试普通类型
         result = cursor._unknownSqlTypeConverter(mock_result_set, 1)
         self.assertEqual(result, "test_value")
 
-        # 测试 GBaseClob2 类型
+    def test_unknown_sql_type_converter_gbaseclob2(self):
+        """测试 GBaseClob2 类型转换器"""
+        mock_connection = mock.Mock()
+        mock_converters = {}
+        with mock.patch('jaydebeapi.Cursor.__init__', return_value=None):
+            cursor = GBase8sCursor(mock_connection, mock_converters)
+
+        class MockReader:
+            def __init__(self):
+                self.chars = [ord('t'), ord('e'), ord('s'), ord('t'), ord(' '), ord('c'), ord('l'), ord('o'), ord('b'), -1]
+                self.index = 0
+            def read(self):
+                if self.index < len(self.chars):
+                    char = self.chars[self.index]
+                    self.index += 1
+                    return char
+                return -1
+
         class MockGBaseClob2:
             def getCharacterStream(self):
-                class MockReader:
-                    def __init__(self):
-                        self.chars = [ord('t'), ord('e'), ord('s'), ord('t'), ord(' '), ord('c'), ord('l'), ord('o'), ord('b'), -1]
-                        self.index = 0
-                    def read(self):
-                        if self.index < len(self.chars):
-                            char = self.chars[self.index]
-                            self.index += 1
-                            return char
-                        return -1
                 return MockReader()
+            def __repr__(self):
+                return "<java class 'com.gbasedbt.jdbc.GBaseClob2'>"
 
-        # 直接修改 cursor 的方法来模拟 GBaseClob2 类型检查
-        original_method = cursor._unknownSqlTypeConverter
-        def mock_method(result_set, column_index):
-            value = result_set.getObject(column_index)
-            # 直接返回 "test clob" 模拟 GBaseClob2 类型的处理
-            return "test clob"
+        mock_value = MockGBaseClob2()
         
-        cursor._unknownSqlTypeConverter = mock_method
-        result = cursor._unknownSqlTypeConverter(mock_result_set, 1)
-        self.assertEqual(result, "test clob")
-        # 恢复原始方法
-        cursor._unknownSqlTypeConverter = original_method
+        result_set = mock.Mock()
+        result_set.getObject.return_value = mock_value
+
+        with mock.patch('db_connector_tool.drivers.gbase8s_jdbc.str', return_value="<java class 'com.gbasedbt.jdbc.GBaseClob2'>"):
+            result = cursor._unknownSqlTypeConverter(result_set, 1)
+            self.assertEqual(result, "test clob")
 
 
 class TestObTimestamp(TestCase):
     """测试 GBase 8s 时间戳类型装饰器"""
 
-    def test_process_bind_param(self):
-        """测试绑定参数处理"""
-        from datetime import datetime
+    def test_process_bind_param_none(self):
+        """测试 None 值的绑定参数处理"""
         timestamp = ObTimestamp()
-
-        # 测试 None 值
         result = timestamp.process_bind_param(None, None)
         self.assertIsNone(result)
 
-        # 测试 datetime 对象（需要 mock jpype）
+    def test_process_bind_param_non_datetime(self):
+        """测试非 datetime 类型的绑定参数处理"""
+        timestamp = ObTimestamp()
+        result = timestamp.process_bind_param("not a datetime", None)
+        self.assertEqual(result, "not a datetime")
+
+    def test_process_bind_param_datetime(self):
+        """测试 datetime 对象的绑定参数处理"""
+        from datetime import datetime
+        timestamp = ObTimestamp()
         test_datetime = datetime(2024, 1, 1, 12, 0, 0)
         with mock.patch('jpype.JClass') as mock_jclass:
             mock_timestamp_class = mock.Mock()
@@ -83,11 +102,9 @@ class TestObTimestamp(TestCase):
         from datetime import datetime
         timestamp = ObTimestamp()
 
-        # 测试 None 值
         result = timestamp.process_result_value(None, None)
         self.assertIsNone(result)
 
-        # 测试字符串值
         test_str = "2024-01-01 12:00:00"
         result = timestamp.process_result_value(test_str, None)
         self.assertIsInstance(result, datetime)
@@ -96,14 +113,22 @@ class TestObTimestamp(TestCase):
 class TestGBase8sJDBCDialect(TestCase):
     """测试 GBase 8s JDBC 方言"""
 
+    def test_initialize(self):
+        """测试 initialize 方法"""
+        dialect = GBase8sJDBCDialect()
+        dialect.initialize(mock.Mock())
+
     def test_dbapi(self):
         """测试 dbapi 方法"""
-        # 测试 jaydebeapi 模块是否可用
+        dialect = GBase8sJDBCDialect()
+        import jaydebeapi
+        original_cursor = jaydebeapi.Cursor
         try:
-            import jaydebeapi
-            self.assertIsNotNone(jaydebeapi)
-        except ImportError:
-            self.skipTest("jaydebeapi 模块不可用")
+            result = GBase8sJDBCDialect.dbapi()
+            self.assertIsNotNone(result)
+            self.assertEqual(jaydebeapi.Cursor, GBase8sCursor)
+        finally:
+            jaydebeapi.Cursor = original_cursor
 
     def test_import_dbapi(self):
         """测试 import_dbapi 方法"""
@@ -114,7 +139,6 @@ class TestGBase8sJDBCDialect(TestCase):
     def test_do_rollback(self):
         """测试 do_rollback 方法"""
         dialect = GBase8sJDBCDialect()
-        # 方法应该不抛出异常
         dialect.do_rollback(mock.Mock())
 
     def test_is_oracle_8(self):
@@ -136,7 +160,6 @@ class TestGBase8sJDBCDialect(TestCase):
         result = dialect.get_default_schema_name(mock_connection)
         self.assertEqual(result, "TEST_USER")
 
-        # 测试没有用户名的情况
         mock_connection.engine.url.username = None
         result = dialect.get_default_schema_name(mock_connection)
         self.assertIsNone(result)
@@ -151,25 +174,98 @@ class TestGBase8sJDBCDialect(TestCase):
             self.assertEqual(result, "TEST_USER")
             mock_get.assert_called_once_with(mock_connection)
 
-    def test_get_server_version_info(self):
-        """测试 _get_server_version_info 方法"""
+    def test_get_server_version_info_success(self):
+        """测试成功获取服务器版本信息"""
+        from sqlalchemy import exc
         dialect = GBase8sJDBCDialect()
         mock_connection = mock.Mock()
 
-        # 测试成功获取版本
         mock_result = mock.Mock()
         mock_result.scalar.return_value = "GBase8sV8.6.2_2.0"
         mock_connection.execute.return_value = mock_result
         result = dialect._get_server_version_info(mock_connection)
         self.assertEqual(result, (8, 6, 2))
 
-        # 测试简单版本格式
+    def test_get_server_version_info_simple(self):
+        """测试简单版本格式"""
+        dialect = GBase8sJDBCDialect()
+        mock_connection = mock.Mock()
+
+        mock_result = mock.Mock()
         mock_result.scalar.return_value = "GBase8s 8.6"
+        mock_connection.execute.return_value = mock_result
         result = dialect._get_server_version_info(mock_connection)
         self.assertEqual(result, (8, 6))
 
-        # 测试查询失败
+    def test_get_server_version_info_no_match(self):
+        """测试无法匹配版本格式"""
+        dialect = GBase8sJDBCDialect()
+        mock_connection = mock.Mock()
+
+        mock_result = mock.Mock()
+        mock_result.scalar.return_value = "Unknown version string"
+        mock_connection.execute.return_value = mock_result
+        result = dialect._get_server_version_info(mock_connection)
+        self.assertIsNone(result)
+
+    def test_get_server_version_info_dbapi_error(self):
+        """测试 DBAPIError 异常"""
+        from sqlalchemy import exc
+        dialect = GBase8sJDBCDialect()
+        mock_connection = mock.Mock()
+        mock_connection.execute.side_effect = exc.DBAPIError(statement=None, params=None, orig=None)
+        result = dialect._get_server_version_info(mock_connection)
+        self.assertIsNone(result)
+
+    def test_get_server_version_info_general_exception(self):
+        """测试一般异常"""
+        dialect = GBase8sJDBCDialect()
+        mock_connection = mock.Mock()
         mock_connection.execute.side_effect = Exception("Query failed")
+        result = dialect._get_server_version_info(mock_connection)
+        self.assertIsNone(result)
+
+    def test_get_server_version_info_try_second_query(self):
+        """测试尝试第二个查询"""
+        from sqlalchemy import exc
+        dialect = GBase8sJDBCDialect()
+        mock_connection = mock.Mock()
+
+        mock_result = mock.Mock()
+        mock_result.scalar.return_value = "GBase8sV8.6.2"
+
+        def side_effect(*args, **kwargs):
+            if side_effect.counter == 0:
+                side_effect.counter += 1
+                raise exc.DBAPIError(statement=None, params=None, orig=None)
+            side_effect.counter += 1
+            return mock_result
+
+        side_effect.counter = 0
+        mock_connection.execute.side_effect = side_effect
+        result = dialect._get_server_version_info(mock_connection)
+        self.assertEqual(result, (8, 6, 2))
+
+    def test_get_server_version_info_both_queries_fail(self):
+        """测试两个查询都失败的情况"""
+        from sqlalchemy import exc
+        dialect = GBase8sJDBCDialect()
+        mock_connection = mock.Mock()
+
+        def side_effect(*args, **kwargs):
+            raise exc.DBAPIError(statement=None, params=None, orig=None)
+
+        mock_connection.execute.side_effect = side_effect
+        result = dialect._get_server_version_info(mock_connection)
+        self.assertIsNone(result)
+
+    def test_get_server_version_info_outer_exception(self):
+        """测试外层 try-except 块捕获异常的情况"""
+        from sqlalchemy import exc
+        dialect = GBase8sJDBCDialect()
+        mock_connection = mock.Mock()
+
+        mock_connection.execute.side_effect = exc.DBAPIError(statement=None, params=None, orig=None)
         result = dialect._get_server_version_info(mock_connection)
         self.assertIsNone(result)
 
@@ -177,18 +273,25 @@ class TestGBase8sJDBCDialect(TestCase):
         """测试 is_disconnect 方法"""
         dialect = GBase8sJDBCDialect()
 
-        # 测试断开连接的情况
-        disconnect_error = Exception("Connection closed")
-        result = dialect.is_disconnect(disconnect_error, None, None)
-        self.assertTrue(result)
+        indicators = [
+            "Connection closed",
+            "Socket closed",
+            "Broken pipe",
+            "Connection reset",
+            "JDBC connection",
+            "Network error",
+        ]
+        for indicator in indicators:
+            error = Exception(indicator)
+            result = dialect.is_disconnect(error, None, None)
+            self.assertTrue(result)
 
-        # 测试非断开连接的情况
         other_error = Exception("Other error")
         result = dialect.is_disconnect(other_error, None, None)
         self.assertFalse(result)
 
-    def test_build_jdbc_url(self):
-        """测试 _build_jdbc_url 方法"""
+    def test_build_jdbc_url_full(self):
+        """测试完整的 JDBC URL 构建"""
         dialect = GBase8sJDBCDialect()
         mock_url_obj = mock.Mock()
         mock_url_obj.host = "localhost"
@@ -198,8 +301,30 @@ class TestGBase8sJDBCDialect(TestCase):
         result = dialect._build_jdbc_url(mock_url_obj)
         self.assertEqual(result, "jdbc:gbasedbt-sqli://localhost:9088/testdb")
 
-    def test_build_connect_args(self):
-        """测试 _build_connect_args 方法"""
+    def test_build_jdbc_url_no_port(self):
+        """测试没有端口的 JDBC URL 构建"""
+        dialect = GBase8sJDBCDialect()
+        mock_url_obj = mock.Mock()
+        mock_url_obj.host = "localhost"
+        mock_url_obj.port = None
+        mock_url_obj.database = "testdb"
+
+        result = dialect._build_jdbc_url(mock_url_obj)
+        self.assertEqual(result, "jdbc:gbasedbt-sqli://localhost/testdb")
+
+    def test_build_jdbc_url_no_database(self):
+        """测试没有数据库的 JDBC URL 构建"""
+        dialect = GBase8sJDBCDialect()
+        mock_url_obj = mock.Mock()
+        mock_url_obj.host = "localhost"
+        mock_url_obj.port = 9088
+        mock_url_obj.database = None
+
+        result = dialect._build_jdbc_url(mock_url_obj)
+        self.assertEqual(result, "jdbc:gbasedbt-sqli://localhost:9088")
+
+    def test_build_connect_args_full(self):
+        """测试完整的连接参数构建"""
         dialect = GBase8sJDBCDialect()
         mock_url_obj = mock.Mock()
         mock_url_obj.username = "user"
@@ -212,22 +337,108 @@ class TestGBase8sJDBCDialect(TestCase):
         self.assertEqual(result["param1"], "value1")
         self.assertEqual(result["rewriteBatchedStatements"], "true")
 
-    def test_handle_jar_path(self):
-        """测试 _handle_jar_path 方法"""
+    def test_build_connect_args_minimal(self):
+        """测试最小连接参数构建"""
+        dialect = GBase8sJDBCDialect()
+        mock_url_obj = mock.Mock()
+        mock_url_obj.username = None
+        mock_url_obj.password = None
+        mock_url_obj.query = None
+
+        result = dialect._build_connect_args(mock_url_obj)
+        self.assertNotIn("user", result)
+        self.assertNotIn("password", result)
+        self.assertEqual(result["rewriteBatchedStatements"], "true")
+
+    def test_build_connect_args_non_string_query(self):
+        """测试非字符串查询参数"""
+        dialect = GBase8sJDBCDialect()
+        mock_url_obj = mock.Mock()
+        mock_url_obj.username = None
+        mock_url_obj.password = None
+        mock_url_obj.query = {"param1": 123}
+
+        result = dialect._build_connect_args(mock_url_obj)
+        self.assertEqual(result["param1"], "123")
+
+    def test_build_connect_args_with_rewrite(self):
+        """测试已存在 rewriteBatchedStatements 参数"""
+        dialect = GBase8sJDBCDialect()
+        mock_url_obj = mock.Mock()
+        mock_url_obj.username = None
+        mock_url_obj.password = None
+        mock_url_obj.query = {"rewriteBatchedStatements": "false"}
+
+        result = dialect._build_connect_args(mock_url_obj)
+        self.assertEqual(result["rewriteBatchedStatements"], "false")
+
+    def test_create_connect_args(self):
+        """测试 create_connect_args 方法"""
+        dialect = GBase8sJDBCDialect()
+        mock_url = mock.Mock()
+
+        with mock.patch('sqlalchemy.engine.url.make_url', return_value=mock_url):
+            with mock.patch.object(dialect, '_build_jdbc_url', return_value="jdbc:url"):
+                with mock.patch.object(dialect, '_build_connect_args', return_value={"user": "test"}):
+                    with mock.patch.object(dialect, '_handle_jar_path') as mock_handle:
+                        args, kwargs = dialect.create_connect_args(mock_url)
+                        self.assertEqual(args, ())
+                        self.assertEqual(kwargs["jclassname"], "com.gbasedbt.jdbc.Driver")
+                        self.assertEqual(kwargs["url"], "jdbc:url")
+                        self.assertEqual(kwargs["driver_args"], {"user": "test"})
+                        mock_handle.assert_called_once()
+
+    def test_handle_jar_path_env_var_exists(self):
+        """测试从环境变量获取 JAR 路径且文件存在"""
         dialect = GBase8sJDBCDialect()
         mock_url_obj = mock.Mock()
         kwargs = {}
 
-        # 测试环境变量方式
         with mock.patch.dict('os.environ', {'GBASE8S_JDBC_JARPATH': '/path/to/gbase.jar'}):
             with mock.patch('os.path.exists', return_value=True):
                 dialect._handle_jar_path(mock_url_obj, kwargs)
                 self.assertEqual(kwargs["jars"], "/path/to/gbase.jar")
 
-        # 测试未找到 JAR 文件的情况
+    def test_handle_jar_path_env_var_not_exists(self):
+        """测试从环境变量获取 JAR 路径但文件不存在"""
+        dialect = GBase8sJDBCDialect()
+        mock_url_obj = mock.Mock()
+        kwargs = {}
+
+        with mock.patch.dict('os.environ', {'GBASE8S_JDBC_JARPATH': '/path/to/gbase.jar'}):
+            with mock.patch('os.path.exists', return_value=False):
+                with mock.patch('db_connector_tool.utils.path_utils.PathHelper.get_user_config_dir', return_value="/config"):
+                    with mock.patch('warnings.warn') as mock_warn:
+                        dialect._handle_jar_path(mock_url_obj, kwargs)
+                        mock_warn.assert_called_once()
+                        self.assertEqual(kwargs["jars"], "/path/to/gbase.jar")
+
+    def test_handle_jar_path_default_dir_found(self):
+        """测试从默认目录找到 JAR 文件"""
+        from pathlib import Path
+        dialect = GBase8sJDBCDialect()
+        mock_url_obj = mock.Mock()
+        kwargs = {}
+
+        mock_file = mock.Mock()
+        mock_file.is_file.return_value = True
+        mock_file.__str__ = lambda self: "/config/jars/gbase.jar"
+
         with mock.patch.dict('os.environ', {}, clear=True):
-            with mock.patch('db_connector_tool.utils.path_utils.PathHelper.get_user_config_dir',
-                           return_value="/config"):
+            with mock.patch('db_connector_tool.utils.path_utils.PathHelper.get_user_config_dir', return_value="/config"):
+                with mock.patch.object(Path, 'rglob', return_value=[mock_file]):
+                    with mock.patch('os.path.exists', return_value=True):
+                        dialect._handle_jar_path(mock_url_obj, kwargs)
+                        self.assertEqual(kwargs["jars"], "/config/jars/gbase.jar")
+
+    def test_handle_jar_path_default_dir_not_found(self):
+        """测试从默认目录未找到 JAR 文件"""
+        dialect = GBase8sJDBCDialect()
+        mock_url_obj = mock.Mock()
+        kwargs = {}
+
+        with mock.patch.dict('os.environ', {}, clear=True):
+            with mock.patch('db_connector_tool.utils.path_utils.PathHelper.get_user_config_dir', return_value="/config"):
                 with mock.patch('pathlib.Path.rglob', return_value=[]):
                     with mock.patch('os.path.exists', return_value=False):
                         with mock.patch('warnings.warn') as mock_warn:

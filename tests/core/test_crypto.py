@@ -809,6 +809,46 @@ class TestCryptoManagerEdgeCases(unittest.TestCase):
 
             self.assertIn("解密失败", str(context.exception))
 
+    def test_clear_sensitive_data_with_gc_success(self):
+        """测试清理敏感数据时垃圾回收成功"""
+        crypto = CryptoManager()
+        
+        # 正常调用清理方法，测试 gc.collect() 成功路径
+        crypto._clear_sensitive_data()
+        
+        # 验证数据已清理
+        self.assertEqual(crypto.password, "")
+        self.assertEqual(crypto.salt, b"")
+        
+    def test_clear_sensitive_data_with_gc_failure(self):
+        """测试清理敏感数据时垃圾回收失败"""
+        crypto = CryptoManager()
+        
+        # 模拟 gc 模块导入失败或 gc.collect() 抛出异常
+        with mock.patch("gc.collect") as mock_gc:
+            mock_gc.side_effect = Exception("GC collection failed")
+            
+            # 调用清理方法，应该不会抛出异常
+            crypto._clear_sensitive_data()
+            
+            # 验证数据已清理
+            self.assertEqual(crypto.password, "")
+            self.assertEqual(crypto.salt, b"")
+
+    def test_clear_sensitive_data_without_iterations_attr(self):
+        """测试清理敏感数据时没有 iterations 属性"""
+        crypto = CryptoManager()
+        
+        # 删除 iterations 属性
+        del crypto.iterations
+        
+        # 调用清理方法，应该不会抛出异常
+        crypto._clear_sensitive_data()
+        
+        # 验证数据已清理
+        self.assertEqual(crypto.password, "")
+        self.assertEqual(crypto.salt, b"")
+
 
 if __name__ == "__main__":
     unittest.main()

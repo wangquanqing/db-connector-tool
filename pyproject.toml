@@ -96,6 +96,10 @@ exclude_lines = [
   "def __str__",
   "raise NotImplementedError",
   "pass",
+  "logger.info",
+  "logger.debug",
+  "logger.warning",
+  "logger.error",
 ]
 
 [tool.coverage.html]

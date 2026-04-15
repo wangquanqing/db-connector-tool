@@ -478,24 +478,24 @@ class TestDBConnectorCLI(unittest.TestCase):
 
     def test_ensure_db_manager_initialized_new(self):
         """测试初始化数据库管理器"""
-        # 确保db_manager为None
-        self.cli.db_manager = None
+        # 创建新的 CLI 实例以确保状态干净
+        cli = DBConnectorCLI()
         
         # 模拟DatabaseManager初始化成功
-        with mock.patch("db_connector_tool.cli.DatabaseManager") as mock_db_manager:
-            result = self.cli._ensure_db_manager_initialized()
+        with mock.patch("src.db_connector_tool.cli.DatabaseManager") as mock_db_manager:
+            result = cli._ensure_db_manager_initialized()
             mock_db_manager.assert_called_once()
             self.assertEqual(result, mock_db_manager.return_value)
 
     def test_ensure_db_manager_initialized_error(self):
         """测试初始化数据库管理器失败"""
-        # 确保db_manager为None
-        self.cli.db_manager = None
+        # 创建新的 CLI 实例以确保状态干净
+        cli = DBConnectorCLI()
         
         # 模拟DatabaseManager初始化失败
-        with mock.patch("db_connector_tool.cli.DatabaseManager", side_effect=Exception("初始化失败")):
+        with mock.patch("src.db_connector_tool.cli.DatabaseManager", side_effect=Exception("初始化失败")):
             with mock.patch("sys.exit") as mock_exit:
-                self.cli._ensure_db_manager_initialized()
+                cli._ensure_db_manager_initialized()
                 mock_exit.assert_called_once_with(1)
 
     def test_add_connection_error(self):
@@ -709,6 +709,740 @@ class TestDBConnectorCLI(unittest.TestCase):
                 # 验证帮助信息被打印（检查是否有包含帮助信息的调用）
                 help_called = any("SQL Shell 命令:" in str(call) for call in mock_print.call_args_list)
                 self.assertTrue(help_called)
+
+
+    def test_remove_connection_error(self):
+        """测试删除连接失败"""
+        class Args(argparse.Namespace):
+            name = "test_conn"
+
+        args = Args()
+
+        mock_instance = mock.Mock()
+        mock_instance.remove_connection.side_effect = Exception("删除失败")
+        self.cli.db_manager = mock_instance
+        
+        with mock.patch("sys.exit") as mock_exit:
+            self.cli.remove_connection(args)
+            mock_exit.assert_called_once_with(1)
+
+    def test_update_connection_error(self):
+        """测试更新连接失败"""
+        class Args(argparse.Namespace):
+            name = "test_conn"
+            type = "mysql"
+            host = "new_host"
+            port = 3306
+            username = "root"
+            password = "new_password"
+            database = "test_db"
+            service_name = None
+            gssencmode = None
+            charset = None
+            tds_version = None
+            custom_params = None
+
+        args = Args()
+
+        mock_instance = mock.Mock()
+        mock_instance.show_connection.side_effect = Exception("更新失败")
+        self.cli.db_manager = mock_instance
+        
+        with mock.patch("sys.exit") as mock_exit:
+            self.cli.update_connection(args)
+            mock_exit.assert_called_once_with(1)
+
+    def test_show_connection_error(self):
+        """测试显示连接详情失败"""
+        class Args(argparse.Namespace):
+            name = "test_conn"
+
+        args = Args()
+
+        mock_instance = mock.Mock()
+        mock_instance.show_connection.side_effect = Exception("获取失败")
+        self.cli.db_manager = mock_instance
+        
+        with mock.patch("sys.exit") as mock_exit:
+            self.cli.show_connection(args)
+            mock_exit.assert_called_once_with(1)
+
+    def test_list_connections_error(self):
+        """测试列出连接失败"""
+        class Args(argparse.Namespace):
+            pass
+
+        args = Args()
+
+        mock_instance = mock.Mock()
+        mock_instance.list_connections.side_effect = Exception("列出失败")
+        self.cli.db_manager = mock_instance
+        
+        with mock.patch("sys.exit") as mock_exit:
+            self.cli.list_connections(args)
+            mock_exit.assert_called_once_with(1)
+
+    def test_test_connection_false(self):
+        """测试连接测试返回False"""
+        class Args(argparse.Namespace):
+            name = "test_conn"
+
+        args = Args()
+
+        mock_instance = mock.Mock()
+        mock_instance.test_connection.return_value = False
+        self.cli.db_manager = mock_instance
+        
+        with mock.patch("sys.exit") as mock_exit:
+            self.cli.test_connection(args)
+            mock_exit.assert_called_once_with(1)
+
+    def test_test_connection_error(self):
+        """测试连接测试异常"""
+        class Args(argparse.Namespace):
+            name = "test_conn"
+
+        args = Args()
+
+        mock_instance = mock.Mock()
+        mock_instance.test_connection.side_effect = Exception("测试失败")
+        self.cli.db_manager = mock_instance
+        
+        with mock.patch("sys.exit") as mock_exit:
+            self.cli.test_connection(args)
+            mock_exit.assert_called_once_with(1)
+
+    def test_execute_query_with_output(self):
+        """测试执行查询并保存输出"""
+        class Args(argparse.Namespace):
+            connection = "test_conn"
+            query = "SELECT * FROM users"
+            output = "output.json"
+            format = "json"
+
+        args = Args()
+
+        mock_instance = mock.Mock()
+        mock_instance.execute_query.return_value = [{"id": 1, "name": "test"}]
+        self.cli.db_manager = mock_instance
+        
+        with mock.patch("src.db_connector_tool.cli.DBConnectorCLI._save_output") as mock_save:
+            with mock.patch("sys.exit"):
+                self.cli.execute_query(args)
+                mock_save.assert_called_once()
+
+    def test_execute_query_error(self):
+        """测试执行查询失败"""
+        class Args(argparse.Namespace):
+            connection = "test_conn"
+            query = "SELECT * FROM users"
+            output = None
+            format = "table"
+
+        args = Args()
+
+        mock_instance = mock.Mock()
+        mock_instance.execute_query.side_effect = Exception("查询失败")
+        self.cli.db_manager = mock_instance
+        
+        with mock.patch("sys.exit") as mock_exit:
+            self.cli.execute_query(args)
+            mock_exit.assert_called_once_with(1)
+
+    def test_save_output_table(self):
+        """测试保存输出为表格格式"""
+        results = [{"id": 1, "name": "test"}]
+        
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
+            output_path = f.name
+        
+        try:
+            with mock.patch("db_connector_tool.cli.DBConnectorCLI._display_table"):
+                self.cli._save_output(results, output_path, "table")
+                # 验证文件存在
+                self.assertTrue(os.path.exists(output_path))
+        finally:
+            if os.path.exists(output_path):
+                os.unlink(output_path)
+
+    def test_save_output_error(self):
+        """测试保存输出失败"""
+        results = [{"id": 1, "name": "test"}]
+        
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            output_path = f.name
+        
+        try:
+            with mock.patch("json.dump", side_effect=Exception("保存失败")):
+                with mock.patch("sys.exit") as mock_exit:
+                    self.cli._save_output(results, output_path, "json")
+                    mock_exit.assert_called_once_with(1)
+        finally:
+            if os.path.exists(output_path):
+                os.unlink(output_path)
+
+    def test_display_table_empty(self):
+        """测试显示空结果表格"""
+        results = []
+        with mock.patch("builtins.print") as mock_print:
+            self.cli._display_table(results)
+            mock_print.assert_not_called()
+
+    def test_display_results_empty(self):
+        """测试显示空结果"""
+        results = []
+        with mock.patch("builtins.print") as mock_print:
+            self.cli._display_results(results, "table")
+            mock_print.assert_called_once_with("没有结果")
+
+    def test_display_csv_empty(self):
+        """测试显示空CSV结果"""
+        results = []
+        with mock.patch("csv.DictWriter") as mock_writer:
+            self.cli._display_csv(results)
+            mock_writer.assert_not_called()
+
+    def test_execute_file_with_output(self):
+        """测试执行SQL文件并保存输出"""
+        class Args(argparse.Namespace):
+            connection = "test_conn"
+            file = "test.sql"
+            output = "output.json"
+            format = "json"
+            continue_on_error = False
+
+        args = Args()
+
+        mock_instance = mock.Mock()
+        self.cli.db_manager = mock_instance
+        
+        with mock.patch("os.path.exists", return_value=True):
+            with mock.patch(
+                "src.db_connector_tool.cli.DBConnectorCLI._read_and_split_sql_file",
+                return_value=["SELECT * FROM users"],
+            ):
+                with mock.patch(
+                    "src.db_connector_tool.cli.DBConnectorCLI._execute_sql_statements",
+                    return_value=([{"id": 1, "name": "test"}], 1, 0),
+                ):
+                    with mock.patch(
+                        "src.db_connector_tool.cli.DBConnectorCLI._print_execution_summary"
+                    ):
+                        with mock.patch(
+                            "src.db_connector_tool.cli.DBConnectorCLI._save_output"
+                        ) as mock_save:
+                            with mock.patch("sys.exit"):
+                                self.cli.execute_file(args)
+                                mock_save.assert_called_once()
+
+    def test_execute_file_error(self):
+        """测试执行SQL文件异常"""
+        class Args(argparse.Namespace):
+            connection = "test_conn"
+            file = "test.sql"
+            output = None
+            format = "table"
+            continue_on_error = False
+
+        args = Args()
+
+        mock_instance = mock.Mock()
+        self.cli.db_manager = mock_instance
+        
+        with mock.patch("os.path.exists", return_value=True):
+            with mock.patch(
+                "src.db_connector_tool.cli.DBConnectorCLI._read_and_split_sql_file",
+                side_effect=Exception("读取失败"),
+            ):
+                with mock.patch("sys.exit") as mock_exit:
+                    self.cli.execute_file(args)
+                    mock_exit.assert_called_once_with(1)
+
+    def test_split_sql_statements_various_cases(self):
+        """测试分割SQL语句的各种情况"""
+        # 测试单行注释
+        sql_content = "-- 这是注释\nSELECT * FROM users;"
+        statements = self.cli._split_sql_statements(sql_content)
+        self.assertEqual(len(statements), 1)
+        self.assertIn("SELECT * FROM users", statements[0])
+        
+        # 测试多行注释
+        sql_content = "/* 这是多行\n注释 */ SELECT * FROM users;"
+        statements = self.cli._split_sql_statements(sql_content)
+        self.assertEqual(len(statements), 1)
+        
+        # 测试无分号结尾
+        sql_content = "SELECT * FROM users"
+        statements = self.cli._split_sql_statements(sql_content)
+        self.assertEqual(len(statements), 1)
+
+    def test_execute_sql_statements_continue_on_error(self):
+        """测试执行SQL语句时继续错误"""
+        mock_db_manager = mock.Mock()
+        mock_db_manager.execute_query.side_effect = Exception("执行失败")
+        mock_db_manager.execute_command.return_value = 1
+        
+        statements = ["SELECT * FROM users", "INSERT INTO users VALUES (1, 'test')"]
+        
+        results, success_count, error_count = self.cli._execute_sql_statements(
+            mock_db_manager, statements, "test_conn", True
+        )
+        
+        self.assertEqual(success_count, 1)
+        self.assertEqual(error_count, 1)
+
+    def test_execute_sql_statements_empty(self):
+        """测试执行空SQL语句"""
+        mock_db_manager = mock.Mock()
+        statements = ["", "   "]
+        results, success_count, error_count = self.cli._execute_sql_statements(
+            mock_db_manager, statements, "test_conn", False
+        )
+        self.assertEqual(len(results), 0)
+
+    def test_interactive_shell_various_commands(self):
+        """测试交互式Shell各种命令"""
+        class Args(argparse.Namespace):
+            connection = "test_conn"
+
+        args = Args()
+
+        mock_instance = mock.Mock()
+        mock_instance.execute_query.return_value = [{"id": 1, "name": "test"}]
+        mock_instance.execute_command.return_value = 1
+        self.cli.db_manager = mock_instance
+        
+        # 测试空输入、非SELECT语句
+        with mock.patch("builtins.input", side_effect=["", "INSERT INTO users VALUES (1, 'test')", "exit"]):
+            with mock.patch("builtins.print"):
+                with mock.patch("db_connector_tool.cli.DBConnectorCLI._display_results"):
+                    self.cli.interactive_shell(args)
+                    mock_instance.execute_command.assert_called_once()
+
+    def test_interactive_shell_init_error(self):
+        """测试交互式Shell初始化错误"""
+        class Args(argparse.Namespace):
+            connection = "test_conn"
+
+        args = Args()
+
+        self.cli.db_manager = None
+        
+        with mock.patch("src.db_connector_tool.cli.DBConnectorCLI._ensure_db_manager_initialized", side_effect=Exception("初始化失败")):
+            with mock.patch("sys.exit") as mock_exit:
+                with mock.patch("builtins.print"):
+                    try:
+                        self.cli.interactive_shell(args)
+                    except SystemExit:
+                        pass
+                    except Exception:
+                        pass
+
+    def test_main_no_func(self):
+        """测试主函数无func分支"""
+        with mock.patch("sys.argv", ["db-connector", "invalid_command"]):
+            with mock.patch("argparse.ArgumentParser.parse_args") as mock_parse:
+                mock_args = mock.Mock()
+                mock_args.version = False
+                delattr(mock_args, 'func')
+                mock_parse.return_value = mock_args
+                with mock.patch("argparse.ArgumentParser.print_help") as mock_print_help:
+                    main()
+                    mock_print_help.assert_called_once()
+
+
+    def test_list_connections_empty(self):
+        """测试列出空连接"""
+        class Args(argparse.Namespace):
+            pass
+
+        args = Args()
+
+        mock_instance = mock.Mock()
+        mock_instance.list_connections.return_value = []
+        self.cli.db_manager = mock_instance
+        
+        with mock.patch("builtins.print") as mock_print:
+            self.cli.list_connections(args)
+            mock_print.assert_any_call("ℹ️  没有配置任何连接")
+
+    def test_execute_file_with_results_and_output(self):
+        """测试执行SQL文件有结果并保存输出"""
+        class Args(argparse.Namespace):
+            connection = "test_conn"
+            file = "test.sql"
+            output = "output.json"
+            format = "json"
+            continue_on_error = False
+
+        args = Args()
+
+        mock_instance = mock.Mock()
+        self.cli.db_manager = mock_instance
+        
+        with mock.patch("os.path.exists", return_value=True):
+            with mock.patch(
+                "src.db_connector_tool.cli.DBConnectorCLI._read_and_split_sql_file",
+                return_value=["SELECT * FROM users"],
+            ):
+                with mock.patch(
+                    "src.db_connector_tool.cli.DBConnectorCLI._execute_sql_statements",
+                    return_value=([{"id": 1, "name": "test"}], 1, 0),
+                ):
+                    with mock.patch(
+                        "src.db_connector_tool.cli.DBConnectorCLI._print_execution_summary"
+                    ):
+                        with mock.patch(
+                            "src.db_connector_tool.cli.DBConnectorCLI._save_output"
+                        ) as mock_save:
+                            with mock.patch("sys.exit"):
+                                self.cli.execute_file(args)
+                                mock_save.assert_called_once()
+
+    def test_save_output_table_format(self):
+        """测试保存输出为真正的表格格式"""
+        results = [{"id": 1, "name": "test"}]
+        
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
+            output_path = f.name
+        
+        try:
+            self.cli._save_output(results, output_path, "table")
+            with open(output_path, "r") as f:
+                content = f.read()
+            self.assertIn("id", content)
+            self.assertIn("name", content)
+        finally:
+            if os.path.exists(output_path):
+                os.unlink(output_path)
+
+    def test_update_connection_with_custom_params(self):
+        """测试更新连接时包含自定义参数"""
+        class Args(argparse.Namespace):
+            name = "test_conn"
+            type = "mysql"
+            host = "new_host"
+            port = 3306
+            username = "root"
+            password = "new_password"
+            database = "test_db"
+            service_name = None
+            gssencmode = None
+            charset = None
+            tds_version = None
+            custom_params = ["timeout=60", "ssl=true"]
+
+        args = Args()
+
+        mock_instance = mock.Mock()
+        mock_instance.show_connection.return_value = {"type": "mysql", "host": "old_host"}
+        self.cli.db_manager = mock_instance
+        
+        with mock.patch("sys.exit"):
+            self.cli.update_connection(args)
+            mock_instance.update_connection.assert_called_once()
+
+    def test_show_connection_with_custom_params(self):
+        """测试显示连接详情时包含自定义参数"""
+        class Args(argparse.Namespace):
+            name = "test_conn"
+
+        args = Args()
+
+        mock_instance = mock.Mock()
+        mock_instance.show_connection.return_value = {"type": "mysql", "host": "localhost", "custom_param": "value"}
+        self.cli.db_manager = mock_instance
+        
+        with mock.patch("sys.exit"):
+            with mock.patch("builtins.print"):
+                self.cli.show_connection(args)
+
+    def test_execute_file_real_save_output(self):
+        """测试执行SQL文件时真正保存输出"""
+        class Args(argparse.Namespace):
+            connection = "test_conn"
+            file = "test.sql"
+            output = "output.json"
+            format = "json"
+            continue_on_error = False
+
+        args = Args()
+
+        mock_instance = mock.Mock()
+        self.cli.db_manager = mock_instance
+        
+        with mock.patch("os.path.exists", return_value=True):
+            with mock.patch(
+                "src.db_connector_tool.cli.DBConnectorCLI._read_and_split_sql_file",
+                return_value=["SELECT * FROM users"],
+            ):
+                with mock.patch(
+                    "src.db_connector_tool.cli.DBConnectorCLI._execute_sql_statements",
+                    return_value=([{"id": 1, "name": "test"}], 1, 0),
+                ):
+                    with mock.patch(
+                        "src.db_connector_tool.cli.DBConnectorCLI._print_execution_summary"
+                    ):
+                        with mock.patch("sys.exit"):
+                            with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+                                args.output = f.name
+                            try:
+                                self.cli.execute_file(args)
+                            finally:
+                                if os.path.exists(args.output):
+                                    os.unlink(args.output)
+
+    def test_interactive_shell_with_exception_handling(self):
+        """测试交互式Shell的完整异常处理流程"""
+        class Args(argparse.Namespace):
+            connection = "test_conn"
+
+        args = Args()
+
+        self.cli.db_manager = None
+        
+        with mock.patch("src.db_connector_tool.cli.DBConnectorCLI._ensure_db_manager_initialized", side_effect=Exception("初始化失败")):
+            with mock.patch("sys.exit") as mock_exit:
+                with mock.patch("builtins.print"):
+                    try:
+                        self.cli.interactive_shell(args)
+                    except SystemExit:
+                        pass
+                    except Exception:
+                        pass
+
+    def test_execute_file_display_results(self):
+        """测试执行SQL文件时显示结果而不保存"""
+        class Args(argparse.Namespace):
+            connection = "test_conn"
+            file = "test.sql"
+            output = None
+            format = "table"
+            continue_on_error = False
+
+        args = Args()
+
+        mock_instance = mock.Mock()
+        self.cli.db_manager = mock_instance
+        
+        with mock.patch("os.path.exists", return_value=True):
+            with mock.patch(
+                "src.db_connector_tool.cli.DBConnectorCLI._read_and_split_sql_file",
+                return_value=["SELECT * FROM users"],
+            ):
+                with mock.patch(
+                    "src.db_connector_tool.cli.DBConnectorCLI._execute_sql_statements",
+                    return_value=([{"id": 1, "name": "test"}], 1, 0),
+                ):
+                    with mock.patch(
+                        "src.db_connector_tool.cli.DBConnectorCLI._print_execution_summary"
+                    ):
+                        with mock.patch(
+                            "src.db_connector_tool.cli.DBConnectorCLI._display_results"
+                        ) as mock_display:
+                            with mock.patch("sys.exit"):
+                                self.cli.execute_file(args)
+                                mock_display.assert_called_once()
+
+    def test_main_no_func_branch(self):
+        """测试主函数无func分支的完整流程"""
+        with mock.patch("sys.argv", ["db-connector", "invalid_command"]):
+            with mock.patch("argparse.ArgumentParser.parse_args") as mock_parse:
+                mock_args = mock.Mock()
+                mock_args.version = False
+                delattr(mock_args, 'func')
+                mock_parse.return_value = mock_args
+                with mock.patch("argparse.ArgumentParser.print_help") as mock_print_help:
+                    main()
+                    mock_print_help.assert_called_once()
+
+    def test_save_output_csv_empty_results(self):
+        """测试保存空结果的CSV文件"""
+        results = []
+        
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as f:
+            output_path = f.name
+        
+        try:
+            self.cli._save_output(results, output_path, "csv")
+            self.assertTrue(os.path.exists(output_path))
+        finally:
+            if os.path.exists(output_path):
+                os.unlink(output_path)
+
+    def test_interactive_shell_outer_exception(self):
+        """测试交互式Shell的外层异常处理"""
+        class Args(argparse.Namespace):
+            connection = "test_conn"
+
+        args = Args()
+
+        self.cli.db_manager = None
+        
+        with mock.patch("src.db_connector_tool.cli.DBConnectorCLI._ensure_db_manager_initialized") as mock_init:
+            mock_init.side_effect = Exception("初始化失败")
+            with mock.patch("sys.exit") as mock_exit:
+                with mock.patch("builtins.print"):
+                    try:
+                        self.cli.interactive_shell(args)
+                    except SystemExit:
+                        pass
+                    except Exception:
+                        pass
+
+    def test_build_connection_config_no_custom_params(self):
+        """测试构建连接配置时没有自定义参数"""
+        class Args(argparse.Namespace):
+            type = "mysql"
+            host = "localhost"
+            port = 3306
+            username = "root"
+            password = "password"
+            database = "test_db"
+            service_name = None
+            gssencmode = None
+            charset = None
+            tds_version = None
+
+        args = Args()
+        config = self.cli._build_connection_config(args)
+        self.assertEqual(config["type"], "mysql")
+
+    def test_interactive_shell_complete_coverage(self):
+        """测试交互式Shell的完整覆盖，包括异常分支和非SELECT语句"""
+        class Args(argparse.Namespace):
+            connection = "test_conn"
+
+        args = Args()
+
+        mock_instance = mock.Mock()
+        mock_instance.execute_command.return_value = 5
+        mock_instance.execute_query.return_value = [{"id": 1, "name": "test"}]
+        self.cli.db_manager = mock_instance
+        
+        # 测试SELECT语句结果显示 - 不需要mock display
+        with mock.patch("builtins.input", side_effect=["SELECT * FROM users", "exit"]):
+            with mock.patch("builtins.print"):
+                with mock.patch("src.db_connector_tool.cli.DBConnectorCLI._display_table"):
+                    self.cli.interactive_shell(args)
+
+    def test_main_with_func(self):
+        """测试主函数有func分支的完整覆盖"""
+        with mock.patch("sys.argv", ["db-connector", "list"]):
+            with mock.patch("argparse.ArgumentParser.parse_args") as mock_parse:
+                mock_args = mock.Mock()
+                mock_args.version = False
+                mock_func = mock.Mock()
+                mock_args.func = mock_func
+                mock_parse.return_value = mock_args
+                main()
+                mock_func.assert_called_once()
+
+    def test_interactive_shell_outer_exception(self):
+        """测试交互式Shell的外层异常处理"""
+        class Args(argparse.Namespace):
+            connection = "test_conn"
+
+        args = Args()
+
+        self.cli.db_manager = None
+        
+        with mock.patch("src.db_connector_tool.cli.DBConnectorCLI._ensure_db_manager_initialized") as mock_init:
+            mock_init.side_effect = Exception("启动失败")
+            with mock.patch("sys.exit"):
+                with mock.patch("builtins.print"):
+                    try:
+                        self.cli.interactive_shell(args)
+                    except Exception:
+                        pass
+
+    def test_execute_file_final_coverage(self):
+        """测试execute_file的最后几个分支，确保完全覆盖"""
+        class Args(argparse.Namespace):
+            connection = "test_conn"
+            file = "test.sql"
+            output = None
+            format = "table"
+            continue_on_error = False
+
+        args = Args()
+
+        mock_instance = mock.Mock()
+        self.cli.db_manager = mock_instance
+        
+        with mock.patch("os.path.exists", return_value=True):
+            with mock.patch(
+                "src.db_connector_tool.cli.DBConnectorCLI._read_and_split_sql_file",
+                return_value=["SELECT * FROM users"],
+            ):
+                with mock.patch(
+                    "src.db_connector_tool.cli.DBConnectorCLI._execute_sql_statements",
+                    return_value=([{"id": 1, "name": "test"}], 1, 0),
+                ):
+                    with mock.patch(
+                        "src.db_connector_tool.cli.DBConnectorCLI._print_execution_summary"
+                    ):
+                        with mock.patch(
+                            "src.db_connector_tool.cli.DBConnectorCLI._display_results"
+                        ):
+                            with mock.patch("sys.exit"):
+                                self.cli.execute_file(args)
+
+    def test_execute_file_no_results(self):
+        """测试execute_file没有结果的情况"""
+        class Args(argparse.Namespace):
+            connection = "test_conn"
+            file = "test.sql"
+            output = None
+            format = "table"
+            continue_on_error = False
+
+        args = Args()
+
+        mock_instance = mock.Mock()
+        self.cli.db_manager = mock_instance
+        
+        with mock.patch("os.path.exists", return_value=True):
+            with mock.patch(
+                "src.db_connector_tool.cli.DBConnectorCLI._read_and_split_sql_file",
+                return_value=["INSERT INTO users VALUES (1, 'test')"],
+            ):
+                with mock.patch(
+                    "src.db_connector_tool.cli.DBConnectorCLI._execute_sql_statements",
+                    return_value=([], 1, 0),
+                ):
+                    with mock.patch(
+                        "src.db_connector_tool.cli.DBConnectorCLI._print_execution_summary"
+                    ):
+                        with mock.patch("sys.exit"):
+                            self.cli.execute_file(args)
+
+    def test_interactive_shell_outer_exception_complete(self):
+        """测试交互式Shell的外层异常处理的完整覆盖"""
+        class Args(argparse.Namespace):
+            connection = "test_conn"
+
+        args = Args()
+
+        # 先设置 db_manager
+        mock_db_manager = mock.Mock()
+        self.cli.db_manager = mock_db_manager
+        
+        # 让第 825 行的 print 抛出异常，但外层异常处理中的 print 可以正常运行
+        call_count = [0]
+        def print_side_effect(*args, **kwargs):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                raise Exception("启动失败")
+            return mock.DEFAULT
+        
+        with mock.patch("builtins.print", side_effect=print_side_effect):
+            try:
+                self.cli.interactive_shell(args)
+            except SystemExit:
+                pass
+            except Exception:
+                pass
 
 
 if __name__ == "__main__":

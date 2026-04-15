@@ -40,6 +40,40 @@ class TestConfigValidator(unittest.TestCase):
         with self.assertRaises(ConfigError):
             ConfigValidator.validate_config(invalid_config)
 
+    def test_validate_config_invalid_version(self) -> None:
+        """测试验证无效版本号的配置"""
+        invalid_config = {
+            "version": "1.0",
+            "app_name": "test_app",
+            "connections": {},
+            "metadata": {
+                "created": "2024-01-01T00:00:00",
+                "last_modified": "2024-01-01T00:00:00",
+                "key_version": "1",
+            },
+        }
+
+        with self.assertRaises(ConfigError) as context:
+            ConfigValidator.validate_config(invalid_config)
+        self.assertIn("无效的版本号格式", str(context.exception))
+
+    def test_validate_config_invalid_key_version(self) -> None:
+        """测试验证无效 key_version 的配置"""
+        invalid_config = {
+            "version": "1.0.0",
+            "app_name": "test_app",
+            "connections": {},
+            "metadata": {
+                "created": "2024-01-01T00:00:00",
+                "last_modified": "2024-01-01T00:00:00",
+                "key_version": "not_a_number",
+            },
+        }
+
+        with self.assertRaises(ConfigError) as context:
+            ConfigValidator.validate_config(invalid_config)
+        self.assertIn("key_version必须是有效的数字字符串", str(context.exception))
+
     def test_is_valid_version_format(self) -> None:
         """测试版本号格式验证"""
         # 有效的版本号
@@ -54,6 +88,24 @@ class TestConfigValidator(unittest.TestCase):
         self.assertFalse(ConfigValidator.is_valid_version_format(None))  # type: ignore
         self.assertFalse(ConfigValidator.is_valid_version_format(123))  # type: ignore
         self.assertFalse(ConfigValidator.is_valid_version_format(""))
+        # 前导零测试
+        self.assertFalse(ConfigValidator.is_valid_version_format("01.0.0"))
+        self.assertFalse(ConfigValidator.is_valid_version_format("1.01.0"))
+        self.assertFalse(ConfigValidator.is_valid_version_format("1.0.01"))
+        # 负数测试 (虽然理论上不会出现，但可以测试异常处理)
+        self.assertFalse(ConfigValidator.is_valid_version_format("-1.0.0"))
+        # 测试负数 num < 0 分支 (使用自定义对象)
+        class CustomPart(str):
+            def isdigit(self):
+                return True
+            def __int__(self):
+                return -1
+
+        class CustomVersion(str):
+            def split(self, sep=None):
+                return [CustomPart('1'), CustomPart('2'), CustomPart('3')]
+
+        self.assertFalse(ConfigValidator.is_valid_version_format(CustomVersion('1.2.3')))
 
     def test_validate_connection_name(self) -> None:
         """测试连接名称验证"""
@@ -71,6 +123,14 @@ class TestConfigValidator(unittest.TestCase):
             ConfigValidator.validate_connection_name("name@symbol")
         with self.assertRaises(ValueError):
             ConfigValidator.validate_connection_name("a" * 51)  # 过长的名称
+        # 保留字测试
+        with self.assertRaises(ValueError) as context:
+            ConfigValidator.validate_connection_name("default")
+        self.assertIn("连接名称不能使用保留字", str(context.exception))
+        with self.assertRaises(ValueError):
+            ConfigValidator.validate_connection_name("test")
+        with self.assertRaises(ValueError):
+            ConfigValidator.validate_connection_name("backup")
 
 
 class TestConfigValidatorConnectionMethods(unittest.TestCase):
