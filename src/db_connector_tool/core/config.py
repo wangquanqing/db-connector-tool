@@ -379,6 +379,21 @@ class ConfigManager:
 
         return config
 
+    def refresh_cache(self) -> None:
+        """手动刷新配置缓存
+
+        强制重新加载配置文件，更新缓存。
+
+        Example:
+            >>> config_manager.refresh_cache()
+        """
+        # 清除缓存
+        self._config_cache = None
+        self._config_mtime = None
+        # 重新加载配置
+        self._load_config()
+        logger.debug("配置缓存已手动刷新")
+
     def _increment_config_version(self, config: Dict[str, Any]) -> None:
         """递增配置文件版本号
 
@@ -410,14 +425,14 @@ class ConfigManager:
                 major_num, minor_num, patch_num
             )
 
-            # 检查主版本号是否合理（限制主版本号不超过9）
-            if major_num > 9:
+            # 移除主版本号限制，允许主版本号自由递增
+            # 检查主版本号是否合理（不再限制主版本号）
+            if major_num < 0:
                 raise ConfigError(
-                    "版本号递增导致主版本号发生不合理变化",
+                    "版本号递增导致主版本号为负数",
                     details={
                         "current_version": current_version,
                         "would_become": f"{major_num}.{minor_num}.{patch_num}",
-                        "max_major_version": 9,
                     },
                 )
 
@@ -727,13 +742,17 @@ class ConfigManager:
                     check=False,
                 )
                 if result.returncode != 0:
-                    logger.warning("Windows权限设置警告: %s", result.stderr)
+                    logger.error("Windows权限设置失败: %s", result.stderr)
+                    logger.warning("配置文件权限设置失败，可能导致安全风险，请手动设置权限")
+                else:
+                    logger.debug("Windows权限设置成功: %s", self.config_path)
             else:
                 # Unix/Linux系统权限设置
                 self.config_path.chmod(stat.S_IRUSR | stat.S_IWUSR)
-            logger.debug("配置文件权限已设置: %s", self.config_path)
+                logger.debug("Unix/Linux权限设置成功: %s", self.config_path)
         except Exception as e:
-            logger.warning("设置配置文件权限失败: %s", str(e))
+            logger.error("设置配置文件权限失败: %s", str(e))
+            logger.warning("配置文件权限设置失败，可能导致安全风险，请手动设置权限")
 
     def backup_config(self, backup_path: Path | None = None) -> Path:
         """备份配置文件

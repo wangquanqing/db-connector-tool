@@ -321,6 +321,16 @@ class ConnectionPoolManager:
         try:
             # 检查驱动实例的基本状态
             if not self._check_driver_basic_status(driver):
+                logger.debug("驱动实例基本状态检查失败")
+                return False
+
+            # 检查驱动实例的其他关键属性
+            if hasattr(driver, "engine") and driver.engine is None:
+                logger.debug("驱动实例引擎未初始化")
+                return False
+
+            if hasattr(driver, "connection") and driver.connection is None:
+                logger.debug("驱动实例连接未建立")
                 return False
 
             # 执行实际查询测试
@@ -329,6 +339,13 @@ class ConnectionPoolManager:
                     return driver.test_connection()
                 except Exception as test_error:
                     logger.debug("连接测试失败: %s", str(test_error))
+                    return False
+            # 对于没有test_connection方法的驱动，检查是否有其他可用的验证方法
+            elif hasattr(driver, "ping"):
+                try:
+                    return driver.ping()
+                except Exception as ping_error:
+                    logger.debug("连接ping测试失败: %s", str(ping_error))
                     return False
             # 对于没有test_connection方法的驱动，至少检查基本属性
             return True

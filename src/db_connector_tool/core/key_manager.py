@@ -230,14 +230,19 @@ class KeyManager:
         if keyring_available and keyring_module is not None:
             self._load_or_create_key_from_keyring()
         elif KeyManager._env_key_available and KeyManager._env_key:
-            # 环境变量密钥可用，使用环境变量
-            try:
-                key_data = json.loads(KeyManager._env_key)
-                self._load_crypto_from_key_data(key_data)
-                logger.debug("使用环境变量中的加密密钥")
-            except (json.JSONDecodeError, TypeError, ConfigError) as e:
-                logger.warning("环境变量密钥加载失败: %s，使用文件存储方案", str(e))
-                self._load_or_create_key_from_file()
+                # 环境变量密钥可用，使用环境变量
+                try:
+                    key_data = json.loads(KeyManager._env_key)
+                    self._load_crypto_from_key_data(key_data)
+                    logger.debug("使用环境变量中的加密密钥")
+                except (json.JSONDecodeError, TypeError) as e:
+                    logger.error("环境变量密钥格式错误: %s，请检查 DB_CONNECTOR_TOOL_ENCRYPTION_KEY 环境变量的格式", str(e))
+                    logger.warning("环境变量密钥加载失败，使用文件存储方案")
+                    self._load_or_create_key_from_file()
+                except ConfigError as e:
+                    logger.error("环境变量密钥数据无效: %s，请检查 DB_CONNECTOR_TOOL_ENCRYPTION_KEY 环境变量的内容", str(e))
+                    logger.warning("环境变量密钥加载失败，使用文件存储方案")
+                    self._load_or_create_key_from_file()
         else:
             # 回退到文件权限方案
             logger.warning("keyring库和环境变量都不可用，使用文件权限保护方案")
@@ -344,12 +349,21 @@ class KeyManager:
             key_file_path = self.config_dir / "encryption.key"
             if key_file_path.exists():
                 self._load_existing_key(key_file_path)
+                logger.warning(
+                    "警告: 使用文件存储加密密钥（安全性较低）。\n"
+                    "安全风险: 文件存储的密钥可能被本地攻击者获取，导致加密数据被解密。\n"
+                    "建议: 1. 安装keyring库 (pip install keyring)，使用操作系统密钥环存储\n"
+                    "      2. 或设置环境变量 DB_CONNECTOR_TOOL_ENCRYPTION_KEY，使用环境变量存储\n"
+                    "      3. 确保密钥文件权限设置正确，仅允许所有者访问"
+                )
             else:
                 self._create_new_key(key_file_path)
                 logger.warning(
                     "警告: 使用文件存储加密密钥（安全性较低）。\n"
-                    "建议: 1. 安装keyring库 (pip install keyring)\n"
-                    "      2. 或设置环境变量 DB_CONNECTOR_TOOL_ENCRYPTION_KEY"
+                    "安全风险: 文件存储的密钥可能被本地攻击者获取，导致加密数据被解密。\n"
+                    "建议: 1. 安装keyring库 (pip install keyring)，使用操作系统密钥环存储\n"
+                    "      2. 或设置环境变量 DB_CONNECTOR_TOOL_ENCRYPTION_KEY，使用环境变量存储\n"
+                    "      3. 确保密钥文件权限设置正确，仅允许所有者访问"
                 )
 
     def _load_existing_key(self, key_file_path: Path) -> None:
