@@ -348,30 +348,25 @@ class KeyManager:
             >>> key_manager._load_or_create_key_from_file()
         """
 
-        if KeyManager._env_key:
-            # 使用环境变量中的密钥
-            self._load_crypto_from_key_data(json.loads(KeyManager._env_key))
-            logger.debug("使用环境变量中的加密密钥")
+        key_file_path = self.config_dir / "encryption.key"
+        if key_file_path.exists():
+            self._load_existing_key(key_file_path)
+            logger.warning(
+                "警告: 使用文件存储加密密钥（安全性较低）。\n"
+                "安全风险: 文件存储的密钥可能被本地攻击者获取，导致加密数据被解密。\n"
+                "建议: 1. 安装keyring库 (pip install keyring)，使用操作系统密钥环存储\n"
+                "      2. 或设置环境变量 DB_CONNECTOR_TOOL_ENCRYPTION_KEY，使用环境变量存储\n"
+                "      3. 确保密钥文件权限设置正确，仅允许所有者访问"
+            )
         else:
-            key_file_path = self.config_dir / "encryption.key"
-            if key_file_path.exists():
-                self._load_existing_key(key_file_path)
-                logger.warning(
-                    "警告: 使用文件存储加密密钥（安全性较低）。\n"
-                    "安全风险: 文件存储的密钥可能被本地攻击者获取，导致加密数据被解密。\n"
-                    "建议: 1. 安装keyring库 (pip install keyring)，使用操作系统密钥环存储\n"
-                    "      2. 或设置环境变量 DB_CONNECTOR_TOOL_ENCRYPTION_KEY，使用环境变量存储\n"
-                    "      3. 确保密钥文件权限设置正确，仅允许所有者访问"
-                )
-            else:
-                self._create_new_key(key_file_path)
-                logger.warning(
-                    "警告: 使用文件存储加密密钥（安全性较低）。\n"
-                    "安全风险: 文件存储的密钥可能被本地攻击者获取，导致加密数据被解密。\n"
-                    "建议: 1. 安装keyring库 (pip install keyring)，使用操作系统密钥环存储\n"
-                    "      2. 或设置环境变量 DB_CONNECTOR_TOOL_ENCRYPTION_KEY，使用环境变量存储\n"
-                    "      3. 确保密钥文件权限设置正确，仅允许所有者访问"
-                )
+            self._create_new_key(key_file_path)
+            logger.warning(
+                "警告: 使用文件存储加密密钥（安全性较低）。\n"
+                "安全风险: 文件存储的密钥可能被本地攻击者获取，导致加密数据被解密。\n"
+                "建议: 1. 安装keyring库 (pip install keyring)，使用操作系统密钥环存储\n"
+                "      2. 或设置环境变量 DB_CONNECTOR_TOOL_ENCRYPTION_KEY，使用环境变量存储\n"
+                "      3. 确保密钥文件权限设置正确，仅允许所有者访问"
+            )
 
     def _load_existing_key(self, key_file_path: Path) -> None:
         """加载现有的加密密钥文件

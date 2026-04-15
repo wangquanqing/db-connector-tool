@@ -249,15 +249,14 @@ class BatchDatabaseManager:
                 try:
                     self.db_manager.remove_connection(connection_name)
                     logger.debug(f"已从数据库管理器中删除连接配置: {connection_name}")
+                    # 只有当从数据库管理器删除成功时，才从连接名称列表中移除
+                    if connection_name in self._connection_names:
+                        self._connection_names.remove(connection_name)
+                        logger.debug(f"已从连接名称列表中移除: {connection_name}")
                 except Exception as remove_error:
                     logger.warning(
                         f"从数据库管理器删除连接配置失败 {connection_name}: {str(remove_error)}"
                     )
-
-                # 2. 从连接名称列表中移除
-                if connection_name in self._connection_names:
-                    self._connection_names.remove(connection_name)
-                    logger.debug(f"已从连接名称列表中移除: {connection_name}")
 
                 logger.info(f"连接 {connection_name} 删除完成")
 
