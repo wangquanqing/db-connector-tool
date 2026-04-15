@@ -245,14 +245,14 @@ class CryptoManager:
             self.fernet = None
         logger.debug("敏感数据已安全清理")
 
-    def _generate_secure_password(self, max_attempts: int = 10) -> str:
+    def _generate_secure_password(self, max_attempts: int = 20) -> str:
         """生成安全的随机密码
 
         使用密码学安全的随机数生成器创建符合强度要求的密码。
         采用更丰富的字符集提高密码熵值，使用迭代代替递归优化性能。
 
         Args:
-            max_attempts: 最大尝试次数，防止无限循环，默认10次
+            max_attempts: 最大尝试次数，防止无限循环，默认20次
 
         Returns:
             str: 符合安全标准的随机密码
@@ -280,30 +280,17 @@ class CryptoManager:
             + self.SPECIAL_CHARACTERS  # 特殊字符 (32)
         )
 
-        # 使用迭代代替递归
+        # 使用迭代生成密码
         for attempt in range(max_attempts):
             # 方法1: 直接选择字符（更优的熵值）
             generated_password = "".join(
-                secrets.choice(character_set) for _ in range(24)
+                secrets.choice(character_set) for _ in range(32)  # 增加密码长度到32位
             )
 
             # 验证密码强度
             if PasswordValidator.validate_strength(generated_password):
                 logger.debug("密码生成成功，尝试次数: %s", attempt + 1)
                 return generated_password
-
-            # 方法2: 如果方法1失败，使用Base64后备方案
-            if attempt == max_attempts // 2:  # 中途切换策略
-                random_bytes = secrets.token_bytes(24)
-                generated_password = base64.urlsafe_b64encode(random_bytes).decode(
-                    "utf-8"
-                )
-                # 移除可能存在的填充字符
-                generated_password = generated_password.rstrip("=")
-
-                if PasswordValidator.validate_strength(generated_password):
-                    logger.debug("Base64方法生成成功，尝试次数: %s", attempt + 1)
-                    return generated_password
 
             logger.debug("密码强度不足，第%s次重新生成", attempt + 1)
 
@@ -326,7 +313,7 @@ class CryptoManager:
 
         # 生成剩余字符
         character_set = string.ascii_letters + string.digits + self.SPECIAL_CHARACTERS
-        remaining_length = 20  # 总长度24 - 4个强制字符
+        remaining_length = 28  # 总长度32 - 4个强制字符
         remaining_characters = "".join(
             secrets.choice(character_set) for _ in range(remaining_length)
         )

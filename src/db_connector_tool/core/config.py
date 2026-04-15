@@ -324,16 +324,13 @@ class ConfigManager:
             raise ConfigError(f"连接配置已存在: {name}")
 
         # 确保加密管理器已初始化
-        try:
-            self.key_manager.get_crypto_manager()
-        except ConfigError:
+        if self.key_manager.crypto is None:
             self.key_manager.load_or_create_key()
-        finally:
-            # 使用统一的加密方法
-            encrypted_config = self.security_manager.encrypt_dict_values(
-                connection_config
-            )
-            config["connections"][name] = encrypted_config
+        # 使用统一的加密方法
+        encrypted_config = self.security_manager.encrypt_dict_values(
+            connection_config
+        )
+        config["connections"][name] = encrypted_config
 
             # 更新配置文件版本号（每次调用增加修订号）
             self._increment_config_version(config)
@@ -410,17 +407,6 @@ class ConfigManager:
                 major_num, minor_num, patch_num
             )
 
-            # 检查主版本号是否合理（限制主版本号不超过99）
-            if major_num > 9:
-                raise ConfigError(
-                    "版本号递增导致第一位发生变化，变更过于频繁，请手动检查",
-                    details={
-                        "current_version": current_version,
-                        "would_become": f"{major_num}.{minor_num}.{patch_num}",
-                        "max_major_version": 9,
-                    },
-                )
-
             new_version = f"{major_num}.{minor_num}.{patch_num}"
 
             # 验证新版本号格式
@@ -436,6 +422,9 @@ class ConfigManager:
             config["version"] = new_version
             logger.debug("配置文件版本号已更新: %s -> %s", current_version, new_version)
 
+        except ConfigError:
+            # 重新抛出ConfigError，因为这是需要用户处理的错误
+            raise
         except (ValueError, AttributeError, RuntimeError) as e:
             logger.warning("版本号递增失败，保持原版本号: %s", str(e))
             # 如果版本号递增失败，不影响主要功能，继续使用原版本号
@@ -492,6 +481,16 @@ class ConfigManager:
             if minor >= 10:
                 minor = 0
                 major += 1
+
+                # 确保主版本号不超过限制
+                if major > 9:
+                    raise ConfigError(
+                        "版本号递增导致主版本号超过限制",
+                        details={
+                            "current_major": major,
+                            "max_major": 9
+                        }
+                    )
 
         return major, minor, patch
 
@@ -569,16 +568,13 @@ class ConfigManager:
         self._ensure_connection_exists(config, name)
 
         # 确保加密管理器已初始化
-        try:
-            self.key_manager.get_crypto_manager()
-        except ConfigError:
+        if self.key_manager.crypto is None:
             self.key_manager.load_or_create_key()
-        finally:
-            # 使用统一的加密方法
-            encrypted_config = self.security_manager.encrypt_dict_values(
-                connection_config
-            )
-            config["connections"][name] = encrypted_config
+        # 使用统一的加密方法
+        encrypted_config = self.security_manager.encrypt_dict_values(
+            connection_config
+        )
+        config["connections"][name] = encrypted_config
 
             # 更新配置文件版本号（每次调用增加修订号）
             self._increment_config_version(config)
@@ -616,9 +612,7 @@ class ConfigManager:
         connection_config = config["connections"][name].copy()
 
         # 确保加密管理器已初始化
-        try:
-            self.key_manager.get_crypto_manager()
-        except ConfigError:
+        if self.key_manager.crypto is None:
             self.key_manager.load_or_create_key()
 
         # 使用统一的解密方法

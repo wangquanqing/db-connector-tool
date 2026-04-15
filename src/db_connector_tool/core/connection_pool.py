@@ -52,7 +52,7 @@ class ConnectionPoolManager:
         Example:
             >>> pool_manager = ConnectionPoolManager()
         """
-        self.connection_pool: Dict[str, SQLAlchemyDriver] = {}
+        self.connection_pool: Dict[str, Any] = {}
         self._lock = threading.RLock()
         self._statistics = {
             "connections_created": 0,
@@ -218,7 +218,7 @@ class ConnectionPoolManager:
             return False
         return True
 
-    def _check_driver_basic_status(self, driver: SQLAlchemyDriver) -> bool:
+    def _check_driver_basic_status(self, driver: Any) -> bool:
         """检查驱动实例的基本状态
 
         检查数据库驱动实例的基本状态是否有效。
@@ -232,13 +232,18 @@ class ConnectionPoolManager:
         Example:
             >>> is_valid = pool_manager._check_driver_basic_status(driver)
         """
-        # 检查驱动实例是否有engine属性
-        if not hasattr(driver, "engine"):
-            logger.debug("驱动实例缺少engine属性")
+        # 检查驱动实例是否有效
+        if driver is None:
+            logger.debug("驱动实例为None")
             return False
 
-        # 检查engine是否存在
-        if not driver.engine:
+        # 检查驱动实例是否有必要的方法
+        if not hasattr(driver, "test_connection"):
+            logger.debug("驱动实例缺少test_connection方法")
+            return False
+
+        # 对于SQLAlchemyDriver，检查engine属性
+        if hasattr(driver, "engine") and not driver.engine:
             logger.debug("驱动实例标记为未连接状态")
             return False
 
@@ -299,7 +304,7 @@ class ConnectionPoolManager:
             self._remove_connection_from_pool(name)
             return None
 
-    def _is_connection_valid(self, driver: SQLAlchemyDriver) -> bool:
+    def _is_connection_valid(self, driver: Any) -> bool:
         """检查连接是否有效
 
         检查数据库连接是否有效，包括基本状态检查和实际查询测试。
@@ -319,7 +324,9 @@ class ConnectionPoolManager:
                 return False
 
             # 执行实际查询测试
-            return driver.test_connection()
+            if hasattr(driver, 'test_connection'):
+                return driver.test_connection()
+            return False
 
         except (OSError, DatabaseError) as error:
             logger.debug("连接有效性检查失败: %s", str(error))
@@ -512,11 +519,14 @@ class ConnectionPoolManager:
             if not self._is_connection_in_pool(name):
                 continue
 
-            if name in self._connection_metadata:
+            if name in self._connection_metadata and "last_used" in self._connection_metadata[name]:
                 idle_time = current_time - self._connection_metadata[name]["last_used"]
             else:
-                # 如果没有元数据，使用当前时间作为默认值
-                idle_time = 0
+                # 如果没有元数据或last_used字段，使用创建时间或当前时间作为默认值
+                if name in self._connection_metadata and "created_at" in self._connection_metadata[name]:
+                    idle_time = current_time - self._connection_metadata[name]["created_at"]
+                else:
+                    idle_time = 0
 
             if idle_time > max_idle_time:
                 logger.debug(

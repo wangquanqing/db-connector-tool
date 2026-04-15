@@ -327,9 +327,9 @@ class KeyManager:
             >>> key_manager._load_or_create_key_from_file()
         """
 
-        if self._env_key:
+        if KeyManager._env_key:
             # 使用环境变量中的密钥
-            self._load_crypto_from_key_data(json.loads(self._env_key))
+            self._load_crypto_from_key_data(json.loads(KeyManager._env_key))
             logger.debug("使用环境变量中的加密密钥")
         else:
             key_file_path = self.config_dir / "encryption.key"
@@ -599,7 +599,7 @@ class KeyManager:
             return
 
         # 2. 如果keyring不可用，检查是否应该使用环境变量
-        if self._env_key_available:
+        if KeyManager._env_key_available:
             # 环境变量方案需要用户手动设置，这里只记录建议
             logger.warning(
                 "建议将新密钥设置为环境变量: %s",

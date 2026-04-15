@@ -188,9 +188,8 @@ class ConfigSecurityManager:
             ).hexdigest()
 
             if signature != expected_signature:
-                logger.warning("配置文件数字签名验证失败，可能被篡改")
-                # 不抛出异常，允许加载但记录警告
-                return False
+                logger.error("配置文件数字签名验证失败，可能被篡改")
+                raise ConfigError("配置文件数字签名验证失败，可能被篡改")
 
             # 验证时间戳，防止重放攻击
             signature_timestamp = config.get("metadata", {}).get("signature_timestamp")
@@ -201,8 +200,8 @@ class ConfigSecurityManager:
                     # 允许1小时的时间差（防止时钟同步问题）
                     time_diff = (current_time - signature_time).total_seconds()
                     if abs(time_diff) > 3600:
-                        logger.warning("配置文件签名时间戳过期，可能是重放攻击")
-                        return False
+                        logger.error("配置文件签名时间戳过期，可能是重放攻击")
+                        raise ConfigError("配置文件签名时间戳过期，可能是重放攻击")
                 except (ValueError, TypeError) as e:
                     logger.warning("时间戳验证失败: %s", str(e))
                     # 时间戳验证失败不影响签名验证结果
@@ -328,8 +327,8 @@ class ConfigSecurityManager:
             return raw_value  # 其他类型直接返回
 
         except (json.JSONDecodeError, KeyError, TypeError, ValueError) as error:
-            logger.warning("反序列化失败，返回原始字符串: %s", str(error))
-            return json_str
+            logger.error("反序列化失败: %s", str(error))
+            raise ConfigError(f"反序列化失败: {str(error)}") from error
 
     def perform_key_rotation(self, config: Dict[str, Any]) -> str:
         """执行密钥轮换的核心逻辑
@@ -351,19 +350,31 @@ class ConfigSecurityManager:
             "2"
         """
 
-        # 解密所有连接配置
-        decrypted_connections = self._decrypt_all_connections(config)
+        # 保存原始连接配置，用于回滚
+        original_connections = config["connections"].copy()
+        original_key_version = config["metadata"].get("key_version", "1")
 
-        # 生成新的加密密钥
-        self.key_manager.rotate_key()
+        try:
+            # 解密所有连接配置
+            decrypted_connections = self._decrypt_all_connections(config)
 
-        # 更新密钥版本
-        new_key_version = self._update_key_version(config)
+            # 生成新的加密密钥
+            self.key_manager.rotate_key()
 
-        # 重新加密所有连接配置
-        self._re_encrypt_all_connections(config, decrypted_connections)
+            # 更新密钥版本
+            new_key_version = self._update_key_version(config)
 
-        return new_key_version
+            # 重新加密所有连接配置
+            self._re_encrypt_all_connections(config, decrypted_connections)
+
+            return new_key_version
+        except Exception as error:
+            # 发生异常时回滚
+            logger.error("密钥轮换失败，执行回滚: %s", str(error))
+            # 恢复原始连接配置
+            config["connections"] = original_connections
+            config["metadata"]["key_version"] = original_key_version
+            raise ConfigError(f"密钥轮换失败: {str(error)}") from error
 
     def _decrypt_all_connections(
         self, config: Dict[str, Any]
