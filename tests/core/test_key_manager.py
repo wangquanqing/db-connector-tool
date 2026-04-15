@@ -1,9 +1,11 @@
 import os
 import tempfile
 import unittest
+from unittest import mock
+from pathlib import Path
 
 from src.db_connector_tool.core.crypto import CryptoManager
-from src.db_connector_tool.core.exceptions import ConfigError
+from src.db_connector_tool.core.exceptions import ConfigError, CryptoError
 from src.db_connector_tool.core.key_manager import KeyManager
 
 
@@ -102,6 +104,178 @@ class TestKeyManager(unittest.TestCase):
         # 验证加密管理器已初始化
         crypto = key_manager.get_crypto_manager()
         self.assertIsInstance(crypto, CryptoManager)
+        key_manager.close()
+
+    def test_load_or_create_key_from_file(self) -> None:
+        """测试从文件加载或创建密钥"""
+        key_manager = KeyManager(self.app_name)
+        # 调用私有方法测试文件存储
+        key_manager._load_or_create_key_from_file()
+        # 验证加密管理器已初始化
+        crypto = key_manager.get_crypto_manager()
+        self.assertIsInstance(crypto, CryptoManager)
+        key_manager.close()
+
+    def test_load_crypto_from_key_data(self) -> None:
+        """测试从密钥数据加载加密管理器"""
+        key_manager = KeyManager(self.app_name)
+        # 创建一个临时的加密管理器获取密钥数据
+        crypto = CryptoManager()
+        key_data = crypto.get_key_info()
+        crypto.close()
+        
+        # 测试加载密钥数据
+        key_manager._load_crypto_from_key_data(key_data)
+        self.assertIsInstance(key_manager.crypto, CryptoManager)
+        key_manager.close()
+
+    def test_create_new_crypto_key(self) -> None:
+        """测试创建新的加密密钥"""
+        key_manager = KeyManager(self.app_name)
+        key_data = key_manager._create_new_crypto_key()
+        self.assertIsInstance(key_data, dict)
+        self.assertIn("password", key_data)
+        self.assertIn("salt", key_data)
+        self.assertIsInstance(key_manager.crypto, CryptoManager)
+        key_manager.close()
+
+    def test_save_new_key_secure(self) -> None:
+        """测试安全保存新密钥"""
+        key_manager = KeyManager(self.app_name)
+        # 创建新的密钥数据
+        key_data = {"password": "test_password", "salt": "test_salt"}
+        # 测试保存新密钥
+        key_manager._save_new_key_secure(key_data)
+        # 验证密钥文件已创建
+        key_file = key_manager.config_dir / "encryption.key"
+        self.assertTrue(key_file.exists())
+        key_manager.close()
+
+    def test_set_secure_file_permissions(self) -> None:
+        """测试设置文件安全权限"""
+        key_manager = KeyManager(self.app_name)
+        # 创建临时文件
+        test_file = Path(self.temp_dir.name) / "test_file.txt"
+        test_file.write_text("test")
+        # 测试设置权限
+        key_manager._set_secure_file_permissions(test_file)
+        # 验证文件存在
+        self.assertTrue(test_file.exists())
+        key_manager.close()
+
+    def test_handle_crypto_error(self) -> None:
+        """测试处理加密错误"""
+        key_manager = KeyManager(self.app_name)
+        # 创建临时密钥文件
+        key_file = key_manager.config_dir / "encryption.key"
+        key_file.parent.mkdir(parents=True, exist_ok=True)
+        key_file.write_text("invalid data")
+        # 测试处理加密错误
+        with mock.patch("src.db_connector_tool.core.key_manager.CryptoManager.from_saved_key", side_effect=CryptoError("Decryption failed")):
+            key_manager._handle_crypto_error(key_file, CryptoError("Decryption failed"))
+        # 验证加密管理器已初始化
+        self.assertIsInstance(key_manager.crypto, CryptoManager)
+        key_manager.close()
+
+    def test_get_secure_hmac_key_no_crypto(self) -> None:
+        """测试在加密管理器未初始化时获取HMAC密钥"""
+        key_manager = KeyManager(self.app_name)
+        # 不加载密钥，直接获取HMAC密钥
+        hmac_key = key_manager.get_secure_hmac_key()
+        self.assertIsInstance(hmac_key, bytes)
+        self.assertEqual(len(hmac_key), 32)
+        key_manager.close()
+
+    def test_get_secure_hmac_key_from_env(self) -> None:
+        """测试从环境变量获取HMAC密钥"""
+        os.environ["DB_CONNECTOR_TOOL_HMAC_KEY"] = "a" * 64  # 32字节的十六进制
+        key_manager = KeyManager(self.app_name)
+        hmac_key = key_manager.get_secure_hmac_key()
+        self.assertIsInstance(hmac_key, bytes)
+        self.assertEqual(len(hmac_key), 32)
+        key_manager.close()
+
+    def test_load_existing_key(self) -> None:
+        """测试加载现有的密钥文件"""
+        key_manager = KeyManager(self.app_name)
+        # 创建一个有效的密钥文件
+        key_file = key_manager.config_dir / "encryption.key"
+        key_file.parent.mkdir(parents=True, exist_ok=True)
+        # 先创建一个加密管理器获取密钥数据
+        crypto = CryptoManager()
+        key_data = crypto.get_key_info()
+        crypto.close()
+        # 写入密钥文件
+        import tomli_w
+        key_file.write_bytes(tomli_w.dumps(key_data).encode("utf-8"))
+        # 测试加载现有密钥
+        key_manager._load_existing_key(key_file)
+        self.assertIsInstance(key_manager.crypto, CryptoManager)
+        key_manager.close()
+
+    def test_create_new_key(self) -> None:
+        """测试创建新的密钥文件"""
+        key_manager = KeyManager(self.app_name)
+        # 创建新的密钥文件
+        key_file = key_manager.config_dir / "encryption.key"
+        key_manager._create_new_key(key_file)
+        # 验证文件已创建
+        self.assertTrue(key_file.exists())
+        # 验证加密管理器已初始化
+        self.assertIsInstance(key_manager.crypto, CryptoManager)
+        key_manager.close()
+
+    def test_check_dependencies(self) -> None:
+        """测试检查依赖项"""
+        # 重置依赖检查状态
+        KeyManager._dependencies_checked = False
+        KeyManager._env_key = None
+        KeyManager._env_key_available = None
+        # 测试依赖检查
+        KeyManager._check_dependencies()
+        self.assertTrue(KeyManager._dependencies_checked)
+
+    def test_ensure_dependencies_checked(self) -> None:
+        """测试确保依赖检查已完成"""
+        # 重置依赖检查状态
+        KeyManager._dependencies_checked = False
+        KeyManager._dependency_check_lock = None
+        key_manager = KeyManager(self.app_name)
+        # 测试依赖检查
+        key_manager._ensure_dependencies_checked()
+        self.assertTrue(KeyManager._dependencies_checked)
+        key_manager.close()
+
+    def test_load_or_create_key_with_env_key(self) -> None:
+        """测试使用环境变量密钥"""
+        # 创建一个有效的环境变量密钥
+        crypto = CryptoManager()
+        key_data = crypto.get_key_info()
+        crypto.close()
+        import json
+        os.environ["DB_CONNECTOR_TOOL_ENCRYPTION_KEY"] = json.dumps(key_data)
+        # 重置依赖检查状态
+        KeyManager._dependencies_checked = False
+        KeyManager._env_key = None
+        KeyManager._env_key_available = None
+        # 测试加载密钥
+        key_manager = KeyManager(self.app_name)
+        key_manager.load_or_create_key()
+        self.assertIsInstance(key_manager.crypto, CryptoManager)
+        key_manager.close()
+
+    def test_load_or_create_key_with_invalid_env_key(self) -> None:
+        """测试使用无效的环境变量密钥"""
+        # 设置无效的环境变量密钥
+        os.environ["DB_CONNECTOR_TOOL_ENCRYPTION_KEY"] = "invalid json"
+        # 重置依赖检查状态
+        KeyManager._dependencies_checked = False
+        KeyManager._env_key = None
+        KeyManager._env_key_available = None
+        # 测试加载密钥（应该回退到文件存储）
+        key_manager = KeyManager(self.app_name)
+        key_manager.load_or_create_key()
+        self.assertIsInstance(key_manager.crypto, CryptoManager)
         key_manager.close()
 
 

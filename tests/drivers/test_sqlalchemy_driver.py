@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import MagicMock, patch
 
-from src.db_connector_tool.core.exceptions import DriverError
+from src.db_connector_tool.core.exceptions import DriverError, QueryError
 from src.db_connector_tool.drivers.sqlalchemy_driver import SQLAlchemyDriver
 
 
@@ -284,6 +284,128 @@ class TestSQLAlchemyDriver(unittest.TestCase):
         self.assertIn("host='localhost'", repr_repr)
         self.assertIn("port='3306'", repr_repr)
         self.assertIn("database='test_db'", repr_repr)
+
+    def test_connect(self) -> None:
+        """测试建立数据库连接"""
+        driver = SQLAlchemyDriver(self.base_config)
+        with patch("src.db_connector_tool.drivers.sqlalchemy_driver.create_engine") as mock_create_engine:
+            mock_engine = MagicMock()
+            mock_create_engine.return_value = mock_engine
+            driver.connect()
+            mock_create_engine.assert_called_once()
+            self.assertIsNotNone(driver.engine)
+
+    def test_execute_query(self) -> None:
+        """测试执行查询"""
+        driver = SQLAlchemyDriver(self.base_config)
+        driver.engine = MagicMock()
+        mock_connection = MagicMock()
+        mock_result = MagicMock()
+        mock_result.keys.return_value = ["id", "name"]
+        mock_result.fetchall.return_value = [(1, "test")]
+        mock_connection.execute.return_value = mock_result
+        driver.engine.connect.return_value.__enter__.return_value = mock_connection
+        
+        results = driver.execute_query("SELECT * FROM users")
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["id"], 1)
+        self.assertEqual(results[0]["name"], "test")
+
+    def test_execute_query_with_parameters(self) -> None:
+        """测试带参数的查询"""
+        driver = SQLAlchemyDriver(self.base_config)
+        driver.engine = MagicMock()
+        mock_connection = MagicMock()
+        mock_result = MagicMock()
+        mock_result.keys.return_value = ["id", "name"]
+        mock_result.fetchall.return_value = [(1, "test")]
+        mock_connection.execute.return_value = mock_result
+        driver.engine.connect.return_value.__enter__.return_value = mock_connection
+        
+        results = driver.execute_query("SELECT * FROM users WHERE id = :id", {"id": 1})
+        self.assertEqual(len(results), 1)
+
+    def test_execute_command(self) -> None:
+        """测试执行命令"""
+        driver = SQLAlchemyDriver(self.base_config)
+        driver.engine = MagicMock()
+        mock_connection = MagicMock()
+        mock_result = MagicMock()
+        mock_result.rowcount = 1
+        mock_connection.execute.return_value = mock_result
+        driver.engine.connect.return_value.__enter__.return_value = mock_connection
+        
+        affected = driver.execute_command("UPDATE users SET name = 'test' WHERE id = 1")
+        self.assertEqual(affected, 1)
+
+    def test_execute_command_with_parameters(self) -> None:
+        """测试带参数的命令"""
+        driver = SQLAlchemyDriver(self.base_config)
+        driver.engine = MagicMock()
+        mock_connection = MagicMock()
+        mock_result = MagicMock()
+        mock_result.rowcount = 1
+        mock_connection.execute.return_value = mock_result
+        driver.engine.connect.return_value.__enter__.return_value = mock_connection
+        
+        affected = driver.execute_command("UPDATE users SET name = :name WHERE id = :id", {"name": "test", "id": 1})
+        self.assertEqual(affected, 1)
+
+    def test_get_tables(self) -> None:
+        """测试获取表列表"""
+        driver = SQLAlchemyDriver(self.base_config)
+        driver.engine = MagicMock()
+        mock_inspector = MagicMock()
+        mock_inspector.get_table_names.return_value = ["users", "orders"]
+        with patch("src.db_connector_tool.drivers.sqlalchemy_driver.inspect", return_value=mock_inspector):
+            tables = driver.get_tables()
+            self.assertEqual(len(tables), 2)
+            self.assertIn("users", tables)
+            self.assertIn("orders", tables)
+
+    def test_get_table_schema(self) -> None:
+        """测试获取表结构"""
+        driver = SQLAlchemyDriver(self.base_config)
+        driver.engine = MagicMock()
+        mock_inspector = MagicMock()
+        mock_inspector.get_columns.return_value = [
+            {"name": "id", "type": "INTEGER", "nullable": False, "default": None},
+            {"name": "name", "type": "VARCHAR", "nullable": True, "default": None}
+        ]
+        with patch("src.db_connector_tool.drivers.sqlalchemy_driver.inspect", return_value=mock_inspector):
+            schema = driver.get_table_schema("users")
+            self.assertEqual(len(schema), 2)
+            self.assertEqual(schema[0]["name"], "id")
+            self.assertEqual(schema[1]["name"], "name")
+
+    def test_perform_connection_test(self) -> None:
+        """测试执行连接测试"""
+        driver = SQLAlchemyDriver(self.base_config)
+        driver.engine = MagicMock()
+        mock_connection = MagicMock()
+        mock_result = MagicMock()
+        mock_result.fetchone.return_value = (1,)
+        mock_connection.execute.return_value = mock_result
+        driver.engine.connect.return_value.__enter__.return_value = mock_connection
+        
+        result = driver._perform_connection_test()
+        self.assertTrue(result)
+
+    def test_test_connection_success(self) -> None:
+        """测试连接测试成功"""
+        driver = SQLAlchemyDriver(self.base_config)
+        driver.engine = MagicMock()
+        with patch.object(driver, "_perform_connection_test", return_value=True):
+            result = driver.test_connection()
+            self.assertTrue(result)
+
+    def test_test_connection_failure(self) -> None:
+        """测试连接测试失败"""
+        driver = SQLAlchemyDriver(self.base_config)
+        driver.engine = MagicMock()
+        with patch.object(driver, "_perform_connection_test", side_effect=Exception("连接失败")):
+            result = driver.test_connection()
+            self.assertFalse(result)
 
 
 class TestSQLAlchemyDriverAdvanced(unittest.TestCase):
