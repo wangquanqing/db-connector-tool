@@ -410,14 +410,14 @@ class ConfigManager:
                 major_num, minor_num, patch_num
             )
 
-            # 检查主版本号是否合理（限制主版本号不超过9）
-            if major_num > 9:
+            # 检查主版本号是否合理（限制主版本号不超过999，避免版本号过长）
+            if major_num > 999:
                 raise ConfigError(
                     "版本号递增导致主版本号发生不合理变化",
                     details={
                         "current_version": current_version,
                         "would_become": f"{major_num}.{minor_num}.{patch_num}",
-                        "max_major_version": 9,
+                        "max_major_version": 999,
                     },
                 )
 
@@ -460,8 +460,13 @@ class ConfigManager:
             (1, 2, 3)
         """
 
-        version_parts = version.split(".")
-        return int(version_parts[0]), int(version_parts[1]), int(version_parts[2])
+        try:
+            version_parts = version.split(".")
+            if len(version_parts) != 3:
+                raise ValueError("版本号格式必须为 x.y.z")
+            return int(version_parts[0]), int(version_parts[1]), int(version_parts[2])
+        except (ValueError, IndexError) as e:
+            raise ValueError(f"版本号格式无效: {version}") from e
 
     def _increment_version_parts(
         self, major: int, minor: int, patch: int

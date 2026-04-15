@@ -481,7 +481,7 @@ class TestConfigManagerAdvanced(unittest.TestCase):
 
             # 3. 测试版本号递增的主版本边界
             config_data = config_manager._load_config()
-            config_data["version"] = "9.9.9"
+            config_data["version"] = "999.9.9"
             with self.assertRaises(ConfigError):
                 config_manager._increment_config_version(config_data)
 
@@ -490,7 +490,7 @@ class TestConfigManagerAdvanced(unittest.TestCase):
                 config_manager._ensure_connection_exists(config_data, "nonexistent")
 
             # 5. 测试解析无效的版本号
-            with self.assertRaises(IndexError):
+            with self.assertRaises(ValueError):
                 config_manager._parse_version_parts("1.2")
 
 

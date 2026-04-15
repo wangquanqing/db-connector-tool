@@ -380,7 +380,8 @@ class CryptoManager:
 
         # 测试基础迭代次数的执行时间
         test_iterations = self.MIN_ITERATIONS
-        test_password = "test_password"
+        # 使用随机生成的测试密码，增强安全性
+        test_password = secrets.token_urlsafe(32)
         test_salt = secrets.token_bytes(self.MIN_SALT_LENGTH)
 
         start_time = time.time()

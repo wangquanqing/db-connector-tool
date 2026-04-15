@@ -330,8 +330,23 @@ class ConnectionPoolManager:
                 except Exception as test_error:
                     logger.debug("连接测试失败: %s", str(test_error))
                     return False
-            # 对于没有test_connection方法的驱动，至少检查基本属性
-            return True
+            # 对于没有test_connection方法的驱动，检查基本连接状态
+            # 检查是否有连接状态属性或方法
+            if hasattr(driver, 'is_connected'):
+                try:
+                    return driver.is_connected()
+                except Exception as e:
+                    logger.debug("连接状态检查失败: %s", str(e))
+                    return False
+            # 检查是否有表示连接状态的属性
+            if hasattr(driver, 'connected'):
+                return bool(driver.connected)
+            # 检查是否有engine属性（如SQLAlchemyDriver）
+            if hasattr(driver, 'engine'):
+                return bool(driver.engine)
+            # 无法确定连接状态，返回False
+            logger.warning("无法检查驱动连接状态，缺少必要的方法或属性")
+            return False
 
         except (OSError, DatabaseError) as error:
             logger.debug("连接有效性检查失败: %s", str(error))

@@ -395,6 +395,20 @@ class SQLAlchemyDriver:
                 pool_config.update({
                     "pool_recycle": 3600,  # SQL Server连接回收时间
                 })
+            elif database_type == "sqlite":
+                # SQLite 特定配置
+                pool_config.update({
+                    "pool_recycle": -1,  # SQLite不需要连接回收
+                    "connect_args": {"check_same_thread": False},  # SQLite线程安全配置
+                })
+            elif database_type == "gbase":
+                # GBase 特定配置
+                pool_config.update({
+                    "pool_recycle": 1800,  # GBase建议的连接回收时间
+                })
+            else:
+                # 其他数据库类型的默认配置
+                logger.debug("使用默认连接池配置 for database type: %s", database_type)
 
             # 允许用户通过配置覆盖连接池参数
             if "pool_config" in self.config:

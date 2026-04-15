@@ -338,8 +338,36 @@ class KeyManager:
 
         if KeyManager._env_key:
             # 使用环境变量中的密钥
-            self._load_crypto_from_key_data(json.loads(KeyManager._env_key))
-            logger.debug("使用环境变量中的加密密钥")
+            try:
+                key_data = json.loads(KeyManager._env_key)
+                # 验证密钥数据格式
+                if "password" in key_data and "salt" in key_data:
+                    self._load_crypto_from_key_data(key_data)
+                    logger.debug("使用环境变量中的加密密钥")
+                else:
+                    logger.warning("环境变量中的加密密钥格式无效，缺少必要字段，使用文件存储方案")
+                    key_file_path = self.config_dir / "encryption.key"
+                    if key_file_path.exists():
+                        self._load_existing_key(key_file_path)
+                    else:
+                        self._create_new_key(key_file_path)
+                        logger.warning(
+                            "警告: 使用文件存储加密密钥（安全性较低）。\n"
+                            "建议: 1. 安装keyring库 (pip install keyring)\n"
+                            "      2. 或设置环境变量 DB_CONNECTOR_TOOL_ENCRYPTION_KEY"
+                        )
+            except (json.JSONDecodeError, TypeError, ConfigError) as e:
+                logger.warning("环境变量密钥加载失败: %s，使用文件存储方案", str(e))
+                key_file_path = self.config_dir / "encryption.key"
+                if key_file_path.exists():
+                    self._load_existing_key(key_file_path)
+                else:
+                    self._create_new_key(key_file_path)
+                    logger.warning(
+                        "警告: 使用文件存储加密密钥（安全性较低）。\n"
+                        "建议: 1. 安装keyring库 (pip install keyring)\n"
+                        "      2. 或设置环境变量 DB_CONNECTOR_TOOL_ENCRYPTION_KEY"
+                    )
         else:
             key_file_path = self.config_dir / "encryption.key"
             if key_file_path.exists():

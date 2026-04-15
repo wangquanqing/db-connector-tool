@@ -469,10 +469,21 @@ class BatchDatabaseManager:
                 # 如果某条SQL失败，尝试回滚
                 if rollback_sqls:
                     try:
-                        self._execute_rollback(conn_name, rollback_sqls)
-                        logger.info(f"连接 {conn_name} 执行回滚成功")
+                        rollback_success = self._execute_rollback(conn_name, rollback_sqls)
+                        if rollback_success:
+                            logger.info(f"连接 {conn_name} 执行回滚成功")
+                        else:
+                            logger.warning(f"连接 {conn_name} 部分回滚失败，可能需要手动处理")
+                            # 记录回滚失败的详细信息到执行结果
+                            execution_results.append(
+                                {"sql": "ROLLBACK", "success": False, "error": "部分回滚操作失败，可能需要手动处理"}
+                            )
                     except Exception as rollback_error:
                         logger.error(f"连接 {conn_name} 执行回滚失败: {str(rollback_error)}")
+                        # 记录回滚失败的详细信息到执行结果
+                        execution_results.append(
+                            {"sql": "ROLLBACK", "success": False, "error": f"回滚执行失败: {str(rollback_error)}"}
+                        )
                 break
             except Exception as e:
                 execution_results.append(
@@ -481,21 +492,43 @@ class BatchDatabaseManager:
                 # 如果某条SQL失败，尝试回滚
                 if rollback_sqls:
                     try:
-                        self._execute_rollback(conn_name, rollback_sqls)
-                        logger.info(f"连接 {conn_name} 执行回滚成功")
+                        rollback_success = self._execute_rollback(conn_name, rollback_sqls)
+                        if rollback_success:
+                            logger.info(f"连接 {conn_name} 执行回滚成功")
+                        else:
+                            logger.warning(f"连接 {conn_name} 部分回滚失败，可能需要手动处理")
+                            # 记录回滚失败的详细信息到执行结果
+                            execution_results.append(
+                                {"sql": "ROLLBACK", "success": False, "error": "部分回滚操作失败，可能需要手动处理"}
+                            )
                     except Exception as rollback_error:
                         logger.error(f"连接 {conn_name} 执行回滚失败: {str(rollback_error)}")
+                        # 记录回滚失败的详细信息到执行结果
+                        execution_results.append(
+                            {"sql": "ROLLBACK", "success": False, "error": f"回滚执行失败: {str(rollback_error)}"}
+                        )
                 break
 
         return execution_results
 
-    def _execute_rollback(self, conn_name: str, rollback_sqls: List[str]) -> None:
-        """执行回滚操作"""
+    def _execute_rollback(self, conn_name: str, rollback_sqls: List[str]) -> bool:
+        """执行回滚操作
+        
+        Args:
+            conn_name: 连接名称
+            rollback_sqls: 回滚SQL语句列表
+            
+        Returns:
+            bool: 回滚是否成功
+        """
+        success = True
         for sql in rollback_sqls:
             try:
                 self.db_manager.execute_query(conn_name, sql)
             except Exception as e:
                 logger.warning(f"回滚执行失败 {conn_name}: {e}")
+                success = False
+        return success
 
     def get_connection_stats(self) -> Dict[str, Any]:
         """获取连接统计信息"""
