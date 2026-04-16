@@ -365,7 +365,7 @@ class SQLAlchemyDriver:
 
             # 基础连接池配置（基于生产环境最佳实践）
             database_type = self.config.get("type", "").lower()
-            
+
             # 为不同数据库类型设置不同的连接池配置
             if database_type == "sqlite":
                 # SQLite 特定配置（不支持max_overflow和pool_timeout）

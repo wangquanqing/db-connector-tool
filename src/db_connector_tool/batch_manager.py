@@ -36,7 +36,10 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict, List, Optional, Tuple
 
 from .core.connections import DatabaseManager
-from .core.exceptions import QueryError, DatabaseError, DBConnectorError, FileSystemError, ConfigError
+from .core.exceptions import (
+    QueryError, DatabaseError, DBConnectorError,
+    FileSystemError, ConfigError, DBConnectionError
+)
 from .utils.logging_utils import get_logger
 from .utils.path_utils import PathHelper
 
@@ -88,7 +91,7 @@ class BatchDatabaseManager:
         self._lock = threading.RLock()
         self._is_cleaned = False
 
-        logger.info(f"批量管理器初始化完成 - 临时配置文件: {self.temp_config_file}")
+        logger.info("批量管理器初始化完成 - 临时配置文件: %s", self.temp_config_file)
 
     def set_base_config(self, config: Dict[str, Any]) -> None:
         """
@@ -136,7 +139,7 @@ class BatchDatabaseManager:
                 connection_names = self.db_manager.list_connections()
                 # 检查连接是否已存在，如果存在则先删除
                 if connection_name in connection_names:
-                    logger.warning(f"连接 {connection_name} 已存在，执行覆盖操作")
+                    logger.warning("连接 %s 已存在，执行覆盖操作", connection_name)
                     self._remove_existing_connection(connection_name)
 
                 # 添加新连接
@@ -303,9 +306,9 @@ class BatchDatabaseManager:
                 if result:
                     success_count += 1
                 status = "正常" if result else "异常"
-                logger.info(f"{status} - {conn_name}")
+                logger.info("%s - %s", status, conn_name)
 
-        logger.info(f"批量测试完成: {success_count}/{len(connection_names)} 个连接正常")
+        logger.info("批量测试完成: %s/%s 个连接正常", success_count, len(connection_names))
         return results
 
     def execute_batch_query(
@@ -353,7 +356,7 @@ class BatchDatabaseManager:
                 results[conn_name] = result
 
         success_count = sum(1 for r in results.values() if r["success"])
-        logger.info(f"批量查询完成: {success_count}/{len(connection_names)} 个连接成功")
+        logger.info("批量查询完成: %s/%s 个连接成功", success_count, len(connection_names))
         return results
 
     def upgrade_table_structure(
@@ -396,7 +399,7 @@ class BatchDatabaseManager:
                 results[conn_name] = result
 
         success_count = sum(1 for r in results.values() if r["success"])
-        logger.info(f"批量升级完成: {success_count}/{len(connection_names)} 个连接成功")
+        logger.info("批量升级完成: %s/%s 个连接成功", success_count, len(connection_names))
         return results
 
     def _get_all_connection_names(self) -> List[str]:

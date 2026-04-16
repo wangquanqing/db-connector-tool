@@ -175,7 +175,6 @@ class GBase8sJDBCDialect(OracleDialect, ABC):
             jaydebeapi 模块，使用自定义游标类
         """
         import jaydebeapi
-
         jaydebeapi.Cursor = GBase8sCursor
         return jaydebeapi
 
@@ -256,15 +255,16 @@ class GBase8sJDBCDialect(OracleDialect, ABC):
 
         return connect_args
 
-    def _handle_jar_path(self, url_obj: Any, _: dict) -> None:
-        """
-        处理 JDBC 驱动 JAR 文件路径。
+    def _handle_jar_path(self, url_obj: Any, kwargs: dict) -> None:
+        """处理 JDBC 驱动 JAR 文件路径。
 
         优先级：URL参数 > 环境变量 > 默认路径
 
         Args:
             url_obj: SQLAlchemy URL对象
+            kwargs: 连接参数字典
         """
+        # url_obj参数暂未使用，保留以备将来支持URL参数指定jar路径
 
         jar_path = None
 
@@ -394,11 +394,10 @@ class GBase8sJDBCDialect(OracleDialect, ABC):
                 if match:
                     version_str = match.group(1)
                     return tuple(int(part) for part in version_str.split("."))
-                else:
-                    # 尝试简单版本号提取
-                    simple_match = re.search(r"(\d+)\.(\d+)", banner)
-                    if simple_match:
-                        return (int(simple_match.group(1)), int(simple_match.group(2)))
+                # 尝试简单版本号提取
+                simple_match = re.search(r"(\d+)\.(\d+)", banner)
+                if simple_match:
+                    return (int(simple_match.group(1)), int(simple_match.group(2)))
 
             return None
 

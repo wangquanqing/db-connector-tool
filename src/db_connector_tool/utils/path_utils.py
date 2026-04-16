@@ -87,7 +87,7 @@ class PathHelper:
 
             return config_dir
 
-        except OSError as e:
+        except OSError:
             # 回退到当前目录（隐藏目录）
             fallback_dir = Path.cwd() / f".{app_name}"
             try:
