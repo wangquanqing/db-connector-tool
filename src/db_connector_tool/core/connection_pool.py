@@ -15,8 +15,6 @@ Example:
 import threading
 import time
 from typing import Any, Dict, List, Optional
-
-from typing import Any
 from ..utils.logging_utils import get_logger
 from .exceptions import DatabaseError
 
@@ -359,7 +357,7 @@ class ConnectionPoolManager:
                         # 执行简单的查询测试
                         if hasattr(conn, "execute"):
                             # 尝试执行一个简单的查询
-                            result = conn.execute("SELECT 1")
+                            conn.execute("SELECT 1")
                             return True
                 except Exception as sqlalchemy_error:
                     logger.debug("SQLAlchemy连接测试失败: %s", str(sqlalchemy_error))

@@ -93,8 +93,8 @@ class PathHelper:
             try:
                 fallback_dir.mkdir(exist_ok=True)
                 return fallback_dir
-            except OSError:
-                raise OSError(f"无法创建配置目录: {str(e)}")
+            except OSError as exc:
+                raise OSError(f"无法创建配置目录: {str(exc)}") from exc
 
     @staticmethod
     def get_user_home_dir() -> Path:
@@ -155,7 +155,7 @@ class PathHelper:
 
         except OSError as e:
             # 重新抛出更详细的错误信息
-            raise OSError(f"无法创建目录 '{dir_path}': {str(e)}")
+            raise OSError(f"无法创建目录 '{dir_path}': {str(e)}") from e
         except (TypeError, ValueError):
             return False
 
@@ -194,9 +194,9 @@ class PathHelper:
             # 展开用户主目录并解析为绝对路径
             return path_obj.expanduser().resolve()
         except OSError as e:
-            raise OSError(f"无法解析路径 '{path}': {str(e)}")
+            raise OSError(f"无法解析路径 '{path}': {str(e)}") from e
         except (TypeError, ValueError) as e:
-            raise ValueError(f"无效的路径格式 '{path}': {str(e)}")
+            raise ValueError(f"无效的路径格式 '{path}': {str(e)}") from e
 
     @staticmethod
     def is_valid_path(path: str | Path) -> bool:
@@ -236,8 +236,7 @@ class PathHelper:
             system = platform.system().lower()
             if system == "windows":
                 return PathHelper._is_valid_path_windows(path_str)
-            else:
-                return PathHelper._is_valid_path_unix(path_str)
+            return PathHelper._is_valid_path_unix(path_str)
 
         except (TypeError, ValueError):
             return False
@@ -346,7 +345,7 @@ class PathHelper:
         try:
             return (base_path / relative_path_obj).resolve()
         except OSError as e:
-            raise OSError(f"无法解析路径 '{relative_path}': {str(e)}")
+            raise OSError(f"无法解析路径 '{relative_path}': {str(e)}") from e
 
     @staticmethod
     def safe_join(base_path: str | Path, *paths: str) -> Path:
@@ -412,7 +411,7 @@ class PathHelper:
             resolved_result = result_path.resolve()
             if not resolved_result.is_relative_to(base_path_resolved):
                 raise ValueError("路径遍历检测到安全违规")
-        except ValueError:
-            raise ValueError("路径遍历检测到安全违规")
+        except ValueError as exc:
+            raise ValueError("路径遍历检测到安全违规") from exc
 
         return result_path

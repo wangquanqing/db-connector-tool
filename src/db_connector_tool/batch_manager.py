@@ -36,7 +36,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict, List, Optional, Tuple
 
 from .core.connections import DatabaseManager
-from .core.exceptions import QueryError
+from .core.exceptions import QueryError, DatabaseError, DBConnectorError, FileSystemError, ConfigError
 from .utils.logging_utils import get_logger
 from .utils.path_utils import PathHelper
 
@@ -149,12 +149,12 @@ class BatchDatabaseManager:
 
                 results[ip] = True
                 success_count += 1
-                logger.info(f"添加连接: {connection_name} -> {ip}")
-            except Exception as e:
+                logger.info("添加连接: %s -> %s", connection_name, ip)
+            except (DatabaseError, ConfigError) as e:
                 results[ip] = False
-                logger.error(f"添加连接失败 {ip}: {e}")
+                logger.error("添加连接失败 %s: %s", ip, e)
 
-        logger.info(f"批量添加完成: {success_count}/{len(ip_list)} 个连接成功")
+        logger.info("批量添加完成: %s/%s 个连接成功", success_count, len(ip_list))
         return results
 
     def cleanup(self) -> None:
@@ -179,13 +179,13 @@ class BatchDatabaseManager:
             # 1. 关闭所有数据库连接
             connection_names = self._get_all_connection_names()
             if connection_names:
-                logger.info(f"关闭 {len(connection_names)} 个数据库连接")
+                logger.info("关闭 %s 个数据库连接", len(connection_names))
                 for conn_name in connection_names:
                     try:
                         self.db_manager.pool_manager.remove_connection(conn_name)
-                        logger.debug(f"连接 {conn_name} 已关闭")
-                    except Exception as e:
-                        logger.warning(f"关闭连接 {conn_name} 失败: {str(e)}")
+                        logger.debug("连接 %s 已关闭", conn_name)
+                    except DatabaseError as e:
+                        logger.warning("关闭连接 %s 失败: %s", conn_name, str(e))
 
             # 2. 清理连接名称列表
             with self._lock:
@@ -200,11 +200,11 @@ class BatchDatabaseManager:
                 )
                 if config_path.exists():
                     config_path.unlink()
-                    logger.info(f"临时配置文件已删除: {config_path}")
+                    logger.info("临时配置文件已删除: %s", config_path)
                 else:
                     logger.debug("临时配置文件不存在，无需删除")
-            except Exception as e:
-                logger.warning(f"删除临时配置文件失败: {str(e)}")
+            except FileSystemError as e:
+                logger.warning("删除临时配置文件失败: %s", str(e))
 
             # 4. 清理基础配置
             self.base_config = None
@@ -212,8 +212,8 @@ class BatchDatabaseManager:
             self._is_cleaned = True
             logger.info("批量管理器资源清理完成")
 
-        except Exception as e:
-            logger.error(f"批量管理器资源清理失败: {str(e)}")
+        except DBConnectorError as e:
+            logger.error("批量管理器资源清理失败: %s", str(e))
             raise
 
     def __enter__(self):
@@ -248,20 +248,20 @@ class BatchDatabaseManager:
                 # 1. 先从数据库管理器中删除连接配置（会自动关闭连接）
                 try:
                     self.db_manager.remove_connection(connection_name)
-                    logger.debug(f"已从数据库管理器中删除连接配置: {connection_name}")
+                    logger.debug("已从数据库管理器中删除连接配置: %s", connection_name)
                     # 只有当从数据库管理器删除成功时，才从连接名称列表中移除
                     if connection_name in self._connection_names:
                         self._connection_names.remove(connection_name)
-                        logger.debug(f"已从连接名称列表中移除: {connection_name}")
-                except Exception as remove_error:
+                        logger.debug("已从连接名称列表中移除: %s", connection_name)
+                except (DatabaseError, ConfigError) as remove_error:
                     logger.warning(
-                        f"从数据库管理器删除连接配置失败 {connection_name}: {str(remove_error)}"
+                        "从数据库管理器删除连接配置失败 %s: %s", connection_name, str(remove_error)
                     )
 
-                logger.info(f"连接 {connection_name} 删除完成")
+                logger.info("连接 %s 删除完成", connection_name)
 
-            except Exception as e:
-                logger.error(f"删除连接 {connection_name} 时发生严重错误: {str(e)}")
+            except DBConnectorError as e:
+                logger.error("删除连接 %s 时发生严重错误: %s", connection_name, str(e))
                 raise
 
     def test_batch_connections(self, max_workers: int = 10) -> Dict[str, bool]:
@@ -286,8 +286,8 @@ class BatchDatabaseManager:
             try:
                 is_connected = self.db_manager.test_connection(conn_name)
                 return conn_name, is_connected
-            except Exception as e:
-                logger.error(f"测试连接 {conn_name} 失败: {e}")
+            except (DatabaseError, DBConnectionError) as e:
+                logger.error("测试连接 %s 失败: %s", conn_name, e)
                 return conn_name, False
 
         # 使用线程池并发测试
@@ -339,7 +339,7 @@ class BatchDatabaseManager:
                 }
             except QueryError as e:
                 return conn_name, {"success": False, "error": str(e), "data": []}
-            except Exception as e:
+            except DatabaseError as e:
                 return conn_name, {"success": False, "error": str(e), "data": []}
 
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -429,7 +429,7 @@ class BatchDatabaseManager:
                 "success": all(r["success"] for r in execution_results),
                 "executions": execution_results,
             }
-        except Exception as e:
+        except DatabaseError as e:
             return conn_name, {"success": False, "error": str(e), "executions": []}
 
     def _execute_upgrade_sqls(
@@ -469,21 +469,21 @@ class BatchDatabaseManager:
                 if rollback_sqls:
                     try:
                         self._execute_rollback(conn_name, rollback_sqls)
-                        logger.info(f"连接 {conn_name} 执行回滚成功")
-                    except Exception as rollback_error:
-                        logger.error(f"连接 {conn_name} 执行回滚失败: {str(rollback_error)}")
+                        logger.info("连接 %s 执行回滚成功", conn_name)
+                    except DatabaseError as rollback_error:
+                        logger.error("连接 %s 执行回滚失败: %s", conn_name, str(rollback_error))
                 break
-            except Exception as e:
+            except DatabaseError as e:
                 execution_results.append(
-                    {"sql": sql, "success": False, "error": f"未知错误: {str(e)}"}
+                    {"sql": sql, "success": False, "error": f"数据库错误: {str(e)}"}
                 )
                 # 如果某条SQL失败，尝试回滚
                 if rollback_sqls:
                     try:
                         self._execute_rollback(conn_name, rollback_sqls)
-                        logger.info(f"连接 {conn_name} 执行回滚成功")
-                    except Exception as rollback_error:
-                        logger.error(f"连接 {conn_name} 执行回滚失败: {str(rollback_error)}")
+                        logger.info("连接 %s 执行回滚成功", conn_name)
+                    except DatabaseError as rollback_error:
+                        logger.error("连接 %s 执行回滚失败: %s", conn_name, str(rollback_error))
                 break
 
         return execution_results
@@ -493,8 +493,8 @@ class BatchDatabaseManager:
         for sql in rollback_sqls:
             try:
                 self.db_manager.execute_query(conn_name, sql)
-            except Exception as e:
-                logger.warning(f"回滚执行失败 {conn_name}: {e}")
+            except DatabaseError as e:
+                logger.warning("回滚执行失败 %s: %s", conn_name, e)
 
     def get_connection_stats(self) -> Dict[str, Any]:
         """获取连接统计信息"""
@@ -504,7 +504,7 @@ class BatchDatabaseManager:
         for conn_name in connection_names:
             try:
                 stats[conn_name] = self.db_manager.get_connection_info(conn_name)
-            except Exception as e:
+            except (DatabaseError, ConfigError) as e:
                 stats[conn_name] = {"error": str(e)}
 
         return stats
@@ -546,8 +546,8 @@ def cleanup_temp_configs(app_name: str = "db_connector_tool") -> None:
         for temp_file in temp_files:
             try:
                 temp_file.unlink()
-                logger.info(f"清理临时配置文件: {temp_file}")
-            except Exception as e:
-                logger.warning(f"清理临时配置文件失败 {temp_file}: {e}")
+                logger.info("清理临时配置文件: %s", temp_file)
+            except FileSystemError as e:
+                logger.warning("清理临时配置文件失败 %s: %s", temp_file, e)
 
-        logger.info(f"共清理 {len(temp_files)} 个临时配置文件")
+        logger.info("共清理 %s 个临时配置文件", len(temp_files))

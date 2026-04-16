@@ -30,6 +30,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 from .__about__ import __version__
 from .core.connections import DatabaseManager
+from .core.exceptions import DBConnectorError, DatabaseError, ConfigError, FileSystemError
 from .drivers.sqlalchemy_driver import SQLAlchemyDriver
 from .utils.logging_utils import setup_logging
 
@@ -88,20 +89,20 @@ class DBConnectorCLI:
 
         try:
             db_manager.add_connection(args.name, config)
-            logger.info(f"连接 '{args.name}' 添加成功")
+            logger.info("连接 '%s' 添加成功", args.name)
             print(f"✅ 连接 '{args.name}' 添加成功")
             self._print_custom_params(config)
-        except Exception as e:
-            logger.error(f"添加连接失败: {e}")
+        except (DatabaseError, ConfigError) as e:
+            logger.error("添加连接失败: %s", e)
             print(f"❌ 添加连接失败: {e}")
             sys.exit(1)
 
-    def show_version(self, args: argparse.Namespace) -> None:
+    def show_version(self, _: argparse.Namespace) -> None:
         """
         显示当前模块版本信息
 
         Args:
-            args (argparse.Namespace): 命令行参数
+            _ (argparse.Namespace): 命令行参数
         """
         print(f"DB Connector Tool 版本: {__version__}")
         print("支持的数据类型: Oracle, PostgreSQL, MySQL, SQL Server, SQLite, GBase 8s")
@@ -123,8 +124,8 @@ class DBConnectorCLI:
         if self.db_manager is None:
             try:
                 self.db_manager = DatabaseManager()
-            except Exception as e:
-                logger.error(f"初始化数据库管理器失败: {e}")
+            except (DBConnectorError, DatabaseError, ConfigError) as e:
+                logger.error("初始化数据库管理器失败: %s", e)
                 print(f"❌ 初始化数据库管理器失败: {e}")
                 sys.exit(1)
         return self.db_manager
@@ -183,7 +184,7 @@ class DBConnectorCLI:
         result = {}
         for param in params:
             if "=" not in param:
-                logger.warning(f"忽略无效的自定义参数格式: {param}")
+                logger.warning("忽略无效的自定义参数格式: %s", param)
                 continue
 
             key, value = param.split("=", 1)
@@ -191,7 +192,7 @@ class DBConnectorCLI:
             value = value.strip()
 
             if not key:
-                logger.warning(f"忽略空键名的参数: {param}")
+                logger.warning("忽略空键名的参数: %s", param)
                 continue
 
             result[key] = self._convert_value_type(value)
@@ -265,10 +266,10 @@ class DBConnectorCLI:
 
         try:
             db_manager.remove_connection(args.name)
-            logger.info(f"连接 '{args.name}' 已删除")
+            logger.info("连接 '%s' 已删除", args.name)
             print(f"✅ 连接 '{args.name}' 已删除")
-        except Exception as e:
-            logger.error(f"删除连接失败: {e}")
+        except (DatabaseError, ConfigError) as e:
+            logger.error("删除连接失败: %s", e)
             print(f"❌ 删除连接失败: {e}")
             sys.exit(1)
 
@@ -289,11 +290,11 @@ class DBConnectorCLI:
             update_config = self._build_update_config(existing_config, args)
 
             db_manager.update_connection(args.name, update_config)
-            logger.info(f"连接 '{args.name}' 更新成功")
+            logger.info("连接 '%s' 更新成功", args.name)
             print(f"✅ 连接 '{args.name}' 更新成功")
             self._print_custom_params(update_config)
-        except Exception as e:
-            logger.error(f"更新连接失败: {e}")
+        except (DatabaseError, ConfigError) as e:
+            logger.error("更新连接失败: %s", e)
             print(f"❌ 更新连接失败: {e}")
             sys.exit(1)
 
@@ -354,8 +355,8 @@ class DBConnectorCLI:
             print(f"🔍 连接 '{args.name}' 的配置:")
             self._display_connection_details(safe_config)
 
-        except Exception as e:
-            logger.error(f"获取连接详情失败: {e}")
+        except (DatabaseError, ConfigError) as e:
+            logger.error("获取连接详情失败: %s", e)
             print(f"❌ 获取连接详情失败: {e}")
             sys.exit(1)
 
@@ -417,8 +418,8 @@ class DBConnectorCLI:
                     print(f"  {i}. {conn}")
             else:
                 print("ℹ️  没有配置任何连接")
-        except Exception as e:
-            logger.error(f"列出连接失败: {e}")
+        except (DatabaseError, ConfigError) as e:
+            logger.error("列出连接失败: %s", e)
             print(f"❌ 列出连接失败: {e}")
             sys.exit(1)
 
@@ -440,8 +441,8 @@ class DBConnectorCLI:
             else:
                 print(f"❌ 连接 '{args.name}' 测试失败")
                 sys.exit(1)
-        except Exception as e:
-            logger.error(f"连接测试失败: {e}")
+        except (DatabaseError, ConfigError) as e:
+            logger.error("连接测试失败: %s", e)
             print(f"❌ 连接测试失败: {e}")
             sys.exit(1)
 
@@ -465,8 +466,8 @@ class DBConnectorCLI:
             else:
                 self._display_results(results, args.format)
 
-        except Exception as e:
-            logger.error(f"执行查询失败: {e}")
+        except (DatabaseError, ConfigError) as e:
+            logger.error("执行查询失败: %s", e)
             print(f"❌ 执行查询失败: {e}")
             sys.exit(1)
 
@@ -502,8 +503,8 @@ class DBConnectorCLI:
                     sys.stdout = original_stdout
 
             print(f"✅ 结果已保存到: {output_path}")
-        except Exception as e:
-            logger.error(f"保存结果失败: {e}")
+        except (DatabaseError, ConfigError, FileSystemError) as e:
+            logger.error("保存结果失败: %s", e)
             print(f"❌ 保存结果失败: {e}")
             sys.exit(1)
 
@@ -607,8 +608,8 @@ class DBConnectorCLI:
         """
         try:
             print(json.dumps(results, indent=2, ensure_ascii=False))
-        except Exception as e:
-            logger.error(f"JSON序列化失败: {e}")
+        except (ValueError, TypeError) as e:
+            logger.error("JSON序列化失败: %s", e)
             print(f"❌ JSON序列化失败: {e}")
             sys.exit(1)
 
@@ -644,7 +645,7 @@ class DBConnectorCLI:
 
         # 验证文件存在性
         if not os.path.exists(args.file):
-            logger.error(f"SQL文件不存在: {args.file}")
+            logger.error("SQL文件不存在: %s", args.file)
             print(f"❌ SQL文件不存在: {args.file}")
             sys.exit(1)
 
@@ -665,8 +666,8 @@ class DBConnectorCLI:
             elif results:
                 self._display_results(results, args.format)
 
-        except Exception as e:
-            logger.error(f"执行SQL文件失败: {e}")
+        except (DatabaseError, ConfigError, FileSystemError) as e:
+            logger.error("执行SQL文件失败: %s", e)
             print(f"❌ 执行SQL文件失败: {e}")
             sys.exit(1)
 
@@ -694,7 +695,7 @@ class DBConnectorCLI:
                     sql_content = f.read()
                 return self._split_sql_statements(sql_content)
             except UnicodeDecodeError as e:
-                logger.error(f"无法解码SQL文件: {e}")
+                logger.error("无法解码SQL文件: %s", e)
                 print("❌ 无法解码SQL文件，请检查文件编码")
                 sys.exit(1)
 
@@ -771,9 +772,9 @@ class DBConnectorCLI:
                     affected = db_manager.execute_command(connection_name, statement)
                     print(f"✅ 执行成功，影响行数: {affected}")
                     success_count += 1
-            except Exception as e:
+            except (DatabaseError, ConfigError) as e:
                 error_count += 1
-                logger.error(f"执行语句失败: {e}")
+                logger.error("执行语句失败: %s", e)
                 print(f"❌ 执行语句失败: {e}")
                 if not continue_on_error:
                     sys.exit(1)
@@ -831,10 +832,10 @@ class DBConnectorCLI:
                     sql = input(f"{args.connection}> ").strip()
                     if sql.lower() in ["exit", "quit"]:
                         break
-                    elif sql.lower() == "help":
+                    if sql.lower() == "help":
                         self._print_shell_help()
                         continue
-                    elif not sql:
+                    if not sql:
                         continue
 
                     # 执行SQL
@@ -848,11 +849,11 @@ class DBConnectorCLI:
                 except KeyboardInterrupt:
                     print("\n👋 再见!")
                     break
-                except Exception as e:
+                except (DatabaseError, ConfigError) as e:
                     print(f"❌ 执行错误: {e}")
 
-        except Exception as e:
-            logger.error(f"启动SQL Shell失败: {e}")
+        except (DatabaseError, ConfigError) as e:
+            logger.error("启动SQL Shell失败: %s", e)
             print(f"❌ 启动SQL Shell失败: {e}")
             sys.exit(1)
 

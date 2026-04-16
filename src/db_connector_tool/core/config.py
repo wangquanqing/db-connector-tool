@@ -747,10 +747,10 @@ class ConfigManager:
         """
         import stat
         import platform
-        
+
         try:
             system = platform.system().lower()
-            
+
             if system == "windows":
                 # Windows系统权限设置
                 import subprocess

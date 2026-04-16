@@ -237,19 +237,19 @@ class KeyManager:
         if keyring_available and keyring_module is not None:
             self._load_or_create_key_from_keyring()
         elif KeyManager._env_key_available and KeyManager._env_key:
-                # 环境变量密钥可用，使用环境变量
-                try:
-                    key_data = json.loads(KeyManager._env_key)
-                    self._load_crypto_from_key_data(key_data)
-                    logger.debug("使用环境变量中的加密密钥")
-                except (json.JSONDecodeError, TypeError) as e:
-                    logger.error("环境变量密钥格式错误: %s，请检查 DB_CONNECTOR_TOOL_ENCRYPTION_KEY 环境变量的格式", str(e))
-                    logger.warning("环境变量密钥加载失败，使用文件存储方案")
-                    self._load_or_create_key_from_file()
-                except ConfigError as e:
-                    logger.error("环境变量密钥数据无效: %s，请检查 DB_CONNECTOR_TOOL_ENCRYPTION_KEY 环境变量的内容", str(e))
-                    logger.warning("环境变量密钥加载失败，使用文件存储方案")
-                    self._load_or_create_key_from_file()
+            # 环境变量密钥可用，使用环境变量
+            try:
+                key_data = json.loads(KeyManager._env_key)
+                self._load_crypto_from_key_data(key_data)
+                logger.debug("使用环境变量中的加密密钥")
+            except (json.JSONDecodeError, TypeError) as e:
+                logger.error("环境变量密钥格式错误: %s，请检查 DB_CONNECTOR_TOOL_ENCRYPTION_KEY 环境变量的格式", str(e))
+                logger.warning("环境变量密钥加载失败，使用文件存储方案")
+                self._load_or_create_key_from_file()
+            except ConfigError as e:
+                logger.error("环境变量密钥数据无效: %s，请检查 DB_CONNECTOR_TOOL_ENCRYPTION_KEY 环境变量的内容", str(e))
+                logger.warning("环境变量密钥加载失败，使用文件存储方案")
+                self._load_or_create_key_from_file()
         else:
             # 回退到文件权限方案
             logger.warning("keyring库和环境变量都不可用，使用文件权限保护方案")
@@ -664,7 +664,7 @@ class KeyManager:
         # 检查环境变量密钥
         cls._env_key = os.environ.get("DB_CONNECTOR_TOOL_ENCRYPTION_KEY")
         cls._env_key_available = False
-        
+
         if cls._env_key:
             try:
                 # 验证环境变量格式
