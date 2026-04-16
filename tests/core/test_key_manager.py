@@ -145,11 +145,15 @@ class TestKeyManager(unittest.TestCase):
         key_manager = KeyManager(self.app_name)
         # 创建新的密钥数据
         key_data = {"password": "test_password", "salt": "test_salt"}
-        # 测试保存新密钥
-        key_manager._save_new_key_secure(key_data)
-        # 验证密钥文件已创建
-        key_file = key_manager.config_dir / "encryption.key"
-        self.assertTrue(key_file.exists())
+        
+        # 模拟 keyring 不可用，确保使用文件存储
+        with mock.patch("src.db_connector_tool.core.key_manager.keyring_available", False):
+            # 测试保存新密钥
+            key_manager._save_new_key_secure(key_data)
+            # 验证密钥文件已创建
+            key_file = key_manager.config_dir / "encryption.key"
+            self.assertTrue(key_file.exists())
+        
         key_manager.close()
 
     def test_set_secure_file_permissions(self) -> None:

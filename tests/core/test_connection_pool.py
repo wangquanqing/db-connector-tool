@@ -327,6 +327,40 @@ class TestConnectionPoolManager(unittest.TestCase):
         is_valid = self.pool_manager._is_connection_valid(mock_is_connected_driver)
         self.assertTrue(is_valid)
 
+        # 测试is_connected方法抛出异常的情况
+        mock_is_connected_error_driver = Mock(spec=['is_connected'])
+        mock_is_connected_error_driver.is_connected.side_effect = Exception("is_connected failed")
+        is_valid = self.pool_manager._is_connection_valid(mock_is_connected_error_driver)
+        self.assertFalse(is_valid)
+
+        # 测试SQLAlchemy驱动（有engine属性）
+        from unittest.mock import MagicMock
+        mock_sqlalchemy_driver = Mock(spec=['engine'])
+        mock_engine = Mock()
+        mock_connection = Mock()
+        mock_result = Mock()
+        mock_sqlalchemy_driver.engine = mock_engine
+        # 使用MagicMock来正确模拟上下文管理器
+        mock_context = MagicMock()
+        mock_context.__enter__.return_value = mock_connection
+        mock_engine.connect.return_value = mock_context
+        mock_connection.execute.return_value = mock_result
+        is_valid = self.pool_manager._is_connection_valid(mock_sqlalchemy_driver)
+        self.assertTrue(is_valid)
+
+        # 测试SQLAlchemy驱动连接失败的情况
+        mock_sqlalchemy_error_driver = Mock(spec=['engine'])
+        mock_error_engine = Mock()
+        mock_sqlalchemy_error_driver.engine = mock_error_engine
+        mock_error_engine.connect.side_effect = Exception("Connection failed")
+        is_valid = self.pool_manager._is_connection_valid(mock_sqlalchemy_error_driver)
+        self.assertFalse(is_valid)
+
+        # 测试基本驱动（没有任何验证方法）
+        mock_basic_driver = Mock()
+        is_valid = self.pool_manager._is_connection_valid(mock_basic_driver)
+        self.assertTrue(is_valid)
+
     def test_update_metadata_nonexistent_connection(self):
         """测试更新不存在连接的元数据"""
         # 尝试更新不存在连接的元数据，应该不会抛出异常

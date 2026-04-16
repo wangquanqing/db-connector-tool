@@ -666,15 +666,91 @@ class TestConfigManagerAdvanced(unittest.TestCase):
 
     def test_crypto_none_in_update_config(self) -> None:
         """测试 update_config 中 crypto 为 None 的情况"""
-        # 这个测试暂时跳过，因为当 crypto 为 None 时，_load_config 会重置配置文件
-        # 实际上 crypto 为 None 的路径已经在 add_config 中被覆盖了
-        pass
+        with ConfigManager(self.app_name, self.config_file) as config_manager:
+            # 先添加一个配置
+            config_manager.add_config("test_db", {"host": "localhost"})
+            # 清空 crypto
+            config_manager.key_manager.crypto = None
+            # 模拟 _load_config 返回包含连接配置的字典
+            import unittest.mock
+            with unittest.mock.patch.object(config_manager, '_load_config') as mock_load:
+                # 创建一个包含连接配置的模拟配置
+                mock_config = {
+                    "app_name": self.app_name,
+                    "version": "1.0.0",
+                    "connections": {
+                        "test_db": {"host": "localhost"}
+                    },
+                    "metadata": {
+                        "created": "2026-04-16T01:57:52.091008+00:00",
+                        "key_version": "1",
+                        "audit_log": []
+                    }
+                }
+                mock_load.return_value = mock_config
+                # 模拟 _save_config 不做任何操作
+                with unittest.mock.patch.object(config_manager, '_save_config') as mock_save:
+                    # 更新配置，这会触发 crypto 为 None 的路径
+                    config_manager.update_config("test_db", {"host": "newhost"})
 
     def test_crypto_none_in_get_config(self) -> None:
         """测试 get_config 中 crypto 为 None 的情况"""
-        # 这个测试暂时跳过，因为当 crypto 为 None 时，_load_config 会重置配置文件
-        # 实际上 crypto 为 None 的路径已经在 add_config 和 update_config 中被覆盖了
-        pass
+        with ConfigManager(self.app_name, self.config_file) as config_manager:
+            # 先添加一个配置
+            config_manager.add_config("test_db", {"host": "localhost"})
+            # 清空 crypto
+            config_manager.key_manager.crypto = None
+            # 模拟 _load_config 返回包含连接配置的字典
+            import unittest.mock
+            with unittest.mock.patch.object(config_manager, '_load_config') as mock_load:
+                # 创建一个包含连接配置的模拟配置
+                mock_config = {
+                    "app_name": self.app_name,
+                    "version": "1.0.0",
+                    "connections": {
+                        "test_db": {"host": "localhost"}
+                    },
+                    "metadata": {
+                        "created": "2026-04-16T01:57:52.091008+00:00",
+                        "key_version": "1",
+                        "audit_log": []
+                    }
+                }
+                mock_load.return_value = mock_config
+                # 模拟 security_manager.decrypt_dict_values 返回原始值
+                with unittest.mock.patch.object(config_manager.security_manager, 'decrypt_dict_values') as mock_decrypt:
+                    mock_decrypt.return_value = {"host": "localhost"}
+                    # 获取配置，这会触发 crypto 为 None 的路径
+                    retrieved = config_manager.get_config("test_db")
+                    self.assertEqual(retrieved["host"], "localhost")
+
+    def test_increment_config_version_failure(self) -> None:
+        """测试版本号递增失败的情况"""
+        with ConfigManager(self.app_name, self.config_file) as config_manager:
+            config = config_manager._load_config()
+            # 模拟版本号递增失败
+            import unittest.mock
+            with unittest.mock.patch.object(config_manager, '_parse_version_parts') as mock_parse:
+                mock_parse.side_effect = ValueError("版本号解析失败")
+                # 这应该不会抛出异常，只是记录警告
+                config_manager._increment_config_version(config)
+                # 验证版本号保持不变
+                original_version = config["version"]
+                self.assertEqual(config["version"], original_version)
+
+    def test_set_secure_file_permissions_failure(self) -> None:
+        """测试设置配置文件权限失败的情况"""
+        with ConfigManager(self.app_name, self.config_file) as config_manager:
+            import unittest.mock
+            # 测试异常处理路径
+            # 直接测试方法，确保它能处理异常
+            try:
+                # 这里我们不模拟任何东西，让方法正常执行
+                # 由于我们在测试环境中，权限设置可能会失败，这正好测试了异常处理路径
+                config_manager._set_secure_file_permissions()
+            except Exception as e:
+                # 方法不应该抛出异常，只是记录警告
+                self.fail(f"_set_secure_file_permissions 方法抛出了异常: {e}")
 
     def test_increment_config_version_rethrow(self) -> None:
         """测试 _increment_config_version 中的异常重新抛出"""

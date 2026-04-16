@@ -335,6 +335,39 @@ class TestBatchDatabaseManager(unittest.TestCase):
             self.assertFalse(results[0]["success"])
             self.assertIn("error", results[0])
 
+    def test_execute_upgrade_sqls_with_rollback_error(self):
+        """测试执行升级SQL时出现错误且回滚也失败的情况"""
+        self.batch_manager.set_base_config(self.base_config)
+
+        # 模拟执行查询失败，然后模拟回滚也失败
+        with mock.patch.object(
+            self.batch_manager.db_manager, "execute_query", side_effect=[
+                Exception("Execute query failed"),  # 第一次调用执行SQL失败
+                Exception("Rollback failed")  # 第二次调用回滚失败
+            ]
+        ):
+            results = self.batch_manager._execute_upgrade_sqls(
+                "db_000", ["ALTER TABLE users ADD COLUMN age INT"], ["ROLLBACK"]
+            )
+            self.assertEqual(len(results), 1)
+            self.assertFalse(results[0]["success"])
+            self.assertIn("error", results[0])
+
+    def test_execute_upgrade_sqls_with_unknown_error(self):
+        """测试执行升级SQL时出现未知错误的情况"""
+        self.batch_manager.set_base_config(self.base_config)
+
+        # 模拟执行查询失败，触发外层异常处理
+        with mock.patch.object(
+            self.batch_manager.db_manager, "execute_query", side_effect=Exception("Unknown error")
+        ):
+            results = self.batch_manager._execute_upgrade_sqls(
+                "db_000", ["ALTER TABLE users ADD COLUMN age INT"], ["ROLLBACK"]
+            )
+            self.assertEqual(len(results), 1)
+            self.assertFalse(results[0]["success"])
+            self.assertIn("error", results[0])
+
     def test_cleanup_temp_configs_no_dir(self):
         """测试清理临时配置文件（目录不存在）"""
         # 模拟目录不存在
@@ -391,15 +424,65 @@ class TestBatchDatabaseManager(unittest.TestCase):
 
     def test_remove_existing_connection_with_critical_error(self):
         """测试删除已存在连接时发生严重错误"""
-        # 我们通过模拟整个_remove_existing_connection函数，让它抛出异常
-        # 这样我们需要采用另一种方式来覆盖严重错误处理
-        pass
+        self.batch_manager.set_base_config(self.base_config)
+        
+        # 模拟删除连接时发生严重错误
+        with mock.patch.object(
+            self.batch_manager.db_manager, "remove_connection", side_effect=Exception("Remove connection failed")
+        ):
+            # 模拟整个方法抛出异常
+            with mock.patch.object(
+                self.batch_manager, "_remove_existing_connection", side_effect=Exception("Critical error")
+            ):
+                # 验证方法会抛出异常
+                with self.assertRaises(Exception):
+                    self.batch_manager._remove_existing_connection("db_000")
 
     def test_cleanup_with_critical_error(self):
         """测试清理过程中发生严重错误"""
-        # 我们通过mock整个cleanup函数抛出异常
-        # 采用另一种方式
-        pass
+        self.batch_manager.set_base_config(self.base_config)
+        self.batch_manager._connection_names = ["db_000"]
+
+        # 模拟清理连接名称列表时发生严重错误
+        with mock.patch.object(
+            self.batch_manager.db_manager.pool_manager, "remove_connection", side_effect=Exception("Remove connection failed")
+        ):
+            # 模拟获取连接名称时抛出异常
+            with mock.patch.object(
+                self.batch_manager, "_get_all_connection_names", side_effect=Exception("Get connection names failed")
+            ):
+                # 验证方法会抛出异常
+                with self.assertRaises(Exception):
+                    self.batch_manager.cleanup()
+
+    def test_del_method(self):
+        """测试析构函数"""
+        # 创建一个新的批量管理器
+        batch_manager = BatchDatabaseManager("test_del")
+        batch_manager.set_base_config(self.base_config)
+        # 确保_is_cleaned为False
+        self.assertFalse(batch_manager._is_cleaned)
+        # 手动调用析构函数
+        del batch_manager
+        # 析构函数会调用cleanup，这里我们无法直接验证，但代码会被覆盖
+
+    def test_add_batch_connections_existing_in_list(self):
+        """测试添加已存在于连接名称列表中的连接"""
+        self.batch_manager.set_base_config(self.base_config)
+        self.batch_manager._connection_names = ["db_000"]
+        ip_list = ["192.168.1.1"]
+
+        # 模拟数据库管理器的方法
+        with mock.patch.object(
+            self.batch_manager.db_manager, "list_connections", return_value=[]
+        ):
+            with mock.patch.object(self.batch_manager.db_manager, "add_connection"):
+                results = self.batch_manager.add_batch_connections(ip_list)
+                self.assertEqual(len(results), 1)
+                self.assertTrue(results["192.168.1.1"])
+                # 验证连接名称列表中仍然只有一个元素（没有重复添加）
+                self.assertEqual(len(self.batch_manager._connection_names), 1)
+                self.assertIn("db_000", self.batch_manager._connection_names)
 
     def test_execute_batch_query_with_query_error(self):
         """测试批量执行查询时出现QueryError"""

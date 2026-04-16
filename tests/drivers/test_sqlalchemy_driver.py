@@ -498,6 +498,91 @@ class TestSQLAlchemyDriver(unittest.TestCase):
             args, kwargs = mock_create_engine.call_args
             self.assertEqual(kwargs["pool_recycle"], 3600)
 
+
+
+    def test_execute_sql_no_engine(self) -> None:
+        """测试execute_sql方法在engine未初始化时的处理"""
+        driver = SQLAlchemyDriver(self.base_config)
+        driver.engine = None
+        with patch("src.db_connector_tool.drivers.sqlalchemy_driver.create_engine") as mock_create_engine:
+            mock_engine = MagicMock()
+            mock_connection = MagicMock()
+            mock_result = MagicMock()
+            mock_result.all.return_value = []
+            mock_connection.execute.return_value = mock_result
+            mock_engine.connect.return_value.__enter__.return_value = mock_connection
+            mock_create_engine.return_value = mock_engine
+            result = driver.execute_sql("SELECT * FROM users")
+            self.assertEqual(result, [])
+
+    def test_get_tables_no_engine(self) -> None:
+        """测试get_tables方法在engine未初始化时的处理"""
+        driver = SQLAlchemyDriver(self.base_config)
+        driver.engine = None
+        with patch("src.db_connector_tool.drivers.sqlalchemy_driver.create_engine") as mock_create_engine:
+            mock_engine = MagicMock()
+            mock_inspector = MagicMock()
+            mock_inspector.get_table_names.return_value = ["users", "posts"]
+            with patch("src.db_connector_tool.drivers.sqlalchemy_driver.inspect", return_value=mock_inspector):
+                mock_create_engine.return_value = mock_engine
+                tables = driver.get_tables()
+                self.assertEqual(tables, ["users", "posts"])
+
+    def test_get_table_schema_no_engine(self) -> None:
+        """测试get_table_schema方法在engine未初始化时的处理"""
+        driver = SQLAlchemyDriver(self.base_config)
+        driver.engine = None
+        with patch("src.db_connector_tool.drivers.sqlalchemy_driver.create_engine") as mock_create_engine:
+            mock_engine = MagicMock()
+            mock_inspector = MagicMock()
+            mock_inspector.get_columns.return_value = [
+                {"name": "id", "type": "INTEGER", "nullable": False},
+                {"name": "name", "type": "VARCHAR", "nullable": True},
+            ]
+            with patch("src.db_connector_tool.drivers.sqlalchemy_driver.inspect", return_value=mock_inspector):
+                mock_create_engine.return_value = mock_engine
+                schema = driver.get_table_schema("users")
+                self.assertEqual(len(schema), 2)
+                self.assertEqual(schema[0]["name"], "id")
+
+    def test_execute_sql_sqlalchemy_error(self) -> None:
+        """测试execute_sql方法的SQLAlchemyError处理"""
+        from sqlalchemy.exc import SQLAlchemyError
+        driver = SQLAlchemyDriver(self.base_config)
+        driver.engine = MagicMock()
+        mock_connection = MagicMock()
+        mock_connection.execute.side_effect = SQLAlchemyError("Database error")
+        driver.engine.connect.return_value.__enter__.return_value = mock_connection
+        with self.assertRaises(QueryError) as context:
+            driver.execute_sql("SELECT * FROM users")
+        self.assertIn("执行SQL失败", str(context.exception))
+
+    def test_get_tables_sqlalchemy_error(self) -> None:
+        """测试get_tables方法的SQLAlchemyError处理"""
+        from sqlalchemy.exc import SQLAlchemyError
+        driver = SQLAlchemyDriver(self.base_config)
+        driver.engine = MagicMock()
+        with patch("src.db_connector_tool.drivers.sqlalchemy_driver.inspect") as mock_inspect:
+            mock_inspector = MagicMock()
+            mock_inspector.get_table_names.side_effect = SQLAlchemyError("Database error")
+            mock_inspect.return_value = mock_inspector
+            with self.assertRaises(QueryError) as context:
+                driver.get_tables()
+            self.assertIn("获取表列表失败", str(context.exception))
+
+    def test_get_table_schema_sqlalchemy_error(self) -> None:
+        """测试get_table_schema方法的SQLAlchemyError处理"""
+        from sqlalchemy.exc import SQLAlchemyError
+        driver = SQLAlchemyDriver(self.base_config)
+        driver.engine = MagicMock()
+        with patch("src.db_connector_tool.drivers.sqlalchemy_driver.inspect") as mock_inspect:
+            mock_inspector = MagicMock()
+            mock_inspector.get_columns.side_effect = SQLAlchemyError("Database error")
+            mock_inspect.return_value = mock_inspector
+            with self.assertRaises(QueryError) as context:
+                driver.get_table_schema("users")
+            self.assertIn("获取表结构失败", str(context.exception))
+
     def test_connect_oracle(self) -> None:
         """测试Oracle连接池配置"""
         oracle_config = {
@@ -661,6 +746,135 @@ class TestSQLAlchemyDriver(unittest.TestCase):
                     pass
                 mock_connect.assert_called_once()
                 mock_disconnect.assert_called_once()
+
+    def test_parse_kingbase_version(self) -> None:
+        """测试解析 Kingbase 版本信息"""
+        from src.db_connector_tool.drivers.sqlalchemy_driver import parse_kingbase_version
+        # 模拟连接对象
+        mock_connection = MagicMock()
+        # 测试 PostgreSQL 格式的版本字符串
+        mock_connection.exec_driver_sql.return_value.scalar.return_value = "PostgreSQL 8.6.0 on x86_64"
+        version = parse_kingbase_version(None, mock_connection)
+        self.assertEqual(version, (8, 6, 0))
+        
+        # 测试 Kingbase 格式的版本字符串
+        mock_connection.exec_driver_sql.return_value.scalar.return_value = "Kingbase V8R6C4B10"
+        version = parse_kingbase_version(None, mock_connection)
+        self.assertEqual(version, (8, 6, 4))
+        
+        # 测试无法解析的版本字符串
+        mock_connection.exec_driver_sql.return_value.scalar.return_value = "Unknown version"
+        with self.assertRaises(AssertionError):
+            parse_kingbase_version(None, mock_connection)
+
+    def test_connect_with_user_pool_config(self) -> None:
+        """测试使用用户自定义连接池配置"""
+        config_with_pool = {
+            "type": "mysql",
+            "host": "localhost",
+            "port": 3306,
+            "username": "root",
+            "password": "password",
+            "database": "test_db",
+            "pool_config": {"pool_size": 10, "max_overflow": 20},
+        }
+        driver = SQLAlchemyDriver(config_with_pool)
+        with patch("src.db_connector_tool.drivers.sqlalchemy_driver.create_engine") as mock_create_engine:
+            mock_create_engine.return_value = MagicMock()
+            driver.connect()
+            args, kwargs = mock_create_engine.call_args
+            self.assertEqual(kwargs["pool_size"], 10)
+            self.assertEqual(kwargs["max_overflow"], 20)
+
+    def test_disconnect_with_engine(self) -> None:
+        """测试断开连接时引擎存在的情况"""
+        driver = SQLAlchemyDriver(self.base_config)
+        mock_engine = MagicMock()
+        driver.engine = mock_engine
+        driver.session = MagicMock()
+        driver.disconnect()
+        mock_engine.dispose.assert_called_once()
+        self.assertIsNone(driver.engine)
+
+    def test_test_connection_database_error(self) -> None:
+        """测试连接测试时的数据库错误"""
+        driver = SQLAlchemyDriver(self.base_config)
+        driver.engine = MagicMock()
+        from sqlalchemy.exc import SQLAlchemyError
+        with patch.object(driver, "_perform_connection_test", side_effect=SQLAlchemyError("数据库错误")):
+            result = driver.test_connection()
+            self.assertFalse(result)
+
+    def test_execute_sql_no_engine(self) -> None:
+        """测试执行SQL时引擎未初始化的情况"""
+        driver = SQLAlchemyDriver(self.base_config)
+        driver.engine = None
+        with patch.object(driver, "connect") as mock_connect:
+            mock_connect.return_value = None
+            driver.engine = MagicMock()
+            mock_connection = MagicMock()
+            mock_result = MagicMock()
+            mock_result.keys.return_value = ["id"]
+            mock_result.fetchall.return_value = [(1,)]
+            mock_connection.execute.return_value = mock_result
+            driver.engine.connect.return_value.__enter__.return_value = mock_connection
+            results = driver.execute_query("SELECT * FROM users")
+            self.assertEqual(len(results), 1)
+
+    def test_execute_sql_sqlalchemy_error(self) -> None:
+        """测试执行SQL时的SQLAlchemy错误"""
+        driver = SQLAlchemyDriver(self.base_config)
+        driver.engine = MagicMock()
+        mock_connection = MagicMock()
+        from sqlalchemy.exc import SQLAlchemyError
+        mock_connection.execute.side_effect = SQLAlchemyError("数据库错误")
+        driver.engine.connect.return_value.__enter__.return_value = mock_connection
+        with self.assertRaises(QueryError):
+            driver.execute_query("SELECT * FROM users")
+
+    def test_get_tables_no_engine(self) -> None:
+        """测试获取表列表时引擎未初始化的情况"""
+        driver = SQLAlchemyDriver(self.base_config)
+        driver.engine = None
+        with patch.object(driver, "connect") as mock_connect:
+            mock_connect.return_value = None
+            driver.engine = MagicMock()
+            mock_inspector = MagicMock()
+            mock_inspector.get_table_names.return_value = ["users"]
+            with patch("src.db_connector_tool.drivers.sqlalchemy_driver.inspect", return_value=mock_inspector):
+                tables = driver.get_tables()
+                self.assertEqual(len(tables), 1)
+
+    def test_get_tables_sqlalchemy_error(self) -> None:
+        """测试获取表列表时的SQLAlchemy错误"""
+        driver = SQLAlchemyDriver(self.base_config)
+        driver.engine = MagicMock()
+        from sqlalchemy.exc import SQLAlchemyError
+        with patch("src.db_connector_tool.drivers.sqlalchemy_driver.inspect", side_effect=SQLAlchemyError("数据库错误")):
+            with self.assertRaises(QueryError):
+                driver.get_tables()
+
+    def test_get_table_schema_no_engine(self) -> None:
+        """测试获取表结构时引擎未初始化的情况"""
+        driver = SQLAlchemyDriver(self.base_config)
+        driver.engine = None
+        with patch.object(driver, "connect") as mock_connect:
+            mock_connect.return_value = None
+            driver.engine = MagicMock()
+            mock_inspector = MagicMock()
+            mock_inspector.get_columns.return_value = [{"name": "id", "type": "INTEGER"}]
+            with patch("src.db_connector_tool.drivers.sqlalchemy_driver.inspect", return_value=mock_inspector):
+                schema = driver.get_table_schema("users")
+                self.assertEqual(len(schema), 1)
+
+    def test_get_table_schema_sqlalchemy_error(self) -> None:
+        """测试获取表结构时的SQLAlchemy错误"""
+        driver = SQLAlchemyDriver(self.base_config)
+        driver.engine = MagicMock()
+        from sqlalchemy.exc import SQLAlchemyError
+        with patch("src.db_connector_tool.drivers.sqlalchemy_driver.inspect", side_effect=SQLAlchemyError("数据库错误")):
+            with self.assertRaises(QueryError):
+                driver.get_table_schema("users")
 
 
 class TestSQLAlchemyDriverAdvanced(unittest.TestCase):

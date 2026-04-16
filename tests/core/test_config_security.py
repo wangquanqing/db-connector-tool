@@ -1,7 +1,7 @@
 import os
 import tempfile
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 from unittest.mock import patch, MagicMock
 
@@ -149,7 +149,7 @@ class TestConfigSecurityManager(unittest.TestCase):
         config["metadata"]["signature"] = signature
         # 设置过期时间戳（超过1小时）
         expired_time = datetime.now(timezone.utc)
-        expired_time = expired_time.replace(hour=expired_time.hour - 2)
+        expired_time = expired_time - timedelta(hours=2)
         config["metadata"]["signature_timestamp"] = expired_time.isoformat()
         
         # 验证签名应该失败
