@@ -259,7 +259,7 @@ class GBase8sJDBCDialect(OracleDialect, ABC):
         else:
             app_name = "db_connector_tool"
             config_dir = PathHelper.get_user_config_dir(app_name)
-            config_path = config_dir / "jars"
+            config_path = os.path.join(config_dir, "jars")
             path = Path(config_path)
             # 使用 glob 递归获取所有文件
             files = [p for p in path.rglob("*gbase*.jar") if p.is_file()]
@@ -274,7 +274,7 @@ class GBase8sJDBCDialect(OracleDialect, ABC):
             path_display = jar_path if jar_path is not None else "未找到任何搜索路径"
             # 获取正确的默认目录路径，使用os.path.join确保路径分隔符正确
             default_jar_dir = PathHelper.get_user_config_dir("db_connector_tool")
-            default_jar_path = os.path.join(default_jar_dir, "jars\\")
+            default_jar_path = os.path.join(default_jar_dir, "jars")
             warnings.warn(
                 f"GBase 8s JDBC驱动jar文件未找到。\n"
                 f"当前搜索路径: {path_display}\n"

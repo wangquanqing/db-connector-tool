@@ -193,7 +193,7 @@ class ConnectionPoolManager:
                     logger.debug("连接 %s 已安全关闭", name)
                 else:
                     logger.debug("连接 %s 未连接或已关闭", name)
-            except (OSError, DatabaseError) as error:
+            except Exception as error:
                 logger.error("清理连接 %s 时发生严重异常: %s", name, str(error))
             finally:
                 # 确保从连接池中移除，避免内存泄漏
@@ -237,9 +237,14 @@ class ConnectionPoolManager:
             logger.debug("驱动实例为None")
             return False
 
-        # 检查驱动实例是否有必要的方法
-        if not hasattr(driver, "test_connection"):
-            logger.debug("驱动实例缺少test_connection方法")
+        # 检查驱动实例是否有必要的方法（test_connection、ping、is_connected 或 engine）
+        if not any([
+            hasattr(driver, "test_connection"),
+            hasattr(driver, "ping"),
+            hasattr(driver, "is_connected"),
+            hasattr(driver, "engine")
+        ]):
+            logger.debug("驱动实例缺少必要的方法")
             return False
 
         # 对于SQLAlchemyDriver，检查engine属性
