@@ -243,11 +243,17 @@ class KeyManager:
                 self._load_crypto_from_key_data(key_data)
                 logger.debug("使用环境变量中的加密密钥")
             except (json.JSONDecodeError, TypeError) as e:
-                logger.error("环境变量密钥格式错误: %s，请检查 DB_CONNECTOR_TOOL_ENCRYPTION_KEY 环境变量的格式", str(e))
+                logger.error(
+                    "环境变量密钥格式错误: %s，请检查 DB_CONNECTOR_TOOL_ENCRYPTION_KEY 环境变量的格式",
+                    str(e),
+                )
                 logger.warning("环境变量密钥加载失败，使用文件存储方案")
                 self._load_or_create_key_from_file()
             except ConfigError as e:
-                logger.error("环境变量密钥数据无效: %s，请检查 DB_CONNECTOR_TOOL_ENCRYPTION_KEY 环境变量的内容", str(e))
+                logger.error(
+                    "环境变量密钥数据无效: %s，请检查 DB_CONNECTOR_TOOL_ENCRYPTION_KEY 环境变量的内容",
+                    str(e),
+                )
                 logger.warning("环境变量密钥加载失败，使用文件存储方案")
                 self._load_or_create_key_from_file()
         else:

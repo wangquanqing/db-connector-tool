@@ -373,7 +373,9 @@ class ConfigSecurityManager:
         original_key_version = config["metadata"].get("key_version", "1")
 
         # 保存原始密钥信息，用于回滚
-        original_key_info = self.key_manager.crypto.get_key_info() if self.key_manager.crypto else None
+        original_key_info = (
+            self.key_manager.crypto.get_key_info() if self.key_manager.crypto else None
+        )
 
         try:
             # 解密所有连接配置
@@ -403,10 +405,11 @@ class ConfigSecurityManager:
                 try:
                     # 尝试恢复原始密钥
                     from .crypto import CryptoManager
+
                     self.key_manager.crypto = CryptoManager.from_saved_key(
                         original_key_info["password"],
                         original_key_info["salt"],
-                        original_key_info["iterations"]
+                        original_key_info["iterations"],
                     )
                     logger.debug("已恢复原始加密密钥")
                 except Exception as key_restore_error:

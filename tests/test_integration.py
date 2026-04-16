@@ -7,10 +7,10 @@ import tempfile
 from pathlib import Path
 from unittest import TestCase, mock
 
-from db_connector_tool import DatabaseManager, BatchDatabaseManager, generate_ip_range
+from db_connector_tool import BatchDatabaseManager, DatabaseManager, generate_ip_range
 from db_connector_tool.core.config import ConfigManager
-from db_connector_tool.core.key_manager import KeyManager
 from db_connector_tool.core.crypto import CryptoManager
+from db_connector_tool.core.key_manager import KeyManager
 from db_connector_tool.utils.path_utils import PathHelper
 
 
@@ -43,10 +43,7 @@ class TestIntegration(TestCase):
         self.assertTrue(self.key_manager.crypto is not None)
 
         # 2. 测试配置管理
-        test_config = {
-            "type": "sqlite",
-            "database": ":memory:"
-        }
+        test_config = {"type": "sqlite", "database": ":memory:"}
         self.config_manager.add_config("test_conn", test_config)
         configs = self.config_manager.list_configs()
         self.assertIn("test_conn", configs)
@@ -86,10 +83,7 @@ class TestIntegration(TestCase):
     def test_batch_manager_integration(self):
         """测试批处理管理器集成"""
         # 设置基础配置
-        base_config = {
-            "type": "sqlite",
-            "database": ":memory:"
-        }
+        base_config = {"type": "sqlite", "database": ":memory:"}
 
         # 创建批量管理器
         with BatchDatabaseManager("test_batch") as batch_manager:
@@ -131,6 +125,7 @@ class TestIntegration(TestCase):
 
         # 测试密码强度验证
         from db_connector_tool.core.validators import PasswordValidator
+
         strong_password = "StrongPassword123!"
         weak_password = "weak"
         self.assertTrue(PasswordValidator.validate_strength(strong_password))
@@ -139,4 +134,5 @@ class TestIntegration(TestCase):
 
 if __name__ == "__main__":
     import unittest
+
     unittest.main()

@@ -1,13 +1,12 @@
 import os
 import tempfile
 import unittest
-from datetime import datetime, timezone, timedelta
-
-from unittest.mock import patch, MagicMock
+from datetime import datetime, timedelta, timezone
+from unittest.mock import MagicMock, patch
 
 from src.db_connector_tool.core.config_security import ConfigSecurityManager
-from src.db_connector_tool.core.key_manager import KeyManager
 from src.db_connector_tool.core.exceptions import ConfigError
+from src.db_connector_tool.core.key_manager import KeyManager
 
 
 class TestConfigSecurityManager(unittest.TestCase):
@@ -79,8 +78,10 @@ class TestConfigSecurityManager(unittest.TestCase):
         # 生成签名并添加到配置
         signature = security_manager.generate_config_signature(config)
         config["metadata"]["signature"] = signature
-        config["metadata"]["signature_timestamp"] = datetime.now(timezone.utc).isoformat()
-        
+        config["metadata"]["signature_timestamp"] = datetime.now(
+            timezone.utc
+        ).isoformat()
+
         # 验证签名
         result = security_manager.verify_config_signature(config)
         self.assertTrue(result)
@@ -102,7 +103,7 @@ class TestConfigSecurityManager(unittest.TestCase):
                 "signature_timestamp": datetime.now(timezone.utc).isoformat(),
             },
         }
-        
+
         # 验证签名应该失败
         with self.assertRaises(ConfigError):
             security_manager.verify_config_signature(config)
@@ -123,7 +124,7 @@ class TestConfigSecurityManager(unittest.TestCase):
                 "signature": "some_signature",
             },
         }
-        
+
         # 模拟加密管理器未初始化
         self.key_manager.crypto = None
         with self.assertRaises(ConfigError):
@@ -151,7 +152,7 @@ class TestConfigSecurityManager(unittest.TestCase):
         expired_time = datetime.now(timezone.utc)
         expired_time = expired_time - timedelta(hours=2)
         config["metadata"]["signature_timestamp"] = expired_time.isoformat()
-        
+
         # 验证签名应该失败
         with self.assertRaises(ConfigError):
             security_manager.verify_config_signature(config)
@@ -175,7 +176,7 @@ class TestConfigSecurityManager(unittest.TestCase):
         signature = security_manager.generate_config_signature(config)
         config["metadata"]["signature"] = signature
         config["metadata"]["signature_timestamp"] = "invalid_timestamp"
-        
+
         # 验证签名应该失败
         with self.assertRaises(ConfigError):
             security_manager.verify_config_signature(config)
@@ -198,7 +199,7 @@ class TestConfigSecurityManager(unittest.TestCase):
         # 生成签名并添加到配置，但不添加时间戳
         signature = security_manager.generate_config_signature(config)
         config["metadata"]["signature"] = signature
-        
+
         # 验证签名应该失败
         with self.assertRaises(ConfigError):
             security_manager.verify_config_signature(config)
@@ -223,7 +224,7 @@ class TestConfigSecurityManager(unittest.TestCase):
         config["metadata"]["signature"] = signature
         # 设置无时区信息的时间戳
         config["metadata"]["signature_timestamp"] = datetime.now().isoformat()
-        
+
         # 验证签名应该成功
         result = security_manager.verify_config_signature(config)
         self.assertTrue(result)
@@ -245,9 +246,12 @@ class TestConfigSecurityManager(unittest.TestCase):
                 "signature_timestamp": datetime.now(timezone.utc).isoformat(),
             },
         }
-        
+
         # 模拟 tomli_w.dumps 抛出异常
-        with patch('src.db_connector_tool.core.config_security.tomli_w.dumps', side_effect=ValueError("模拟异常")):
+        with patch(
+            "src.db_connector_tool.core.config_security.tomli_w.dumps",
+            side_effect=ValueError("模拟异常"),
+        ):
             with self.assertRaises(ConfigError):
                 security_manager.verify_config_signature(config)
 
@@ -339,13 +343,15 @@ class TestConfigSecurityManager(unittest.TestCase):
         for i in range(101):
             current_time = f"2024-01-01T00:00:{i:02d}"
             security_manager.add_audit_log_entry(config, f"operation_{i}", current_time)
-        
+
         # 应该只保留最后 100 条
         self.assertEqual(len(config["metadata"]["audit_log"]), 100)
         # 第一条应该是 operation_1
         self.assertEqual(config["metadata"]["audit_log"][0]["operation"], "operation_1")
         # 最后一条应该是 operation_100
-        self.assertEqual(config["metadata"]["audit_log"][-1]["operation"], "operation_100")
+        self.assertEqual(
+            config["metadata"]["audit_log"][-1]["operation"], "operation_100"
+        )
 
     def test_encrypt_dict_values(self) -> None:
         """测试加密字典值"""
@@ -384,19 +390,19 @@ class TestConfigSecurityManager(unittest.TestCase):
     def test_deserialize_value_various_types(self) -> None:
         """测试 _deserialize_value 方法支持各种类型"""
         security_manager = ConfigSecurityManager(self.key_manager)
-        
+
         # 测试 bool 类型
         bool_str = '{"type": "bool", "value": true}'
         result = security_manager._deserialize_value(bool_str)
         self.assertIsInstance(result, bool)
         self.assertTrue(result)
-        
+
         # 测试 float 类型
         float_str = '{"type": "float", "value": 3.14}'
         result = security_manager._deserialize_value(float_str)
         self.assertIsInstance(result, float)
         self.assertEqual(result, 3.14)
-        
+
         # 测试其他类型
         other_str = '{"type": "list", "value": [1, 2, 3]}'
         result = security_manager._deserialize_value(other_str)
@@ -405,14 +411,14 @@ class TestConfigSecurityManager(unittest.TestCase):
     def test_deserialize_value_with_invalid_json(self) -> None:
         """测试 _deserialize_value 方法处理无效 JSON"""
         security_manager = ConfigSecurityManager(self.key_manager)
-        
+
         with self.assertRaises(ConfigError):
             security_manager._deserialize_value("invalid json")
 
     def test_deserialize_value_missing_type_or_value(self) -> None:
         """测试 _deserialize_value 方法处理缺少类型或值的情况"""
         security_manager = ConfigSecurityManager(self.key_manager)
-        
+
         with self.assertRaises(ConfigError):
             security_manager._deserialize_value('{"type": "int"}')
 
@@ -453,7 +459,7 @@ class TestConfigSecurityManager(unittest.TestCase):
     def test_perform_key_rotation_with_error_rollback(self) -> None:
         """测试密钥轮换失败时的回滚逻辑"""
         security_manager = ConfigSecurityManager(self.key_manager)
-        
+
         # 生成配置数据
         config = {
             "version": "1.0.0",
@@ -479,26 +485,30 @@ class TestConfigSecurityManager(unittest.TestCase):
             config["connections"]["test_db"]
         )
         config["connections"]["test_db"] = encrypted_connections
-        
+
         # 保存原始配置用于比较
         original_config = {
             "connections": config["connections"].copy(),
-            "key_version": config["metadata"]["key_version"]
+            "key_version": config["metadata"]["key_version"],
         }
-        
+
         # 模拟密钥轮换过程中的错误
-        with patch.object(self.key_manager, 'rotate_key', side_effect=Exception("模拟错误")):
+        with patch.object(
+            self.key_manager, "rotate_key", side_effect=Exception("模拟错误")
+        ):
             with self.assertRaises(ConfigError):
                 security_manager.perform_key_rotation(config)
-        
+
         # 验证配置已回滚
         self.assertEqual(config["connections"], original_config["connections"])
-        self.assertEqual(config["metadata"]["key_version"], original_config["key_version"])
+        self.assertEqual(
+            config["metadata"]["key_version"], original_config["key_version"]
+        )
 
     def test_perform_key_rotation_with_key_restore_error(self) -> None:
         """测试密钥轮换失败时恢复密钥也失败的情况"""
         security_manager = ConfigSecurityManager(self.key_manager)
-        
+
         # 生成配置数据
         config = {
             "version": "1.0.0",
@@ -524,37 +534,39 @@ class TestConfigSecurityManager(unittest.TestCase):
             config["connections"]["test_db"]
         )
         config["connections"]["test_db"] = encrypted_connections
-        
+
         # 模拟密钥轮换过程中的错误，并模拟 CryptoManager
         import sys
         from unittest.mock import MagicMock
-        
+
         # 创建模拟的 CryptoManager
         mock_crypto_module = MagicMock()
         mock_crypto_class = MagicMock()
         mock_crypto_class.from_saved_key.side_effect = Exception("恢复密钥失败")
         mock_crypto_module.CryptoManager = mock_crypto_class
-        
+
         # 模拟密钥轮换过程中的错误
-        with patch.object(self.key_manager, 'rotate_key', side_effect=Exception("模拟错误")):
+        with patch.object(
+            self.key_manager, "rotate_key", side_effect=Exception("模拟错误")
+        ):
             # 临时替换 sys.modules 中的 crypto 模块
-            original_crypto = sys.modules.get('src.db_connector_tool.core.crypto')
-            sys.modules['src.db_connector_tool.core.crypto'] = mock_crypto_module
-            
+            original_crypto = sys.modules.get("src.db_connector_tool.core.crypto")
+            sys.modules["src.db_connector_tool.core.crypto"] = mock_crypto_module
+
             try:
                 with self.assertRaises(ConfigError):
                     security_manager.perform_key_rotation(config)
             finally:
                 # 恢复原始模块
                 if original_crypto:
-                    sys.modules['src.db_connector_tool.core.crypto'] = original_crypto
+                    sys.modules["src.db_connector_tool.core.crypto"] = original_crypto
                 else:
-                    del sys.modules['src.db_connector_tool.core.crypto']
+                    del sys.modules["src.db_connector_tool.core.crypto"]
 
     def test_perform_key_rotation_without_original_key_info(self) -> None:
         """测试密钥轮换失败时没有原始密钥信息的情况"""
         security_manager = ConfigSecurityManager(self.key_manager)
-        
+
         # 生成配置数据
         config = {
             "version": "1.0.0",
@@ -580,18 +592,24 @@ class TestConfigSecurityManager(unittest.TestCase):
             config["connections"]["test_db"]
         )
         config["connections"]["test_db"] = encrypted_connections
-        
+
         # 保存原始的 crypto 对象
         original_crypto = self.key_manager.crypto
-        
+
         try:
             # 临时设置 key_manager.crypto 为 None
             self.key_manager.crypto = None
-            
+
             # 同时模拟 _decrypt_all_connections 方法，这样不会因为没有 crypto 而失败
-            with patch.object(security_manager, '_decrypt_all_connections', return_value={"test_db": {}}):
+            with patch.object(
+                security_manager,
+                "_decrypt_all_connections",
+                return_value={"test_db": {}},
+            ):
                 # 模拟密钥轮换过程中的错误
-                with patch.object(self.key_manager, 'rotate_key', side_effect=Exception("模拟错误")):
+                with patch.object(
+                    self.key_manager, "rotate_key", side_effect=Exception("模拟错误")
+                ):
                     with self.assertRaises(ConfigError):
                         security_manager.perform_key_rotation(config)
         finally:

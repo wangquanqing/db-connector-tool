@@ -271,7 +271,9 @@ class PasswordValidator:
         has_uppercase = bool(re.search(r"[A-Z]", password))
         has_lowercase = bool(re.search(r"[a-z]", password))
         has_digit = bool(re.search(r"\d", password))
-        has_special = bool(re.search(r"[!@#$%^&*()_+\-=\[\]{}|;:,.<>?~`\"\'\\/]", password))
+        has_special = bool(
+            re.search(r"[!@#$%^&*()_+\-=\[\]{}|;:,.<>?~`\"\'\\/]", password)
+        )
 
         # 计算复杂度类型数量
         complexity_types = sum([has_uppercase, has_lowercase, has_digit, has_special])

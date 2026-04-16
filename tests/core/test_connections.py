@@ -301,10 +301,11 @@ class TestDatabaseManager(unittest.TestCase):
         # 验证返回的结果
         self.assertTrue(result)
 
-
     @patch("src.db_connector_tool.core.connections.ConfigManager")
     @patch("src.db_connector_tool.core.connections.ConnectionPoolManager")
-    def test_get_connection_with_overrides(self, mock_pool_manager, mock_config_manager):
+    def test_get_connection_with_overrides(
+        self, mock_pool_manager, mock_config_manager
+    ):
         """测试使用配置覆盖获取连接"""
         # 模拟配置管理器和连接池管理器
         mock_config_instance = Mock()
@@ -324,7 +325,7 @@ class TestDatabaseManager(unittest.TestCase):
         db_manager = DatabaseManager(self.app_name, self.config_file)
 
         # 测试使用配置覆盖获取连接
-        with patch.object(db_manager, '_create_driver_for_type') as mock_create_driver:
+        with patch.object(db_manager, "_create_driver_for_type") as mock_create_driver:
             mock_driver = Mock()
             mock_create_driver.return_value = mock_driver
             mock_driver.connect = Mock()
@@ -435,7 +436,9 @@ class TestDatabaseManager(unittest.TestCase):
 
     @patch("src.db_connector_tool.core.connections.ConfigManager")
     @patch("src.db_connector_tool.core.connections.ConnectionPoolManager")
-    def test_add_connection_already_exists(self, mock_pool_manager, mock_config_manager):
+    def test_add_connection_already_exists(
+        self, mock_pool_manager, mock_config_manager
+    ):
         """测试添加已存在的连接"""
         # 模拟配置管理器和连接池管理器
         mock_config_instance = Mock()
@@ -460,6 +463,7 @@ class TestDatabaseManager(unittest.TestCase):
 
         # 验证抛出 ConfigError
         from src.db_connector_tool.core.exceptions import ConfigError
+
         with self.assertRaises(ConfigError):
             db_manager.add_connection("test_db", connection_config)
 
@@ -480,6 +484,7 @@ class TestDatabaseManager(unittest.TestCase):
 
         # 测试删除不存在的连接
         from src.db_connector_tool.core.exceptions import ConfigError
+
         with self.assertRaises(ConfigError):
             db_manager.remove_connection("test_db")
 
@@ -516,7 +521,9 @@ class TestDatabaseManager(unittest.TestCase):
 
     @patch("src.db_connector_tool.core.connections.ConfigManager")
     @patch("src.db_connector_tool.core.connections.ConnectionPoolManager")
-    def test_create_driver_for_type_unsupported(self, mock_pool_manager, mock_config_manager):
+    def test_create_driver_for_type_unsupported(
+        self, mock_pool_manager, mock_config_manager
+    ):
         """测试创建不支持的数据库类型驱动"""
         # 模拟配置管理器和连接池管理器
         mock_config_instance = Mock()
@@ -531,6 +538,7 @@ class TestDatabaseManager(unittest.TestCase):
         # 测试不支持的数据库类型
         connection_config = {"type": "unsupported"}
         from src.db_connector_tool.core.exceptions import DBConnectionError
+
         with self.assertRaises(DBConnectionError):
             db_manager._create_driver_for_type(connection_config)
 
@@ -560,6 +568,7 @@ class TestDatabaseManager(unittest.TestCase):
         ]
 
         from src.db_connector_tool.core.exceptions import DBConnectionError
+
         for error_msg, expected_msg in error_types:
             with self.subTest(error_msg=error_msg):
                 with self.assertRaises(DBConnectionError) as cm:
@@ -568,7 +577,9 @@ class TestDatabaseManager(unittest.TestCase):
 
     @patch("src.db_connector_tool.core.connections.ConfigManager")
     @patch("src.db_connector_tool.core.connections.ConnectionPoolManager")
-    def test_diagnose_connection_test_failure(self, mock_pool_manager, mock_config_manager):
+    def test_diagnose_connection_test_failure(
+        self, mock_pool_manager, mock_config_manager
+    ):
         """测试诊断连接时的测试失败"""
         # 模拟配置管理器和连接池管理器
         mock_config_instance = Mock()
@@ -665,7 +676,10 @@ class TestDatabaseManager(unittest.TestCase):
         mock_config_manager.return_value = mock_config_instance
         # 模拟抛出 ConfigError 异常
         from src.db_connector_tool.core.exceptions import ConfigError
-        mock_config_instance.list_configs.side_effect = ConfigError("List configs failed")
+
+        mock_config_instance.list_configs.side_effect = ConfigError(
+            "List configs failed"
+        )
 
         mock_pool_instance = Mock()
         mock_pool_manager.return_value = mock_pool_instance
@@ -678,48 +692,51 @@ class TestDatabaseManager(unittest.TestCase):
         self.assertIn("test_app", str_representation)
         self.assertIn("test_connections.toml", str_representation)
 
-
     @patch("src.db_connector_tool.core.connections.ConfigManager")
     @patch("src.db_connector_tool.core.connections.ConnectionPoolManager")
     def test_init_exception(self, mock_pool_manager, mock_config_manager):
         """测试 __init__ 方法的异常处理"""
         from src.db_connector_tool.core.exceptions import DatabaseError
-        
+
         # 模拟配置管理器抛出异常
         mock_config_manager.side_effect = OSError("Config file error")
-        
+
         with self.assertRaises(DatabaseError):
             DatabaseManager(self.app_name, self.config_file)
 
     @patch("src.db_connector_tool.core.connections.ConfigManager")
     @patch("src.db_connector_tool.core.connections.ConnectionPoolManager")
-    def test_close_all_connections_with_connections(self, mock_pool_manager, mock_config_manager):
+    def test_close_all_connections_with_connections(
+        self, mock_pool_manager, mock_config_manager
+    ):
         """测试 close_all_connections 方法关闭有连接的情况"""
         mock_config_instance = Mock()
         mock_config_manager.return_value = mock_config_instance
-        
+
         mock_pool_instance = Mock()
         mock_pool_manager.return_value = mock_pool_instance
         mock_pool_instance.close_all_connections.return_value = (5, 1)
-        
+
         db_manager = DatabaseManager(self.app_name, self.config_file)
         db_manager.close_all_connections()
-        
+
         mock_pool_instance.close_all_connections.assert_called_once()
 
     @patch("src.db_connector_tool.core.connections.ConfigManager")
     @patch("src.db_connector_tool.core.connections.ConnectionPoolManager")
-    def test_close_all_connections_exception(self, mock_pool_manager, mock_config_manager):
+    def test_close_all_connections_exception(
+        self, mock_pool_manager, mock_config_manager
+    ):
         """测试 close_all_connections 方法的异常处理"""
         from src.db_connector_tool.core.exceptions import DatabaseError
-        
+
         mock_config_instance = Mock()
         mock_config_manager.return_value = mock_config_instance
-        
+
         mock_pool_instance = Mock()
         mock_pool_manager.return_value = mock_pool_instance
         mock_pool_instance.close_all_connections.side_effect = OSError("Close error")
-        
+
         db_manager = DatabaseManager(self.app_name, self.config_file)
         with self.assertRaises(DatabaseError):
             db_manager.close_all_connections()
@@ -729,18 +746,18 @@ class TestDatabaseManager(unittest.TestCase):
     def test_safe_operation_exception(self, mock_pool_manager, mock_config_manager):
         """测试 _safe_operation 方法的异常处理"""
         from src.db_connector_tool.core.exceptions import DatabaseError
-        
+
         mock_config_instance = Mock()
         mock_config_manager.return_value = mock_config_instance
-        
+
         mock_pool_instance = Mock()
         mock_pool_manager.return_value = mock_pool_instance
-        
+
         db_manager = DatabaseManager(self.app_name, self.config_file)
-        
+
         def failing_func():
             raise OSError("Test error")
-        
+
         with self.assertRaises(DatabaseError):
             db_manager._safe_operation("test", "name", failing_func)
 
@@ -749,29 +766,33 @@ class TestDatabaseManager(unittest.TestCase):
     def test_get_connection_exception(self, mock_pool_manager, mock_config_manager):
         """测试 get_connection 方法的异常处理"""
         from src.db_connector_tool.core.exceptions import DBConnectionError
-        
+
         mock_config_instance = Mock()
         mock_config_manager.return_value = mock_config_instance
         mock_config_instance.list_configs.return_value = ["test_db"]
-        
+
         mock_pool_instance = Mock()
         mock_pool_manager.return_value = mock_pool_instance
-        
+
         db_manager = DatabaseManager(self.app_name, self.config_file)
         db_manager._validate_connection_exists = Mock()
-        db_manager._get_connection_from_pool = Mock(side_effect=OSError("Connection error"))
-        
+        db_manager._get_connection_from_pool = Mock(
+            side_effect=OSError("Connection error")
+        )
+
         with self.assertRaises(DBConnectionError):
             db_manager.get_connection("test_db")
-        
+
         mock_pool_instance.record_connection_error.assert_called_once()
 
     @patch("src.db_connector_tool.core.connections.ConfigManager")
     @patch("src.db_connector_tool.core.connections.ConnectionPoolManager")
-    def test_get_connection_with_overrides_exception(self, mock_pool_manager, mock_config_manager):
+    def test_get_connection_with_overrides_exception(
+        self, mock_pool_manager, mock_config_manager
+    ):
         """测试 _get_connection_with_overrides 方法的异常处理"""
         from src.db_connector_tool.core.exceptions import DBConnectionError
-        
+
         mock_config_instance = Mock()
         mock_config_manager.return_value = mock_config_instance
         mock_config_instance.get_config.return_value = {
@@ -781,19 +802,21 @@ class TestDatabaseManager(unittest.TestCase):
             "database": "test_db",
         }
         mock_config_instance.list_configs.return_value = ["test_db"]
-        
+
         mock_pool_instance = Mock()
         mock_pool_manager.return_value = mock_pool_instance
-        
+
         db_manager = DatabaseManager(self.app_name, self.config_file)
-        
-        with patch.object(db_manager, '_create_driver_for_type') as mock_create_driver:
+
+        with patch.object(db_manager, "_create_driver_for_type") as mock_create_driver:
             mock_driver = Mock()
             mock_create_driver.return_value = mock_driver
             mock_driver.connect.side_effect = OSError("Connect error")
-            
+
             with self.assertRaises(DBConnectionError):
-                db_manager._get_connection_with_overrides("test_db", {"host": "127.0.0.1"})
+                db_manager._get_connection_with_overrides(
+                    "test_db", {"host": "127.0.0.1"}
+                )
 
     @patch("src.db_connector_tool.core.connections.ConfigManager")
     @patch("src.db_connector_tool.core.connections.ConnectionPoolManager")
@@ -807,19 +830,19 @@ class TestDatabaseManager(unittest.TestCase):
             "port": 3306,
             "database": "test_db",
         }
-        
+
         mock_pool_instance = Mock()
         mock_pool_manager.return_value = mock_pool_instance
-        
+
         db_manager = DatabaseManager(self.app_name, self.config_file)
-        
-        with patch.object(db_manager, '_create_driver_for_type') as mock_create_driver:
+
+        with patch.object(db_manager, "_create_driver_for_type") as mock_create_driver:
             mock_driver = Mock()
             mock_create_driver.return_value = mock_driver
             mock_driver.connect = Mock()
-            
+
             result = db_manager._create_new_connection("test_db")
-            
+
             mock_create_driver.assert_called_once()
             mock_driver.connect.assert_called_once()
             mock_pool_instance.add_connection.assert_called_once()
@@ -827,10 +850,12 @@ class TestDatabaseManager(unittest.TestCase):
 
     @patch("src.db_connector_tool.core.connections.ConfigManager")
     @patch("src.db_connector_tool.core.connections.ConnectionPoolManager")
-    def test_create_new_connection_exception(self, mock_pool_manager, mock_config_manager):
+    def test_create_new_connection_exception(
+        self, mock_pool_manager, mock_config_manager
+    ):
         """测试 _create_new_connection 方法的异常处理"""
         from src.db_connector_tool.core.exceptions import DBConnectionError
-        
+
         mock_config_instance = Mock()
         mock_config_manager.return_value = mock_config_instance
         mock_config_instance.get_config.return_value = {
@@ -839,21 +864,23 @@ class TestDatabaseManager(unittest.TestCase):
             "port": 3306,
             "database": "test_db",
         }
-        
+
         mock_pool_instance = Mock()
         mock_pool_manager.return_value = mock_pool_instance
-        
+
         db_manager = DatabaseManager(self.app_name, self.config_file)
-        db_manager._handle_connection_error = Mock(side_effect=DBConnectionError("Test error"))
-        
-        with patch.object(db_manager, '_create_driver_for_type') as mock_create_driver:
+        db_manager._handle_connection_error = Mock(
+            side_effect=DBConnectionError("Test error")
+        )
+
+        with patch.object(db_manager, "_create_driver_for_type") as mock_create_driver:
             mock_driver = Mock()
             mock_create_driver.return_value = mock_driver
             mock_driver.connect.side_effect = OSError("Connect error")
-            
+
             with self.assertRaises(DBConnectionError):
                 db_manager._create_new_connection("test_db")
-            
+
             mock_pool_instance.record_connection_error.assert_called_once()
 
     @patch("src.db_connector_tool.core.connections.ConfigManager")
@@ -863,18 +890,18 @@ class TestDatabaseManager(unittest.TestCase):
         mock_config_instance = Mock()
         mock_config_manager.return_value = mock_config_instance
         mock_config_instance.list_configs.return_value = ["test_db"]
-        
+
         mock_pool_instance = Mock()
         mock_pool_manager.return_value = mock_pool_instance
-        
+
         mock_driver = Mock()
         mock_driver.test_connection.return_value = False
-        
+
         db_manager = DatabaseManager(self.app_name, self.config_file)
         db_manager.get_connection = Mock(return_value=mock_driver)
-        
+
         result = db_manager.test_connection("test_db")
-        
+
         self.assertFalse(result)
 
     @patch("src.db_connector_tool.core.connections.ConfigManager")
@@ -884,15 +911,15 @@ class TestDatabaseManager(unittest.TestCase):
         mock_config_instance = Mock()
         mock_config_manager.return_value = mock_config_instance
         mock_config_instance.list_configs.return_value = ["test_db"]
-        
+
         mock_pool_instance = Mock()
         mock_pool_manager.return_value = mock_pool_instance
-        
+
         db_manager = DatabaseManager(self.app_name, self.config_file)
         db_manager.get_connection = Mock(side_effect=OSError("Connection error"))
-        
+
         result = db_manager.test_connection("test_db")
-        
+
         self.assertFalse(result)
         mock_pool_instance.record_connection_error.assert_called_once()
         mock_pool_instance.remove_connection.assert_called_once_with("test_db")
@@ -902,20 +929,20 @@ class TestDatabaseManager(unittest.TestCase):
     def test_execute_query_exception(self, mock_pool_manager, mock_config_manager):
         """测试 execute_query 方法的异常处理"""
         from src.db_connector_tool.core.exceptions import DatabaseError
-        
+
         mock_config_instance = Mock()
         mock_config_manager.return_value = mock_config_instance
         mock_config_instance.list_configs.return_value = ["test_db"]
-        
+
         mock_pool_instance = Mock()
         mock_pool_manager.return_value = mock_pool_instance
-        
+
         db_manager = DatabaseManager(self.app_name, self.config_file)
         db_manager.get_connection = Mock(side_effect=OSError("Query error"))
-        
+
         with self.assertRaises(DatabaseError):
             db_manager.execute_query("test_db", "SELECT * FROM users")
-        
+
         mock_pool_instance.record_connection_error.assert_called_once()
 
     @patch("src.db_connector_tool.core.connections.ConfigManager")
@@ -923,66 +950,74 @@ class TestDatabaseManager(unittest.TestCase):
     def test_execute_command_exception(self, mock_pool_manager, mock_config_manager):
         """测试 execute_command 方法的异常处理"""
         from src.db_connector_tool.core.exceptions import DatabaseError
-        
+
         mock_config_instance = Mock()
         mock_config_manager.return_value = mock_config_instance
         mock_config_instance.list_configs.return_value = ["test_db"]
-        
+
         mock_pool_instance = Mock()
         mock_pool_manager.return_value = mock_pool_instance
-        
+
         db_manager = DatabaseManager(self.app_name, self.config_file)
         db_manager.get_connection = Mock(side_effect=OSError("Command error"))
-        
+
         with self.assertRaises(DatabaseError):
             db_manager.execute_command("test_db", "UPDATE users SET name = 'test'")
-        
+
         mock_pool_instance.record_connection_error.assert_called_once()
 
     @patch("src.db_connector_tool.core.connections.ConfigManager")
     @patch("src.db_connector_tool.core.connections.ConnectionPoolManager")
-    def test_cleanup_idle_connections_exception(self, mock_pool_manager, mock_config_manager):
+    def test_cleanup_idle_connections_exception(
+        self, mock_pool_manager, mock_config_manager
+    ):
         """测试 cleanup_idle_connections 方法的异常处理"""
         from src.db_connector_tool.core.exceptions import DatabaseError
-        
+
         mock_config_instance = Mock()
         mock_config_manager.return_value = mock_config_instance
-        
+
         mock_pool_instance = Mock()
         mock_pool_manager.return_value = mock_pool_instance
-        mock_pool_instance.cleanup_idle_connections.side_effect = OSError("Cleanup error")
-        
+        mock_pool_instance.cleanup_idle_connections.side_effect = OSError(
+            "Cleanup error"
+        )
+
         db_manager = DatabaseManager(self.app_name, self.config_file)
         with self.assertRaises(DatabaseError):
             db_manager.cleanup_idle_connections()
 
     @patch("src.db_connector_tool.core.connections.ConfigManager")
     @patch("src.db_connector_tool.core.connections.ConnectionPoolManager")
-    def test_diagnose_connection_config_error(self, mock_pool_manager, mock_config_manager):
+    def test_diagnose_connection_config_error(
+        self, mock_pool_manager, mock_config_manager
+    ):
         """测试 diagnose_connection 方法的配置错误"""
         from src.db_connector_tool.core.exceptions import ConfigError
-        
+
         mock_config_instance = Mock()
         mock_config_manager.return_value = mock_config_instance
         mock_config_instance.get_config.side_effect = ConfigError("Config error")
-        
+
         mock_pool_instance = Mock()
         mock_pool_manager.return_value = mock_pool_instance
         mock_pool_instance.get_connection_info.return_value = {}
-        
+
         db_manager = DatabaseManager(self.app_name, self.config_file)
         diagnosis = db_manager.diagnose_connection("test_db")
-        
+
         self.assertEqual(diagnosis["status"], "error")
         self.assertIn("config", diagnosis["details"])
         self.assertFalse(diagnosis["details"]["config"]["valid"])
 
     @patch("src.db_connector_tool.core.connections.ConfigManager")
     @patch("src.db_connector_tool.core.connections.ConnectionPoolManager")
-    def test_diagnose_connection_general_error(self, mock_pool_manager, mock_config_manager):
+    def test_diagnose_connection_general_error(
+        self, mock_pool_manager, mock_config_manager
+    ):
         """测试 diagnose_connection 方法的一般错误"""
         from src.db_connector_tool.core.exceptions import DBConnectionError
-        
+
         mock_config_instance = Mock()
         mock_config_manager.return_value = mock_config_instance
         mock_config_instance.get_config.return_value = {
@@ -992,27 +1027,29 @@ class TestDatabaseManager(unittest.TestCase):
             "database": "test_db",
         }
         mock_config_instance.list_configs.return_value = ["test_db"]
-        
+
         mock_pool_instance = Mock()
         mock_pool_manager.return_value = mock_pool_instance
         mock_pool_instance.get_connection_info.return_value = {}
-        
+
         db_manager = DatabaseManager(self.app_name, self.config_file)
-        
+
         def mock_diagnose_connection(name, diagnosis):
             raise OSError("General error")
-        
+
         db_manager._diagnose_config = Mock()
         db_manager._diagnose_connection = Mock(side_effect=OSError("General error"))
-        
+
         diagnosis = db_manager.diagnose_connection("test_db")
-        
+
         self.assertEqual(diagnosis["status"], "error")
         self.assertIn("general_error", diagnosis["details"])
 
     @patch("src.db_connector_tool.core.connections.ConfigManager")
     @patch("src.db_connector_tool.core.connections.ConnectionPoolManager")
-    def test_get_connection_from_pool_creates_new(self, mock_pool_manager, mock_config_manager):
+    def test_get_connection_from_pool_creates_new(
+        self, mock_pool_manager, mock_config_manager
+    ):
         """测试 _get_connection_from_pool 方法创建新连接"""
         mock_config_instance = Mock()
         mock_config_manager.return_value = mock_config_instance
@@ -1023,28 +1060,30 @@ class TestDatabaseManager(unittest.TestCase):
             "port": 3306,
             "database": "test_db",
         }
-        
+
         mock_pool_instance = Mock()
         mock_pool_manager.return_value = mock_pool_instance
         mock_pool_instance.get_connection.return_value = None
-        
+
         db_manager = DatabaseManager(self.app_name, self.config_file)
-        
-        with patch.object(db_manager, '_create_new_connection') as mock_create_new:
+
+        with patch.object(db_manager, "_create_new_connection") as mock_create_new:
             mock_driver = Mock()
             mock_create_new.return_value = mock_driver
-            
+
             result = db_manager._get_connection_from_pool("test_db")
-            
+
             mock_create_new.assert_called_once_with("test_db")
             self.assertEqual(result, mock_driver)
 
     @patch("src.db_connector_tool.core.connections.ConfigManager")
     @patch("src.db_connector_tool.core.connections.ConnectionPoolManager")
-    def test_diagnose_connection_test_exception(self, mock_pool_manager, mock_config_manager):
+    def test_diagnose_connection_test_exception(
+        self, mock_pool_manager, mock_config_manager
+    ):
         """测试 diagnose_connection 方法的连接测试异常"""
         from src.db_connector_tool.core.exceptions import DBConnectionError
-        
+
         mock_config_instance = Mock()
         mock_config_manager.return_value = mock_config_instance
         mock_config_instance.get_config.return_value = {
@@ -1054,25 +1093,27 @@ class TestDatabaseManager(unittest.TestCase):
             "database": "test_db",
         }
         mock_config_instance.list_configs.return_value = ["test_db"]
-        
+
         mock_pool_instance = Mock()
         mock_pool_manager.return_value = mock_pool_instance
         mock_pool_instance.get_connection_info.return_value = {}
-        
+
         db_manager = DatabaseManager(self.app_name, self.config_file)
         mock_driver = Mock()
         mock_driver.test_connection.side_effect = DBConnectionError("Test error")
         db_manager.get_connection = Mock(return_value=mock_driver)
-        
+
         diagnosis = db_manager.diagnose_connection("test_db")
-        
+
         self.assertEqual(diagnosis["status"], "unhealthy")
         self.assertIn("test", diagnosis["details"])
         self.assertFalse(diagnosis["details"]["test"]["success"])
 
     @patch("src.db_connector_tool.core.connections.ConfigManager")
     @patch("src.db_connector_tool.core.connections.ConnectionPoolManager")
-    def test_diagnose_connection_with_pool_info(self, mock_pool_manager, mock_config_manager):
+    def test_diagnose_connection_with_pool_info(
+        self, mock_pool_manager, mock_config_manager
+    ):
         """测试 diagnose_connection 方法包含连接池信息"""
         mock_config_instance = Mock()
         mock_config_manager.return_value = mock_config_instance
@@ -1083,7 +1124,7 @@ class TestDatabaseManager(unittest.TestCase):
             "database": "test_db",
         }
         mock_config_instance.list_configs.return_value = ["test_db"]
-        
+
         mock_pool_instance = Mock()
         mock_pool_manager.return_value = mock_pool_instance
         mock_pool_instance.get_connection_info.return_value = {
@@ -1092,21 +1133,23 @@ class TestDatabaseManager(unittest.TestCase):
             "last_error": "test error",
             "response_time": 0.5,
         }
-        
+
         db_manager = DatabaseManager(self.app_name, self.config_file)
         mock_driver = Mock()
         mock_driver.test_connection.return_value = True
         db_manager.get_connection = Mock(return_value=mock_driver)
-        
+
         diagnosis = db_manager.diagnose_connection("test_db")
-        
+
         self.assertTrue(diagnosis["details"]["pool_info"]["is_active"])
         self.assertEqual(diagnosis["details"]["pool_info"]["use_count"], 10)
         self.assertEqual(diagnosis["details"]["pool_info"]["connection_errors"], 5)
 
     @patch("src.db_connector_tool.core.connections.ConfigManager")
     @patch("src.db_connector_tool.core.connections.ConnectionPoolManager")
-    def test_diagnose_connection_without_pool_info(self, mock_pool_manager, mock_config_manager):
+    def test_diagnose_connection_without_pool_info(
+        self, mock_pool_manager, mock_config_manager
+    ):
         """测试 diagnose_connection 方法没有连接池信息的情况"""
         mock_config_instance = Mock()
         mock_config_manager.return_value = mock_config_instance
@@ -1117,18 +1160,18 @@ class TestDatabaseManager(unittest.TestCase):
             "database": "test_db",
         }
         mock_config_instance.list_configs.return_value = ["test_db"]
-        
+
         mock_pool_instance = Mock()
         mock_pool_manager.return_value = mock_pool_instance
         mock_pool_instance.get_connection_info.return_value = None
-        
+
         db_manager = DatabaseManager(self.app_name, self.config_file)
         mock_driver = Mock()
         mock_driver.test_connection.return_value = True
         db_manager.get_connection = Mock(return_value=mock_driver)
-        
+
         diagnosis = db_manager.diagnose_connection("test_db")
-        
+
         self.assertFalse(diagnosis["details"]["pool_info"]["is_active"])
         self.assertEqual(diagnosis["details"]["pool_info"]["use_count"], 0)
         self.assertEqual(diagnosis["details"]["pool_info"]["connection_errors"], 0)
@@ -1139,25 +1182,27 @@ class TestDatabaseManager(unittest.TestCase):
         """测试 _add_pool_info 方法"""
         mock_config_instance = Mock()
         mock_config_manager.return_value = mock_config_instance
-        
+
         mock_pool_instance = Mock()
         mock_pool_manager.return_value = mock_pool_instance
         mock_pool_instance.get_connection_info.return_value = None
-        
+
         db_manager = DatabaseManager(self.app_name, self.config_file)
         diagnosis = {"details": {}}
         db_manager._add_pool_info("test_db", diagnosis)
-        
+
         self.assertIn("pool_info", diagnosis["details"])
         self.assertFalse(diagnosis["details"]["pool_info"]["is_active"])
         mock_pool_instance.get_connection_info.assert_called_once_with("test_db")
 
     @patch("src.db_connector_tool.core.connections.ConfigManager")
     @patch("src.db_connector_tool.core.connections.ConnectionPoolManager")
-    def test_diagnose_connection_exception(self, mock_pool_manager, mock_config_manager):
+    def test_diagnose_connection_exception(
+        self, mock_pool_manager, mock_config_manager
+    ):
         """测试 _diagnose_connection 方法的异常情况"""
         from src.db_connector_tool.core.exceptions import DBConnectionError
-        
+
         mock_config_instance = Mock()
         mock_config_manager.return_value = mock_config_instance
         mock_config_instance.get_config.return_value = {
@@ -1167,18 +1212,18 @@ class TestDatabaseManager(unittest.TestCase):
             "database": "test_db",
         }
         mock_config_instance.list_configs.return_value = ["test_db"]
-        
+
         mock_pool_instance = Mock()
         mock_pool_manager.return_value = mock_pool_instance
         mock_pool_instance.get_connection_info.return_value = {}
-        
+
         db_manager = DatabaseManager(self.app_name, self.config_file)
         diagnosis = {"details": {}}
-        
+
         db_manager.get_connection = Mock(side_effect=OSError("Connection error"))
-        
+
         db_manager._diagnose_connection("test_db", diagnosis)
-        
+
         self.assertEqual(diagnosis["status"], "unhealthy")
         self.assertFalse(diagnosis["details"]["connection"]["established"])
         self.assertIn("error", diagnosis["details"]["connection"])
@@ -1195,19 +1240,19 @@ class TestDatabaseManager(unittest.TestCase):
             "port": 3306,
             "database": "test_db",
         }
-        
+
         mock_pool_instance = Mock()
         mock_pool_manager.return_value = mock_pool_instance
-        
+
         db_manager = DatabaseManager(self.app_name, self.config_file)
-        
-        with patch.object(db_manager, '_create_driver_for_type') as mock_create_driver:
+
+        with patch.object(db_manager, "_create_driver_for_type") as mock_create_driver:
             mock_driver = Mock()
             mock_create_driver.return_value = mock_driver
             mock_driver.connect = Mock()
-            
+
             result = db_manager._create_new_connection("test_db")
-            
+
             self.assertEqual(result, mock_driver)
 
     @patch("src.db_connector_tool.core.connections.ConfigManager")
@@ -1223,29 +1268,33 @@ class TestDatabaseManager(unittest.TestCase):
             "database": "test_db",
         }
         mock_config_instance.list_configs.return_value = ["test_db"]
-        
+
         mock_pool_instance = Mock()
         mock_pool_manager.return_value = mock_pool_instance
-        
+
         db_manager = DatabaseManager(self.app_name, self.config_file)
-        
-        with patch.object(db_manager, '_create_driver_for_type') as mock_create_driver:
+
+        with patch.object(db_manager, "_create_driver_for_type") as mock_create_driver:
             mock_driver = Mock()
             mock_create_driver.return_value = mock_driver
             mock_driver.connect = Mock()
-            
-            with patch('atexit.register') as mock_atexit:
+
+            with patch("atexit.register") as mock_atexit:
                 config_overrides = {"host": "127.0.0.1"}
-                result = db_manager._get_connection_with_overrides("test_db", config_overrides)
-                
+                result = db_manager._get_connection_with_overrides(
+                    "test_db", config_overrides
+                )
+
                 mock_atexit.assert_called_once()
-                
+
                 cleanup_func = mock_atexit.call_args[0][0]
                 cleanup_func()
 
     @patch("src.db_connector_tool.core.connections.ConfigManager")
     @patch("src.db_connector_tool.core.connections.ConnectionPoolManager")
-    def test_cleanup_temp_connection_with_exception(self, mock_pool_manager, mock_config_manager):
+    def test_cleanup_temp_connection_with_exception(
+        self, mock_pool_manager, mock_config_manager
+    ):
         """测试临时连接清理函数发生异常的情况"""
         mock_config_instance = Mock()
         mock_config_manager.return_value = mock_config_instance
@@ -1256,26 +1305,30 @@ class TestDatabaseManager(unittest.TestCase):
             "database": "test_db",
         }
         mock_config_instance.list_configs.return_value = ["test_db"]
-        
+
         mock_pool_instance = Mock()
         mock_pool_manager.return_value = mock_pool_instance
-        
+
         db_manager = DatabaseManager(self.app_name, self.config_file)
-        
-        with patch.object(db_manager, '_create_driver_for_type') as mock_create_driver:
+
+        with patch.object(db_manager, "_create_driver_for_type") as mock_create_driver:
             mock_driver = Mock()
             mock_create_driver.return_value = mock_driver
             mock_driver.connect = Mock()
-            
-            with patch('atexit.register') as mock_atexit:
+
+            with patch("atexit.register") as mock_atexit:
                 config_overrides = {"host": "127.0.0.1"}
-                result = db_manager._get_connection_with_overrides("test_db", config_overrides)
-                
+                result = db_manager._get_connection_with_overrides(
+                    "test_db", config_overrides
+                )
+
                 mock_atexit.assert_called_once()
-                
+
                 cleanup_func = mock_atexit.call_args[0][0]
-                
-                mock_pool_instance.remove_connection.side_effect = Exception("Cleanup error")
+
+                mock_pool_instance.remove_connection.side_effect = Exception(
+                    "Cleanup error"
+                )
                 cleanup_func()
 
     @patch("src.db_connector_tool.core.connections.ConfigManager")
@@ -1284,12 +1337,12 @@ class TestDatabaseManager(unittest.TestCase):
         """测试 _create_driver_for_type 方法的实际执行（不使用 mock）"""
         mock_config_instance = Mock()
         mock_config_manager.return_value = mock_config_instance
-        
+
         mock_pool_instance = Mock()
         mock_pool_manager.return_value = mock_pool_instance
-        
+
         db_manager = DatabaseManager(self.app_name, self.config_file)
-        
+
         # 使用 SQLite 测试，因为它只需要 database 参数
         connection_config = {"type": "sqlite", "database": ":memory:"}
         try:

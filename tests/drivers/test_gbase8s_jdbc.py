@@ -8,7 +8,9 @@ import warnings
 from unittest import TestCase, mock
 
 from db_connector_tool.drivers.gbase8s_jdbc import (
-    GBase8sCursor, ObTimestamp, GBase8sJDBCDialect
+    GBase8sCursor,
+    GBase8sJDBCDialect,
+    ObTimestamp,
 )
 
 
@@ -19,7 +21,7 @@ class TestGBase8sCursor(TestCase):
         """测试游标初始化"""
         mock_connection = mock.Mock()
         mock_converters = {}
-        with mock.patch('jaydebeapi.Cursor.__init__', return_value=None):
+        with mock.patch("jaydebeapi.Cursor.__init__", return_value=None):
             cursor = GBase8sCursor(mock_connection, mock_converters)
             self.assertIsNotNone(cursor)
 
@@ -30,7 +32,7 @@ class TestGBase8sCursor(TestCase):
 
         mock_connection = mock.Mock()
         mock_converters = {}
-        with mock.patch('jaydebeapi.Cursor.__init__', return_value=None):
+        with mock.patch("jaydebeapi.Cursor.__init__", return_value=None):
             cursor = GBase8sCursor(mock_connection, mock_converters)
 
         result = cursor._unknownSqlTypeConverter(mock_result_set, 1)
@@ -40,13 +42,25 @@ class TestGBase8sCursor(TestCase):
         """测试 GBaseClob2 类型转换器"""
         mock_connection = mock.Mock()
         mock_converters = {}
-        with mock.patch('jaydebeapi.Cursor.__init__', return_value=None):
+        with mock.patch("jaydebeapi.Cursor.__init__", return_value=None):
             cursor = GBase8sCursor(mock_connection, mock_converters)
 
         class MockReader:
             def __init__(self):
-                self.chars = [ord('t'), ord('e'), ord('s'), ord('t'), ord(' '), ord('c'), ord('l'), ord('o'), ord('b'), -1]
+                self.chars = [
+                    ord("t"),
+                    ord("e"),
+                    ord("s"),
+                    ord("t"),
+                    ord(" "),
+                    ord("c"),
+                    ord("l"),
+                    ord("o"),
+                    ord("b"),
+                    -1,
+                ]
                 self.index = 0
+
             def read(self):
                 if self.index < len(self.chars):
                     char = self.chars[self.index]
@@ -57,15 +71,19 @@ class TestGBase8sCursor(TestCase):
         class MockGBaseClob2:
             def getCharacterStream(self):
                 return MockReader()
+
             def __repr__(self):
                 return "<java class 'com.gbasedbt.jdbc.GBaseClob2'>"
 
         mock_value = MockGBaseClob2()
-        
+
         result_set = mock.Mock()
         result_set.getObject.return_value = mock_value
 
-        with mock.patch('db_connector_tool.drivers.gbase8s_jdbc.str', return_value="<java class 'com.gbasedbt.jdbc.GBaseClob2'>"):
+        with mock.patch(
+            "db_connector_tool.drivers.gbase8s_jdbc.str",
+            return_value="<java class 'com.gbasedbt.jdbc.GBaseClob2'>",
+        ):
             result = cursor._unknownSqlTypeConverter(result_set, 1)
             self.assertEqual(result, "test clob")
 
@@ -88,9 +106,10 @@ class TestObTimestamp(TestCase):
     def test_process_bind_param_datetime(self):
         """测试 datetime 对象的绑定参数处理"""
         from datetime import datetime
+
         timestamp = ObTimestamp()
         test_datetime = datetime(2024, 1, 1, 12, 0, 0)
-        with mock.patch('jpype.JClass') as mock_jclass:
+        with mock.patch("jpype.JClass") as mock_jclass:
             mock_timestamp_class = mock.Mock()
             mock_jclass.return_value = mock_timestamp_class
             mock_timestamp_class.valueOf.return_value = "java_timestamp"
@@ -100,6 +119,7 @@ class TestObTimestamp(TestCase):
     def test_process_result_value(self):
         """测试结果值处理"""
         from datetime import datetime
+
         timestamp = ObTimestamp()
 
         result = timestamp.process_result_value(None, None)
@@ -122,6 +142,7 @@ class TestGBase8sJDBCDialect(TestCase):
         """测试 dbapi 方法"""
         dialect = GBase8sJDBCDialect()
         import jaydebeapi
+
         original_cursor = jaydebeapi.Cursor
         try:
             result = GBase8sJDBCDialect.dbapi()
@@ -169,7 +190,9 @@ class TestGBase8sJDBCDialect(TestCase):
         dialect = GBase8sJDBCDialect()
         mock_connection = mock.Mock()
         mock_connection.engine.url.username = "test_user"
-        with mock.patch.object(dialect, 'get_default_schema_name', return_value="TEST_USER") as mock_get:
+        with mock.patch.object(
+            dialect, "get_default_schema_name", return_value="TEST_USER"
+        ) as mock_get:
             result = dialect._get_default_schema_name(mock_connection)
             self.assertEqual(result, "TEST_USER")
             mock_get.assert_called_once_with(mock_connection)
@@ -177,6 +200,7 @@ class TestGBase8sJDBCDialect(TestCase):
     def test_get_server_version_info_success(self):
         """测试成功获取服务器版本信息"""
         from sqlalchemy import exc
+
         dialect = GBase8sJDBCDialect()
         mock_connection = mock.Mock()
 
@@ -211,9 +235,12 @@ class TestGBase8sJDBCDialect(TestCase):
     def test_get_server_version_info_dbapi_error(self):
         """测试 DBAPIError 异常"""
         from sqlalchemy import exc
+
         dialect = GBase8sJDBCDialect()
         mock_connection = mock.Mock()
-        mock_connection.execute.side_effect = exc.DBAPIError(statement=None, params=None, orig=None)
+        mock_connection.execute.side_effect = exc.DBAPIError(
+            statement=None, params=None, orig=None
+        )
         result = dialect._get_server_version_info(mock_connection)
         self.assertIsNone(result)
 
@@ -228,6 +255,7 @@ class TestGBase8sJDBCDialect(TestCase):
     def test_get_server_version_info_try_second_query(self):
         """测试尝试第二个查询"""
         from sqlalchemy import exc
+
         dialect = GBase8sJDBCDialect()
         mock_connection = mock.Mock()
 
@@ -249,6 +277,7 @@ class TestGBase8sJDBCDialect(TestCase):
     def test_get_server_version_info_both_queries_fail(self):
         """测试两个查询都失败的情况"""
         from sqlalchemy import exc
+
         dialect = GBase8sJDBCDialect()
         mock_connection = mock.Mock()
 
@@ -262,10 +291,13 @@ class TestGBase8sJDBCDialect(TestCase):
     def test_get_server_version_info_outer_exception(self):
         """测试外层 try-except 块捕获异常的情况"""
         from sqlalchemy import exc
+
         dialect = GBase8sJDBCDialect()
         mock_connection = mock.Mock()
 
-        mock_connection.execute.side_effect = exc.DBAPIError(statement=None, params=None, orig=None)
+        mock_connection.execute.side_effect = exc.DBAPIError(
+            statement=None, params=None, orig=None
+        )
         result = dialect._get_server_version_info(mock_connection)
         self.assertIsNone(result)
 
@@ -377,13 +409,17 @@ class TestGBase8sJDBCDialect(TestCase):
         dialect = GBase8sJDBCDialect()
         mock_url = mock.Mock()
 
-        with mock.patch('sqlalchemy.engine.url.make_url', return_value=mock_url):
-            with mock.patch.object(dialect, '_build_jdbc_url', return_value="jdbc:url"):
-                with mock.patch.object(dialect, '_build_connect_args', return_value={"user": "test"}):
-                    with mock.patch.object(dialect, '_handle_jar_path') as mock_handle:
+        with mock.patch("sqlalchemy.engine.url.make_url", return_value=mock_url):
+            with mock.patch.object(dialect, "_build_jdbc_url", return_value="jdbc:url"):
+                with mock.patch.object(
+                    dialect, "_build_connect_args", return_value={"user": "test"}
+                ):
+                    with mock.patch.object(dialect, "_handle_jar_path") as mock_handle:
                         args, kwargs = dialect.create_connect_args(mock_url)
                         self.assertEqual(args, ())
-                        self.assertEqual(kwargs["jclassname"], "com.gbasedbt.jdbc.Driver")
+                        self.assertEqual(
+                            kwargs["jclassname"], "com.gbasedbt.jdbc.Driver"
+                        )
                         self.assertEqual(kwargs["url"], "jdbc:url")
                         self.assertEqual(kwargs["driver_args"], {"user": "test"})
                         mock_handle.assert_called_once()
@@ -394,8 +430,10 @@ class TestGBase8sJDBCDialect(TestCase):
         mock_url_obj = mock.Mock()
         kwargs = {}
 
-        with mock.patch.dict('os.environ', {'GBASE8S_JDBC_JARPATH': '/path/to/gbase.jar'}):
-            with mock.patch('os.path.exists', return_value=True):
+        with mock.patch.dict(
+            "os.environ", {"GBASE8S_JDBC_JARPATH": "/path/to/gbase.jar"}
+        ):
+            with mock.patch("os.path.exists", return_value=True):
                 dialect._handle_jar_path(mock_url_obj, kwargs)
                 self.assertEqual(kwargs["jars"], "/path/to/gbase.jar")
 
@@ -405,10 +443,15 @@ class TestGBase8sJDBCDialect(TestCase):
         mock_url_obj = mock.Mock()
         kwargs = {}
 
-        with mock.patch.dict('os.environ', {'GBASE8S_JDBC_JARPATH': '/path/to/gbase.jar'}):
-            with mock.patch('os.path.exists', return_value=False):
-                with mock.patch('db_connector_tool.utils.path_utils.PathHelper.get_user_config_dir', return_value="/config"):
-                    with mock.patch('warnings.warn') as mock_warn:
+        with mock.patch.dict(
+            "os.environ", {"GBASE8S_JDBC_JARPATH": "/path/to/gbase.jar"}
+        ):
+            with mock.patch("os.path.exists", return_value=False):
+                with mock.patch(
+                    "db_connector_tool.utils.path_utils.PathHelper.get_user_config_dir",
+                    return_value="/config",
+                ):
+                    with mock.patch("warnings.warn") as mock_warn:
                         dialect._handle_jar_path(mock_url_obj, kwargs)
                         mock_warn.assert_called_once()
                         self.assertEqual(kwargs["jars"], "/path/to/gbase.jar")
@@ -416,6 +459,7 @@ class TestGBase8sJDBCDialect(TestCase):
     def test_handle_jar_path_default_dir_found(self):
         """测试从默认目录找到 JAR 文件"""
         from pathlib import Path
+
         dialect = GBase8sJDBCDialect()
         mock_url_obj = mock.Mock()
         kwargs = {}
@@ -424,10 +468,13 @@ class TestGBase8sJDBCDialect(TestCase):
         mock_file.is_file.return_value = True
         mock_file.__str__ = lambda self: "/config/jars/gbase.jar"
 
-        with mock.patch.dict('os.environ', {}, clear=True):
-            with mock.patch('db_connector_tool.utils.path_utils.PathHelper.get_user_config_dir', return_value="/config"):
-                with mock.patch.object(Path, 'rglob', return_value=[mock_file]):
-                    with mock.patch('os.path.exists', return_value=True):
+        with mock.patch.dict("os.environ", {}, clear=True):
+            with mock.patch(
+                "db_connector_tool.utils.path_utils.PathHelper.get_user_config_dir",
+                return_value="/config",
+            ):
+                with mock.patch.object(Path, "rglob", return_value=[mock_file]):
+                    with mock.patch("os.path.exists", return_value=True):
                         dialect._handle_jar_path(mock_url_obj, kwargs)
                         self.assertEqual(kwargs["jars"], "/config/jars/gbase.jar")
 
@@ -437,15 +484,19 @@ class TestGBase8sJDBCDialect(TestCase):
         mock_url_obj = mock.Mock()
         kwargs = {}
 
-        with mock.patch.dict('os.environ', {}, clear=True):
-            with mock.patch('db_connector_tool.utils.path_utils.PathHelper.get_user_config_dir', return_value="/config"):
-                with mock.patch('pathlib.Path.rglob', return_value=[]):
-                    with mock.patch('os.path.exists', return_value=False):
-                        with mock.patch('warnings.warn') as mock_warn:
+        with mock.patch.dict("os.environ", {}, clear=True):
+            with mock.patch(
+                "db_connector_tool.utils.path_utils.PathHelper.get_user_config_dir",
+                return_value="/config",
+            ):
+                with mock.patch("pathlib.Path.rglob", return_value=[]):
+                    with mock.patch("os.path.exists", return_value=False):
+                        with mock.patch("warnings.warn") as mock_warn:
                             dialect._handle_jar_path(mock_url_obj, kwargs)
                             mock_warn.assert_called_once()
 
 
 if __name__ == "__main__":
     import unittest
+
     unittest.main()

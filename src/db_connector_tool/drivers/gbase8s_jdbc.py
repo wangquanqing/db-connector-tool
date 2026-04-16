@@ -12,7 +12,7 @@ GBase 8s JDBC 驱动模块
 使用示例：
     >>> from db_connector_tool.drivers.gbase8s_jdbc import GBase8sJDBCDialect
     >>> from sqlalchemy import create_engine
-    >>> 
+    >>>
     >>> # 创建 GBase 8s 连接引擎
     >>> engine = create_engine(
     ...     "gbase8s+jdbc://username:password@host:port/database"
@@ -175,6 +175,7 @@ class GBase8sJDBCDialect(OracleDialect, ABC):
             jaydebeapi 模块，使用自定义游标类
         """
         import jaydebeapi
+
         jaydebeapi.Cursor = GBase8sCursor
         return jaydebeapi
 

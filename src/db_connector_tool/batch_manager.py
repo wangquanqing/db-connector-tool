@@ -37,8 +37,12 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from .core.connections import DatabaseManager
 from .core.exceptions import (
-    QueryError, DatabaseError, DBConnectorError,
-    FileSystemError, ConfigError, DBConnectionError
+    ConfigError,
+    DatabaseError,
+    DBConnectionError,
+    DBConnectorError,
+    FileSystemError,
+    QueryError,
 )
 from .utils.logging_utils import get_logger
 from .utils.path_utils import PathHelper
@@ -229,7 +233,7 @@ class BatchDatabaseManager:
 
     def __del__(self):
         """析构函数，确保资源清理"""
-        if hasattr(self, '_is_cleaned') and not self._is_cleaned:
+        if hasattr(self, "_is_cleaned") and not self._is_cleaned:
             try:
                 self.cleanup()
             except Exception:
@@ -258,7 +262,9 @@ class BatchDatabaseManager:
                         logger.debug("已从连接名称列表中移除: %s", connection_name)
                 except (DatabaseError, ConfigError) as remove_error:
                     logger.warning(
-                        "从数据库管理器删除连接配置失败 %s: %s", connection_name, str(remove_error)
+                        "从数据库管理器删除连接配置失败 %s: %s",
+                        connection_name,
+                        str(remove_error),
                     )
 
                 logger.info("连接 %s 删除完成", connection_name)
@@ -308,7 +314,9 @@ class BatchDatabaseManager:
                 status = "正常" if result else "异常"
                 logger.info("%s - %s", status, conn_name)
 
-        logger.info("批量测试完成: %s/%s 个连接正常", success_count, len(connection_names))
+        logger.info(
+            "批量测试完成: %s/%s 个连接正常", success_count, len(connection_names)
+        )
         return results
 
     def execute_batch_query(
@@ -356,7 +364,9 @@ class BatchDatabaseManager:
                 results[conn_name] = result
 
         success_count = sum(1 for r in results.values() if r["success"])
-        logger.info("批量查询完成: %s/%s 个连接成功", success_count, len(connection_names))
+        logger.info(
+            "批量查询完成: %s/%s 个连接成功", success_count, len(connection_names)
+        )
         return results
 
     def upgrade_table_structure(
@@ -399,7 +409,9 @@ class BatchDatabaseManager:
                 results[conn_name] = result
 
         success_count = sum(1 for r in results.values() if r["success"])
-        logger.info("批量升级完成: %s/%s 个连接成功", success_count, len(connection_names))
+        logger.info(
+            "批量升级完成: %s/%s 个连接成功", success_count, len(connection_names)
+        )
         return results
 
     def _get_all_connection_names(self) -> List[str]:
@@ -474,7 +486,9 @@ class BatchDatabaseManager:
                         self._execute_rollback(conn_name, rollback_sqls)
                         logger.info("连接 %s 执行回滚成功", conn_name)
                     except DatabaseError as rollback_error:
-                        logger.error("连接 %s 执行回滚失败: %s", conn_name, str(rollback_error))
+                        logger.error(
+                            "连接 %s 执行回滚失败: %s", conn_name, str(rollback_error)
+                        )
                 break
             except DatabaseError as e:
                 execution_results.append(
@@ -486,7 +500,9 @@ class BatchDatabaseManager:
                         self._execute_rollback(conn_name, rollback_sqls)
                         logger.info("连接 %s 执行回滚成功", conn_name)
                     except DatabaseError as rollback_error:
-                        logger.error("连接 %s 执行回滚失败: %s", conn_name, str(rollback_error))
+                        logger.error(
+                            "连接 %s 执行回滚失败: %s", conn_name, str(rollback_error)
+                        )
                 break
 
         return execution_results

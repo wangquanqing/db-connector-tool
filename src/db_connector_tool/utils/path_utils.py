@@ -300,8 +300,8 @@ class PathHelper:
         # 虽然技术上某些字符是允许的，但为了跨平台一致性和安全性，我们限制一些特殊字符
         illegal_chars = [
             "\0",  # NUL字符
-            "?",   # 通配符
-            "*",   # 通配符
+            "?",  # 通配符
+            "*",  # 通配符
         ]
         return not any(char in path_str for char in illegal_chars)
 
