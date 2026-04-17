@@ -125,7 +125,6 @@ class TestConnectionPoolManager(unittest.TestCase):
         self.assertEqual(success_count, 2)
         self.assertEqual(error_count, 0)
 
-
     def test_update_metadata(self):
         """测试更新查询和命令元数据"""
         # 创建模拟的驱动实例
@@ -199,6 +198,7 @@ class TestConnectionPoolManager(unittest.TestCase):
 
         # 验证抛出 DatabaseError
         from src.db_connector_tool.core.exceptions import DatabaseError
+
         with self.assertRaises(DatabaseError):
             self.pool_manager.add_connection("test_db", invalid_driver)
 
@@ -210,6 +210,7 @@ class TestConnectionPoolManager(unittest.TestCase):
 
         # 验证抛出 DatabaseError
         from src.db_connector_tool.core.exceptions import DatabaseError
+
         with self.assertRaises(DatabaseError):
             self.pool_manager.add_connection("test_db", mock_driver)
 
@@ -316,26 +317,31 @@ class TestConnectionPoolManager(unittest.TestCase):
         self.assertFalse(is_valid)
 
         # 测试有 ping 方法的驱动
-        mock_ping_driver = Mock(spec=['ping'])
+        mock_ping_driver = Mock(spec=["ping"])
         mock_ping_driver.ping.return_value = True
         is_valid = self.pool_manager._is_connection_valid(mock_ping_driver)
         self.assertTrue(is_valid)
 
         # 测试有 is_connected 方法的驱动
-        mock_is_connected_driver = Mock(spec=['is_connected'])
+        mock_is_connected_driver = Mock(spec=["is_connected"])
         mock_is_connected_driver.is_connected.return_value = True
         is_valid = self.pool_manager._is_connection_valid(mock_is_connected_driver)
         self.assertTrue(is_valid)
 
         # 测试is_connected方法抛出异常的情况
-        mock_is_connected_error_driver = Mock(spec=['is_connected'])
-        mock_is_connected_error_driver.is_connected.side_effect = Exception("is_connected failed")
-        is_valid = self.pool_manager._is_connection_valid(mock_is_connected_error_driver)
+        mock_is_connected_error_driver = Mock(spec=["is_connected"])
+        mock_is_connected_error_driver.is_connected.side_effect = Exception(
+            "is_connected failed"
+        )
+        is_valid = self.pool_manager._is_connection_valid(
+            mock_is_connected_error_driver
+        )
         self.assertFalse(is_valid)
 
         # 测试SQLAlchemy驱动（有engine属性）
         from unittest.mock import MagicMock
-        mock_sqlalchemy_driver = Mock(spec=['engine'])
+
+        mock_sqlalchemy_driver = Mock(spec=["engine"])
         mock_engine = Mock()
         mock_connection = Mock()
         mock_result = Mock()
@@ -349,7 +355,7 @@ class TestConnectionPoolManager(unittest.TestCase):
         self.assertTrue(is_valid)
 
         # 测试SQLAlchemy驱动连接失败的情况
-        mock_sqlalchemy_error_driver = Mock(spec=['engine'])
+        mock_sqlalchemy_error_driver = Mock(spec=["engine"])
         mock_error_engine = Mock()
         mock_sqlalchemy_error_driver.engine = mock_error_engine
         mock_error_engine.connect.side_effect = Exception("Connection failed")
@@ -427,7 +433,7 @@ class TestConnectionPoolManager(unittest.TestCase):
             "pool_size": 1,
             "average_response_time": 0.1,
             "error_rate": 0.0,
-            "connection_details": []
+            "connection_details": [],
         }
         response = self.pool_manager._build_pool_status_response(status_data)
 
@@ -487,23 +493,23 @@ class TestConnectionPoolManager(unittest.TestCase):
         self.assertTrue(is_valid)
 
         # 测试有 ping 方法的驱动
-        ping_driver = Mock(spec=['ping'])
+        ping_driver = Mock(spec=["ping"])
         is_valid = self.pool_manager._check_driver_basic_status(ping_driver)
         self.assertTrue(is_valid)
 
         # 测试有 is_connected 方法的驱动
-        is_connected_driver = Mock(spec=['is_connected'])
+        is_connected_driver = Mock(spec=["is_connected"])
         is_valid = self.pool_manager._check_driver_basic_status(is_connected_driver)
         self.assertTrue(is_valid)
 
         # 测试有 engine 属性的驱动
-        engine_driver = Mock(spec=['engine'])
+        engine_driver = Mock(spec=["engine"])
         engine_driver.engine = Mock()
         is_valid = self.pool_manager._check_driver_basic_status(engine_driver)
         self.assertTrue(is_valid)
 
         # 测试 engine 为 None 的驱动
-        engine_none_driver = Mock(spec=['engine'])
+        engine_none_driver = Mock(spec=["engine"])
         engine_none_driver.engine = None
         is_valid = self.pool_manager._check_driver_basic_status(engine_none_driver)
         self.assertFalse(is_valid)
@@ -517,14 +523,16 @@ class TestConnectionPoolManager(unittest.TestCase):
         self.assertFalse(is_valid)
 
         # 测试 ping 抛出异常的情况
-        mock_ping_driver = Mock(spec=['ping'])
+        mock_ping_driver = Mock(spec=["ping"])
         mock_ping_driver.ping.side_effect = Exception("Ping failed")
         is_valid = self.pool_manager._is_connection_valid(mock_ping_driver)
         self.assertFalse(is_valid)
 
         # 测试 is_connected 抛出异常的情况
-        mock_is_connected_driver = Mock(spec=['is_connected'])
-        mock_is_connected_driver.is_connected.side_effect = Exception("Is connected failed")
+        mock_is_connected_driver = Mock(spec=["is_connected"])
+        mock_is_connected_driver.is_connected.side_effect = Exception(
+            "Is connected failed"
+        )
         is_valid = self.pool_manager._is_connection_valid(mock_is_connected_driver)
         self.assertFalse(is_valid)
 
@@ -599,26 +607,29 @@ class TestConnectionPoolManager(unittest.TestCase):
         # 创建模拟的驱动实例
         mock_driver1 = Mock()
         mock_driver1.test_connection.return_value = True
-        
+
         # 添加连接
         self.pool_manager.add_connection("test_db1", mock_driver1)
-        
+
         # 让 remove_connection 抛出 OSError
         from src.db_connector_tool.core.exceptions import DatabaseError
+
         original_remove = self.pool_manager.remove_connection
-        
+
         def mock_remove(name):
             raise OSError("Test OS error")
-        
+
         self.pool_manager.remove_connection = mock_remove
-        
+
         # 关闭所有连接
-        success_count, error_count = self.pool_manager._close_all_connections(["test_db1"])
-        
+        success_count, error_count = self.pool_manager._close_all_connections(
+            ["test_db1"]
+        )
+
         # 验证结果
         self.assertEqual(success_count, 0)
         self.assertEqual(error_count, 1)
-        
+
         # 恢复原方法
         self.pool_manager.remove_connection = original_remove
 
@@ -627,28 +638,28 @@ class TestConnectionPoolManager(unittest.TestCase):
         # 创建模拟的驱动实例
         mock_driver = Mock()
         mock_driver.test_connection.return_value = True
-        
+
         # 添加连接
         self.pool_manager.add_connection("test_db", mock_driver)
-        
+
         # 模拟 _close_all_connections 返回成功，但连接池没有完全清空
         original_close_all = self.pool_manager._close_all_connections
-        
+
         def mock_close_all(names):
             # 不实际移除连接
             return 1, 0
-        
+
         self.pool_manager._close_all_connections = mock_close_all
-        
+
         # 关闭所有连接
         success_count, error_count = self.pool_manager.close_all_connections()
-        
+
         # 验证结果
         self.assertEqual(success_count, 1)
         self.assertEqual(error_count, 0)
         # 验证连接池被强制清空
         self.assertEqual(len(self.pool_manager.connection_pool), 0)
-        
+
         # 恢复原方法
         self.pool_manager._close_all_connections = original_close_all
 
@@ -657,28 +668,28 @@ class TestConnectionPoolManager(unittest.TestCase):
         # 创建模拟的驱动实例
         mock_driver = Mock()
         mock_driver.test_connection.return_value = True
-        
+
         # 添加连接
         connection_name = "test_db"
         self.pool_manager.add_connection(connection_name, mock_driver)
-        
+
         # 使用自定义字典类来测试错误处理
         from src.db_connector_tool.core.exceptions import DatabaseError
-        
+
         class ErrorDict(dict):
             def __delitem__(self, key):
                 raise DatabaseError("Test error")
-        
+
         # 替换连接池为我们的错误字典
         original_pool = self.pool_manager.connection_pool
         self.pool_manager.connection_pool = ErrorDict(original_pool)
-        
+
         # 移除连接（应该不会抛出异常）
         try:
             self.pool_manager._remove_connection_from_pool(connection_name)
         except Exception as e:
             self.fail(f"_remove_connection_from_pool 应该不会抛出异常，但抛出了: {e}")
-        
+
         # 恢复原连接池
         self.pool_manager.connection_pool = original_pool
 
@@ -687,14 +698,14 @@ class TestConnectionPoolManager(unittest.TestCase):
         # 创建模拟的驱动实例，先添加成功，然后让连接变为无效
         mock_driver = Mock()
         mock_driver.test_connection.return_value = True
-        
+
         # 添加连接（此时 test_connection 返回 True）
         connection_name = "test_db"
         self.pool_manager.add_connection(connection_name, mock_driver)
-        
+
         # 现在让连接变为无效
         mock_driver.test_connection.return_value = False
-        
+
         # 重新获取连接，应该返回 None 并清理
         retrieved = self.pool_manager.get_connection(connection_name)
         self.assertIsNone(retrieved)
@@ -706,82 +717,91 @@ class TestConnectionPoolManager(unittest.TestCase):
         mock_driver_invalid = Mock(spec=[])
         is_valid = self.pool_manager._is_connection_valid(mock_driver_invalid)
         self.assertFalse(is_valid)
-        
+
         # 测试有 engine 但 engine 为 None
         mock_engine_none = Mock()
         mock_engine_none.engine = None
         # 给它添加必要的属性使 _check_driver_basic_status 通过
         mock_engine_none.ping = Mock()
         # 确保没有 test_connection 方法
-        if hasattr(mock_engine_none, 'test_connection'):
-            delattr(mock_engine_none, 'test_connection')
+        if hasattr(mock_engine_none, "test_connection"):
+            delattr(mock_engine_none, "test_connection")
         is_valid = self.pool_manager._is_connection_valid(mock_engine_none)
         self.assertFalse(is_valid)
-        
+
         # 测试有 connection 但 connection 为 None
         mock_conn_none = Mock()
         mock_conn_none.ping.return_value = True
         mock_conn_none.connection = None
         # 确保没有 test_connection 方法
-        if hasattr(mock_conn_none, 'test_connection'):
-            delattr(mock_conn_none, 'test_connection')
+        if hasattr(mock_conn_none, "test_connection"):
+            delattr(mock_conn_none, "test_connection")
         is_valid = self.pool_manager._is_connection_valid(mock_conn_none)
         self.assertFalse(is_valid)
-        
+
         # 测试 SQLAlchemy 引擎连接失败
         mock_sqlalchemy = Mock()
         mock_sqlalchemy.engine = Mock()
         mock_sqlalchemy.engine.connect = Mock(side_effect=Exception("Connect failed"))
         # 确保没有 test_connection, ping, is_connected 方法
-        for attr in ['test_connection', 'ping', 'is_connected']:
+        for attr in ["test_connection", "ping", "is_connected"]:
             if hasattr(mock_sqlalchemy, attr):
                 delattr(mock_sqlalchemy, attr)
         is_valid = self.pool_manager._is_connection_valid(mock_sqlalchemy)
         self.assertFalse(is_valid)
-        
+
         # 测试 SQLAlchemy 引擎连接成功但没有 execute 方法
         mock_engine_ok_no_execute = Mock()
         mock_engine_ok_no_execute.engine = Mock()
         mock_conn = Mock()
         # 不设置 execute 方法
-        mock_engine_ok_no_execute.engine.connect.return_value.__enter__ = Mock(return_value=mock_conn)
-        mock_engine_ok_no_execute.engine.connect.return_value.__exit__ = Mock(return_value=None)
+        mock_engine_ok_no_execute.engine.connect.return_value.__enter__ = Mock(
+            return_value=mock_conn
+        )
+        mock_engine_ok_no_execute.engine.connect.return_value.__exit__ = Mock(
+            return_value=None
+        )
         # 确保没有 test_connection, ping, is_connected 方法
-        for attr in ['test_connection', 'ping', 'is_connected']:
+        for attr in ["test_connection", "ping", "is_connected"]:
             if hasattr(mock_engine_ok_no_execute, attr):
                 delattr(mock_engine_ok_no_execute, attr)
         is_valid = self.pool_manager._is_connection_valid(mock_engine_ok_no_execute)
         self.assertTrue(is_valid)
-        
+
         # 测试 SQLAlchemy 引擎连接成功且有 execute 方法
         mock_engine_ok = Mock()
         mock_engine_ok.engine = Mock()
         mock_conn_execute = Mock()
         mock_conn_execute.execute = Mock()
-        mock_engine_ok.engine.connect.return_value.__enter__ = Mock(return_value=mock_conn_execute)
+        mock_engine_ok.engine.connect.return_value.__enter__ = Mock(
+            return_value=mock_conn_execute
+        )
         mock_engine_ok.engine.connect.return_value.__exit__ = Mock(return_value=None)
         # 确保没有 test_connection, ping, is_connected 方法
-        for attr in ['test_connection', 'ping', 'is_connected']:
+        for attr in ["test_connection", "ping", "is_connected"]:
             if hasattr(mock_engine_ok, attr):
                 delattr(mock_engine_ok, attr)
         is_valid = self.pool_manager._is_connection_valid(mock_engine_ok)
         self.assertTrue(is_valid)
-        
+
         # 测试 OSError/DatabaseError 异常
         from src.db_connector_tool.core.exceptions import DatabaseError
+
         mock_ose = Mock()
         mock_ose.test_connection = Mock(side_effect=OSError("OS error"))
         is_valid = self.pool_manager._is_connection_valid(mock_ose)
         self.assertFalse(is_valid)
-        
+
         mock_db_error = Mock()
         mock_db_error.test_connection = Mock(side_effect=DatabaseError("DB error"))
         is_valid = self.pool_manager._is_connection_valid(mock_db_error)
         self.assertFalse(is_valid)
-        
+
         # 测试其他通用异常
         mock_generic_error = Mock()
-        mock_generic_error.test_connection = Mock(side_effect=ValueError("Generic error"))
+        mock_generic_error.test_connection = Mock(
+            side_effect=ValueError("Generic error")
+        )
         is_valid = self.pool_manager._is_connection_valid(mock_generic_error)
         self.assertFalse(is_valid)
 
@@ -790,7 +810,7 @@ class TestConnectionPoolManager(unittest.TestCase):
         # 记录不存在连接的错误
         test_error = DatabaseError("Test error")
         self.pool_manager.record_connection_error("non_existent", test_error)
-        
+
         # 验证统计信息仍然被记录
         stats = self.pool_manager.get_statistics()
         self.assertEqual(stats["connection_errors"], 1)
@@ -798,12 +818,12 @@ class TestConnectionPoolManager(unittest.TestCase):
     def test_add_connection_without_test_connection(self):
         """测试添加没有 test_connection 方法的连接"""
         # 创建只有 engine 方法的驱动
-        mock_driver = Mock(spec=['engine'])
+        mock_driver = Mock(spec=["engine"])
         mock_driver.engine = Mock()
         # 确保没有 test_connection 方法
-        if hasattr(mock_driver, 'test_connection'):
-            delattr(mock_driver, 'test_connection')
-        
+        if hasattr(mock_driver, "test_connection"):
+            delattr(mock_driver, "test_connection")
+
         # 这种情况下，add_connection 不会检查 test_connection（因为没有），所以会成功添加
         self.pool_manager.add_connection("test_db", mock_driver)
         # 验证连接被添加
@@ -812,7 +832,7 @@ class TestConnectionPoolManager(unittest.TestCase):
     def test_process_idle_connections_various_metadata_cases(self):
         """测试处理空闲连接时的各种元数据情况"""
         import time
-        
+
         # 创建模拟的驱动实例
         mock_driver1 = Mock()
         mock_driver1.test_connection.return_value = True
@@ -820,23 +840,25 @@ class TestConnectionPoolManager(unittest.TestCase):
         mock_driver2.test_connection.return_value = True
         mock_driver3 = Mock()
         mock_driver3.test_connection.return_value = True
-        
+
         # 添加连接
         self.pool_manager.add_connection("db1", mock_driver1)
         self.pool_manager.add_connection("db2", mock_driver2)
         self.pool_manager.add_connection("db3", mock_driver3)
-        
+
         # 移除 db2 的元数据中的 last_used
         del self.pool_manager._connection_metadata["db2"]["last_used"]
         # 移除 db3 的全部元数据
         del self.pool_manager._connection_metadata["db3"]
-        
+
         current_time = time.time()
         # 处理空闲连接
         cleaned_count = self.pool_manager._process_idle_connections(
-            ["db1", "db2", "db3"], current_time, max_idle_time=-1  # 负数表示所有连接都超时
+            ["db1", "db2", "db3"],
+            current_time,
+            max_idle_time=-1,  # 负数表示所有连接都超时
         )
-        
+
         # 验证所有连接都被清理
         self.assertEqual(cleaned_count, 3)
 
@@ -848,10 +870,10 @@ class TestConnectionPoolManager(unittest.TestCase):
             "pool_size": 0,
             "average_response_time": 0.0,
             "error_rate": 0.0,
-            "connection_details": []
+            "connection_details": [],
         }
         response = self.pool_manager._build_pool_status_response(status_data)
-        
+
         # 验证响应包含必要的字段且活跃连接数为 0
         self.assertIn("current_time", response)
         self.assertEqual(response["pool_size"], 0)
@@ -860,121 +882,128 @@ class TestConnectionPoolManager(unittest.TestCase):
     def test_is_connection_valid_remaining_lines(self):
         """测试覆盖剩余的代码行"""
         from unittest.mock import patch
-        
+
         # 1. 测试 engine 为 None 的情况（覆盖 line 335）
         mock_engine_none = Mock()
         mock_engine_none.ping = Mock()
         mock_engine_none.engine = None
         # 确保没有 test_connection 方法
-        if hasattr(mock_engine_none, 'test_connection'):
-            delattr(mock_engine_none, 'test_connection')
+        if hasattr(mock_engine_none, "test_connection"):
+            delattr(mock_engine_none, "test_connection")
         # 测试
         is_valid = self.pool_manager._is_connection_valid(mock_engine_none)
         self.assertFalse(is_valid)
-        
+
         # 2. 测试 connection 为 None 的情况（覆盖 line 339）
         mock_conn_none = Mock()
         mock_conn_none.ping = Mock()
         mock_conn_none.connection = None
         mock_conn_none.engine = Mock()  # engine 不为 None
         # 确保没有 test_connection 方法
-        if hasattr(mock_conn_none, 'test_connection'):
-            delattr(mock_conn_none, 'test_connection')
+        if hasattr(mock_conn_none, "test_connection"):
+            delattr(mock_conn_none, "test_connection")
         # 测试
         is_valid = self.pool_manager._is_connection_valid(mock_conn_none)
         self.assertFalse(is_valid)
-        
+
         # 3. 直接测试代码的异常处理部分
         # 我们将手动调用这些代码路径，使用 mock 确保我们触发异常
         mock_driver_error = Mock()
         mock_driver_error.test_connection = Mock()
-        
+
         # 让我们 patch _check_driver_basic_status，然后直接测试异常情况
         original_check = self.pool_manager._check_driver_basic_status
         self.pool_manager._check_driver_basic_status = lambda x: True
-        
+
         try:
             # 测试 OSError 异常
             mock_driver_error.test_connection.side_effect = OSError("Test OS error")
             is_valid = self.pool_manager._is_connection_valid(mock_driver_error)
             self.assertFalse(is_valid)
-            
+
             # 测试 DatabaseError 异常
             from src.db_connector_tool.core.exceptions import DatabaseError
-            mock_driver_error.test_connection.side_effect = DatabaseError("Test DB error")
+
+            mock_driver_error.test_connection.side_effect = DatabaseError(
+                "Test DB error"
+            )
             is_valid = self.pool_manager._is_connection_valid(mock_driver_error)
             self.assertFalse(is_valid)
-            
+
             # 测试其他异常
-            mock_driver_error.test_connection.side_effect = ValueError("Test generic error")
+            mock_driver_error.test_connection.side_effect = ValueError(
+                "Test generic error"
+            )
             is_valid = self.pool_manager._is_connection_valid(mock_driver_error)
             self.assertFalse(is_valid)
         finally:
             self.pool_manager._check_driver_basic_status = original_check
-        
+
         # 4. 测试 _check_driver_basic_status 通过后的异常处理
         # 让 _check_driver_basic_status 抛出异常
         mock_simple = Mock()
         mock_simple.test_connection = Mock()
         mock_simple.test_connection.return_value = True
-        
+
         # 让 _check_driver_basic_status 抛出 OSError
         orig_check = self.pool_manager._check_driver_basic_status
-        
+
         def mock_check_throws_oserror(x):
             raise OSError("Check failed")
-        
+
         self.pool_manager._check_driver_basic_status = mock_check_throws_oserror
         try:
             is_valid = self.pool_manager._is_connection_valid(mock_simple)
             self.assertFalse(is_valid)
         finally:
             self.pool_manager._check_driver_basic_status = orig_check
-        
+
         # 让 _check_driver_basic_status 抛出 DatabaseError
         def mock_check_throws_dberror(x):
             from src.db_connector_tool.core.exceptions import DatabaseError
+
             raise DatabaseError("Check failed")
-        
+
         self.pool_manager._check_driver_basic_status = mock_check_throws_dberror
         try:
             is_valid = self.pool_manager._is_connection_valid(mock_simple)
             self.assertFalse(is_valid)
         finally:
             self.pool_manager._check_driver_basic_status = orig_check
-        
+
         # 让 _check_driver_basic_status 抛出其他异常
         def mock_check_throws_other(x):
             raise ValueError("Check failed")
-        
+
         self.pool_manager._check_driver_basic_status = mock_check_throws_other
         try:
             is_valid = self.pool_manager._is_connection_valid(mock_simple)
             self.assertFalse(is_valid)
         finally:
             self.pool_manager._check_driver_basic_status = orig_check
-        
+
         # 5. 测试没有验证方法但基本检查通过的情况（覆盖 line 375）
         # 使用 patch 让所有验证方法都不存在
-        with patch('builtins.hasattr') as mock_hasattr:
+        with patch("builtins.hasattr") as mock_hasattr:
             # 保存原始 hasattr
             import builtins
+
             original_hasattr = builtins.hasattr
-            
+
             def custom_hasattr(obj, name):
-                if name in ['test_connection', 'ping', 'is_connected']:
+                if name in ["test_connection", "ping", "is_connected"]:
                     return False
                 # 对于 engine 和 connection，让它们存在且不为 None
-                if name == 'engine' or name == 'connection':
+                if name == "engine" or name == "connection":
                     return True
                 return original_hasattr(obj, name)
-            
+
             mock_hasattr.side_effect = custom_hasattr
-            
+
             # 同时 patch _check_driver_basic_status 让它返回 True
             orig_check_func = self.pool_manager._check_driver_basic_status
             self.pool_manager._check_driver_basic_status = lambda x: True
-            
+
             try:
                 mock_no_methods = Mock()
                 mock_no_methods.engine = Mock()
@@ -992,12 +1021,12 @@ class TestConnectionPoolManager(unittest.TestCase):
     def test_process_idle_connection_not_in_pool(self):
         """测试处理不在连接池中的空闲连接"""
         import time
-        
+
         # 创建模拟的驱动实例并添加
         mock_driver = Mock()
         mock_driver.test_connection.return_value = True
         self.pool_manager.add_connection("test_db", mock_driver)
-        
+
         # 处理一个不存在的连接
         current_time = time.time()
         cleaned_count = self.pool_manager._process_idle_connections(
@@ -1011,8 +1040,9 @@ class TestConnectionPoolManager(unittest.TestCase):
         # 创建一个 test_connection 返回 False 的驱动
         mock_driver = Mock()
         mock_driver.test_connection.return_value = False
-        
+
         from src.db_connector_tool.core.exceptions import DatabaseError
+
         # 应该抛出异常
         with self.assertRaises(DatabaseError) as context:
             self.pool_manager.add_connection("test_db", mock_driver)
@@ -1023,23 +1053,23 @@ class TestConnectionPoolManager(unittest.TestCase):
         # 创建模拟的驱动实例，先让 test_connection 返回 True 来成功添加
         mock_driver = Mock()
         mock_driver.test_connection.return_value = True
-        
+
         # 添加连接
         self.pool_manager.add_connection("test_db", mock_driver)
-        
+
         # 现在让 test_connection 返回 False（确保它被检测为无效）
         mock_driver.test_connection.return_value = False
-        
+
         # 构建状态响应
         status_data = {
             "current_time": 1234567890.0,
             "pool_size": 1,
             "average_response_time": 0.0,
             "error_rate": 0.0,
-            "connection_details": []
+            "connection_details": [],
         }
         response = self.pool_manager._build_pool_status_response(status_data)
-        
+
         # 验证活跃连接数为 0（因为连接无效）
         self.assertEqual(response["active_connections"], 0)
 
@@ -1050,66 +1080,75 @@ class TestConnectionPoolManager(unittest.TestCase):
         driver = Mock()
         driver.ping = Mock(return_value=True)
         driver.engine = None
-        
+
         # 确保没有 test_connection 方法，这样会走到 engine 检查
-        if hasattr(driver, 'test_connection'):
-            delattr(driver, 'test_connection')
-        
+        if hasattr(driver, "test_connection"):
+            delattr(driver, "test_connection")
+
         # 让我们确保 ping 不会被调用，所以移除它
-        delattr(driver, 'ping')
+        delattr(driver, "ping")
         # 现在用 engine 来让 _check_driver_basic_status 返回 True
         driver.engine = None
         # 等等，让我们重新思考
         # 让 _check_driver_basic_status 返回 True，通过有 engine 属性
         driver2 = Mock()
-        driver2.engine = Mock()  # 临时不为 None，让 _check_driver_basic_status 返回 True
+        driver2.engine = (
+            Mock()
+        )  # 临时不为 None，让 _check_driver_basic_status 返回 True
         driver2.engine = None  # 然后设置为 None，让 line 335 执行
-        
+
         # 更好的方法：patch _check_driver_basic_status
         original_check = self.pool_manager._check_driver_basic_status
         self.pool_manager._check_driver_basic_status = lambda x: True
-        
+
         try:
             driver_final = Mock()
             driver_final.engine = None
             # 确保没有 test_connection 方法
-            if hasattr(driver_final, 'test_connection'):
-                delattr(driver_final, 'test_connection')
+            if hasattr(driver_final, "test_connection"):
+                delattr(driver_final, "test_connection")
             # 确保没有 ping 或 is_connected 方法
-            for attr in ['ping', 'is_connected']:
+            for attr in ["ping", "is_connected"]:
                 if hasattr(driver_final, attr):
                     delattr(driver_final, attr)
-            
+
             result = self.pool_manager._is_connection_valid(driver_final)
             self.assertFalse(result)
         finally:
             self.pool_manager._check_driver_basic_status = original_check
-    
+
     def test_cover_final_lines(self):
         """覆盖 line 375 - 当没有验证方法但基本检查通过时"""
         # 让我们 patch _check_driver_basic_status，确保它返回 True
         original_check = self.pool_manager._check_driver_basic_status
         self.pool_manager._check_driver_basic_status = lambda x: True
-        
+
         try:
             # 创建一个简单的 mock 驱动
             driver_simple = Mock()
             # 删除所有可能的验证方法
-            for attr in ['test_connection', 'ping', 'is_connected', 'engine']:
+            for attr in ["test_connection", "ping", "is_connected", "engine"]:
                 if hasattr(driver_simple, attr):
                     delattr(driver_simple, attr)
-            
+
             # 让我们使用 patch 来控制 hasattr 的行为
-            from unittest.mock import patch
             import builtins
+            from unittest.mock import patch
+
             original_hasattr = builtins.hasattr
-            
+
             def custom_hasattr(obj, name):
-                if name in ['test_connection', 'ping', 'is_connected', 'engine', 'connection']:
+                if name in [
+                    "test_connection",
+                    "ping",
+                    "is_connected",
+                    "engine",
+                    "connection",
+                ]:
                     return False
                 return original_hasattr(obj, name)
-            
-            with patch('builtins.hasattr', side_effect=custom_hasattr):
+
+            with patch("builtins.hasattr", side_effect=custom_hasattr):
                 result2 = self.pool_manager._is_connection_valid(driver_simple)
                 self.assertTrue(result2)
         finally:

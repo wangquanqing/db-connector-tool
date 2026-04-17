@@ -94,18 +94,22 @@ class TestConfigValidator(unittest.TestCase):
         self.assertFalse(ConfigValidator.is_valid_version_format("1.0.01"))
         # 负数测试 (虽然理论上不会出现，但可以测试异常处理)
         self.assertFalse(ConfigValidator.is_valid_version_format("-1.0.0"))
+
         # 测试负数 num < 0 分支 (使用自定义对象)
         class CustomPart(str):
             def isdigit(self):
                 return True
+
             def __int__(self):
                 return -1
 
         class CustomVersion(str):
             def split(self, sep=None):
-                return [CustomPart('1'), CustomPart('2'), CustomPart('3')]
+                return [CustomPart("1"), CustomPart("2"), CustomPart("3")]
 
-        self.assertFalse(ConfigValidator.is_valid_version_format(CustomVersion('1.2.3')))
+        self.assertFalse(
+            ConfigValidator.is_valid_version_format(CustomVersion("1.2.3"))
+        )
 
     def test_validate_connection_name(self) -> None:
         """测试连接名称验证"""

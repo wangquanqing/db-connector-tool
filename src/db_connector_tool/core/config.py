@@ -330,9 +330,7 @@ class ConfigManager:
         if self.key_manager.crypto is None:
             self.key_manager.load_or_create_key()
         # 使用统一的加密方法
-        encrypted_config = self.security_manager.encrypt_dict_values(
-            connection_config
-        )
+        encrypted_config = self.security_manager.encrypt_dict_values(connection_config)
         config["connections"][name] = encrypted_config
 
         # 更新配置文件版本号（每次调用增加修订号）
@@ -618,9 +616,7 @@ class ConfigManager:
         if self.key_manager.crypto is None:
             self.key_manager.load_or_create_key()
         # 使用统一的加密方法
-        encrypted_config = self.security_manager.encrypt_dict_values(
-            connection_config
-        )
+        encrypted_config = self.security_manager.encrypt_dict_values(connection_config)
         config["connections"][name] = encrypted_config
 
         # 更新配置文件版本号（每次调用增加修订号）
@@ -745,15 +741,16 @@ class ConfigManager:
 
         设置配置文件的安全权限，确保只有所有者可以访问。
         """
-        import stat
         import platform
-        
+        import stat
+
         try:
             system = platform.system().lower()
-            
+
             if system == "windows":
                 # Windows系统权限设置
                 import subprocess
+
                 username = getpass.getuser()
                 result = subprocess.run(
                     [
@@ -771,7 +768,9 @@ class ConfigManager:
                 )
                 if result.returncode != 0:
                     logger.error("Windows权限设置失败: %s", result.stderr)
-                    logger.warning("配置文件权限设置失败，可能导致安全风险，请手动设置权限")
+                    logger.warning(
+                        "配置文件权限设置失败，可能导致安全风险，请手动设置权限"
+                    )
                 else:
                     logger.debug("Windows权限设置成功: %s", self.config_path)
             else:
@@ -810,6 +809,7 @@ class ConfigManager:
         # 设置备份文件的安全权限
         try:
             import stat
+
             backup_path.chmod(stat.S_IRUSR | stat.S_IWUSR)
         except Exception as e:
             logger.warning("设置备份文件权限失败: %s", str(e))

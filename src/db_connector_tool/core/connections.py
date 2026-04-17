@@ -25,7 +25,6 @@ import threading
 import time
 from typing import Any, Dict, List
 
-from ..drivers.sqlalchemy_driver import SQLAlchemyDriver
 from ..utils.logging_utils import get_logger
 from .config import ConfigManager
 from .connection_pool import ConnectionPoolManager
@@ -445,7 +444,6 @@ class DatabaseManager:
         # 根据数据库类型选择合适的驱动
         driver = self._create_driver_for_type(connection_config)
 
-
         try:
             driver.connect()
         except (OSError, DBConnectionError) as connect_error:
@@ -457,17 +455,20 @@ class DatabaseManager:
         # 临时配置的连接也加入连接池，但使用特殊标记
         temp_connection_name = f"{name}_temp_{hash(str(config_overrides))}"
         self.pool_manager.add_connection(temp_connection_name, driver)
-        logger.info("使用临时配置建立数据库连接: %s (临时连接: %s)", name, temp_connection_name)
-        
+        logger.info(
+            "使用临时配置建立数据库连接: %s (临时连接: %s)", name, temp_connection_name
+        )
+
         # 注册临时连接清理函数，在连接不再使用时清理
         import atexit
+
         def cleanup_temp_connection():
             try:
                 self.pool_manager.remove_connection(temp_connection_name)
                 logger.debug("临时连接已清理: %s", temp_connection_name)
             except Exception as e:
                 logger.debug("清理临时连接失败: %s", str(e))
-        
+
         atexit.register(cleanup_temp_connection)
         return driver
 
@@ -509,9 +510,9 @@ class DatabaseManager:
         db_type = connection_config.get("type", "mysql")
         if db_type in ["mysql", "postgresql", "oracle", "sqlserver", "sqlite", "gbase"]:
             from ..drivers.sqlalchemy_driver import SQLAlchemyDriver
+
             return SQLAlchemyDriver(connection_config)
-        else:
-            raise DBConnectionError(f"不支持的数据库类型: {db_type}")
+        raise DBConnectionError(f"不支持的数据库类型: {db_type}")
 
     def _create_new_connection(self, name: str) -> Any:
         """创建新的数据库连接
@@ -528,10 +529,10 @@ class DatabaseManager:
 
         # 创建新连接，处理网络超时和服务不可用
         connection_config = self.show_connection(name)
-        
+
         # 根据数据库类型选择合适的驱动
         driver = self._create_driver_for_type(connection_config)
-        
+
         try:
             driver.connect()
         except (OSError, DBConnectionError) as connect_error:
@@ -882,9 +883,7 @@ class DatabaseManager:
                 "error": str(connect_error),
             }
 
-    def _diagnose_connection_test(
-        self, driver: Any, diagnosis: Dict[str, Any]
-    ) -> None:
+    def _diagnose_connection_test(self, driver: Any, diagnosis: Dict[str, Any]) -> None:
         """诊断连接测试
 
         Args:

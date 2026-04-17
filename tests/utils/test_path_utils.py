@@ -186,7 +186,7 @@ class TestPathHelper(unittest.TestCase):
     def test_get_user_config_dir_fallback(self, mock_system):
         """测试获取配置目录失败时的回退机制"""
         mock_system.return_value = "Linux"
-        
+
         # 第一次mkdir失败（主目录），第二次成功（回退目录）
         def mkdir_side_effect(**kwargs):
             if not hasattr(mkdir_side_effect, "call_count"):
@@ -195,7 +195,7 @@ class TestPathHelper(unittest.TestCase):
             if mkdir_side_effect.call_count == 1:
                 raise OSError("Permission denied")
             return None
-        
+
         with mock.patch.object(Path, "mkdir", side_effect=mkdir_side_effect):
             config_dir = PathHelper.get_user_config_dir(self.app_name)
             self.assertIsInstance(config_dir, Path)
@@ -219,7 +219,10 @@ class TestPathHelper(unittest.TestCase):
     def test_ensure_dir_exists_type_error(self):
         """测试ensure_dir_exists处理类型错误"""
         # 让Path()构造函数抛出TypeError
-        with mock.patch("src.db_connector_tool.utils.path_utils.Path", side_effect=TypeError("Bad path")):
+        with mock.patch(
+            "src.db_connector_tool.utils.path_utils.Path",
+            side_effect=TypeError("Bad path"),
+        ):
             result = PathHelper.ensure_dir_exists("bad_path")
             self.assertFalse(result)
 
@@ -228,7 +231,9 @@ class TestPathHelper(unittest.TestCase):
         # 测试当目录已存在但不是目录时不会报错，那我们测试在创建目录时出现OSError
         test_dir = os.path.join(self.temp_dir, "test_dir")
         with mock.patch.object(Path, "exists", return_value=False):
-            with mock.patch.object(Path, "mkdir", side_effect=OSError("Permission denied")):
+            with mock.patch.object(
+                Path, "mkdir", side_effect=OSError("Permission denied")
+            ):
                 with self.assertRaises(OSError) as cm:
                     PathHelper.ensure_dir_exists(test_dir)
                 self.assertIn("无法创建目录", str(cm.exception))
@@ -243,7 +248,10 @@ class TestPathHelper(unittest.TestCase):
     def test_normalize_path_type_error(self):
         """测试normalize_path处理TypeError"""
         # 让Path()构造函数抛出TypeError
-        with mock.patch("src.db_connector_tool.utils.path_utils.Path", side_effect=TypeError("Bad path")):
+        with mock.patch(
+            "src.db_connector_tool.utils.path_utils.Path",
+            side_effect=TypeError("Bad path"),
+        ):
             with self.assertRaises(ValueError):
                 PathHelper.normalize_path("bad_path")
 
@@ -260,9 +268,11 @@ class TestPathHelper(unittest.TestCase):
 
     def test_is_valid_path_type_error(self):
         """测试is_valid_path处理类型错误"""
+
         class BadPath:
             def __str__(self):
                 raise ValueError("Cannot convert to string")
+
         self.assertFalse(PathHelper.is_valid_path(BadPath()))
 
     def test_is_valid_path_windows_no_drive(self):

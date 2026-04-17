@@ -130,9 +130,9 @@ def _ensure_log_dir_exists(log_dir_path: Path) -> None:
     try:
         log_dir_path.mkdir(parents=True, exist_ok=True)
     except PermissionError as e:
-        raise PermissionError(f"没有权限创建日志目录 {log_dir_path}: {str(e)}")
+        raise PermissionError(f"没有权限创建日志目录 {log_dir_path}: {str(e)}") from e
     except OSError as e:
-        raise OSError(f"无法创建日志目录 {log_dir_path}: {str(e)}")
+        raise OSError(f"无法创建日志目录 {log_dir_path}: {str(e)}") from e
 
 
 def _create_formatter(log_format: str | None) -> logging.Formatter:
@@ -227,9 +227,9 @@ def _configure_file_handlers(
         return handlers_added
 
     except PermissionError as e:
-        raise PermissionError(f"没有权限写入日志文件 {log_file}: {str(e)}")
+        raise PermissionError(f"没有权限写入日志文件 {log_file}: {str(e)}") from e
     except OSError as e:
-        raise OSError(f"无法创建日志文件 {log_file}: {str(e)}")
+        raise OSError(f"无法创建日志文件 {log_file}: {str(e)}") from e
 
 
 def _create_error_file_handler(
@@ -420,7 +420,7 @@ class LogManager:
             >>> logger = log_manager.setup(level="DEBUG", log_to_file=True)
         """
         logger = setup_logging(self.app_name, **kwargs)
-        self.logger.info(f"LogManager为应用 '{self.app_name}' 配置了日志系统")
+        self.logger.info("LogManager为应用 '%s' 配置了日志系统", self.app_name)
         return logger
 
     def add_file_handler(
@@ -490,7 +490,7 @@ class LogManager:
             logger.addHandler(file_handler)
             self._handlers.append(file_handler)
 
-            self.logger.info(f"添加文件handler: {log_file}")
+            self.logger.info("添加文件handler: %s", log_file)
 
     def remove_handler(self, handler: logging.Handler) -> None:
         """
@@ -513,7 +513,7 @@ class LogManager:
 
             if handler in self._handlers:
                 self._handlers.remove(handler)
-                self.logger.info(f"已移除handler: {handler}")
+                self.logger.info("已移除handler: %s", handler)
 
     def cleanup(self) -> None:
         """
@@ -536,7 +536,7 @@ class LogManager:
                 handler.close()
                 self._handlers.remove(handler)
 
-            self.logger.info(f"已清理所有handler，共清理 {handler_count} 个")
+            self.logger.info("已清理所有handler，共清理 %s 个", handler_count)
 
     def get_loggers_info(self) -> Dict[str, Dict[str, Any]]:
         """

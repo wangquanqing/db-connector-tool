@@ -166,9 +166,9 @@ class ConfigSecurityManager:
             # 确保加密管理器已初始化
             try:
                 self.key_manager.get_crypto_manager()
-            except ConfigError:
+            except ConfigError as exc:
                 logger.error("加密管理器未初始化，无法验证签名")
-                raise ConfigError("加密管理器未初始化，无法验证配置文件签名")
+                raise ConfigError("加密管理器未初始化，无法验证配置文件签名") from exc
 
             # 生成待验证的配置数据（排除signature和audit_log字段）
             config_to_verify = config.copy()
@@ -197,7 +197,7 @@ class ConfigSecurityManager:
             if not signature_timestamp:
                 logger.error("配置文件缺少签名时间戳，可能是重放攻击")
                 raise ConfigError("配置文件缺少签名时间戳，可能是重放攻击")
-            
+
             try:
                 signature_time = datetime.fromisoformat(signature_timestamp)
                 # 确保签名时间是带时区的
@@ -214,7 +214,7 @@ class ConfigSecurityManager:
                     raise ConfigError("配置文件签名时间戳过期，可能是重放攻击")
             except (ValueError, TypeError) as e:
                 logger.error("时间戳验证失败: %s", str(e))
-                raise ConfigError(f"时间戳验证失败: {str(e)}")
+                raise ConfigError(f"时间戳验证失败: {str(e)}") from e
 
             logger.debug("配置文件数字签名验证成功")
             return True
@@ -373,7 +373,9 @@ class ConfigSecurityManager:
         original_key_version = config["metadata"].get("key_version", "1")
 
         # 保存原始密钥信息，用于回滚
-        original_key_info = self.key_manager.crypto.get_key_info() if self.key_manager.crypto else None
+        original_key_info = (
+            self.key_manager.crypto.get_key_info() if self.key_manager.crypto else None
+        )
 
         try:
             # 解密所有连接配置
@@ -403,10 +405,11 @@ class ConfigSecurityManager:
                 try:
                     # 尝试恢复原始密钥
                     from .crypto import CryptoManager
+
                     self.key_manager.crypto = CryptoManager.from_saved_key(
                         original_key_info["password"],
                         original_key_info["salt"],
-                        original_key_info["iterations"]
+                        original_key_info["iterations"],
                     )
                     logger.debug("已恢复原始加密密钥")
                 except Exception as key_restore_error:

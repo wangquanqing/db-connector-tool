@@ -365,7 +365,7 @@ class SQLAlchemyDriver:
 
             # 基础连接池配置（基于生产环境最佳实践）
             database_type = self.config.get("type", "").lower()
-            
+
             # 为不同数据库类型设置不同的连接池配置
             if database_type == "sqlite":
                 # SQLite 特定配置（不支持max_overflow和pool_timeout）
@@ -388,24 +388,32 @@ class SQLAlchemyDriver:
                 # 根据数据库类型调整连接池配置
                 if database_type == "mysql":
                     # MySQL 特定配置
-                    pool_config.update({
-                        "pool_recycle": 280,  # MySQL默认wait_timeout为28800秒，设置较小值避免连接失效
-                    })
+                    pool_config.update(
+                        {
+                            "pool_recycle": 280,  # MySQL默认wait_timeout为28800秒，设置较小值避免连接失效
+                        }
+                    )
                 elif database_type == "postgresql":
                     # PostgreSQL 特定配置
-                    pool_config.update({
-                        "pool_recycle": 3600,  # PostgreSQL默认连接超时较长
-                    })
+                    pool_config.update(
+                        {
+                            "pool_recycle": 3600,  # PostgreSQL默认连接超时较长
+                        }
+                    )
                 elif database_type == "oracle":
                     # Oracle 特定配置
-                    pool_config.update({
-                        "pool_recycle": 1800,  # Oracle建议的连接回收时间
-                    })
+                    pool_config.update(
+                        {
+                            "pool_recycle": 1800,  # Oracle建议的连接回收时间
+                        }
+                    )
                 elif database_type == "sqlserver":
                     # SQL Server 特定配置
-                    pool_config.update({
-                        "pool_recycle": 3600,  # SQL Server连接回收时间
-                    })
+                    pool_config.update(
+                        {
+                            "pool_recycle": 3600,  # SQL Server连接回收时间
+                        }
+                    )
 
             # 允许用户通过配置覆盖连接池参数
             if "pool_config" in self.config:

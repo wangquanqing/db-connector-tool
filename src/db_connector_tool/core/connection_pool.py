@@ -16,7 +16,6 @@ import threading
 import time
 from typing import Any, Dict, List, Optional
 
-from typing import Any
 from ..utils.logging_utils import get_logger
 from .exceptions import DatabaseError
 
@@ -238,12 +237,14 @@ class ConnectionPoolManager:
             return False
 
         # 检查驱动实例是否有必要的方法（test_connection、ping、is_connected 或 engine）
-        if not any([
-            hasattr(driver, "test_connection"),
-            hasattr(driver, "ping"),
-            hasattr(driver, "is_connected"),
-            hasattr(driver, "engine")
-        ]):
+        if not any(
+            [
+                hasattr(driver, "test_connection"),
+                hasattr(driver, "ping"),
+                hasattr(driver, "is_connected"),
+                hasattr(driver, "engine"),
+            ]
+        ):
             logger.debug("驱动实例缺少必要的方法")
             return False
 
@@ -339,7 +340,7 @@ class ConnectionPoolManager:
                 return False
 
             # 执行实际查询测试
-            if hasattr(driver, 'test_connection'):
+            if hasattr(driver, "test_connection"):
                 try:
                     return driver.test_connection()
                 except Exception as test_error:
@@ -359,7 +360,7 @@ class ConnectionPoolManager:
                         # 执行简单的查询测试
                         if hasattr(conn, "execute"):
                             # 尝试执行一个简单的查询
-                            result = conn.execute("SELECT 1")
+                            conn.execute("SELECT 1")
                             return True
                 except Exception as sqlalchemy_error:
                     logger.debug("SQLAlchemy连接测试失败: %s", str(sqlalchemy_error))
@@ -418,7 +419,7 @@ class ConnectionPoolManager:
 
             # 验证驱动实例是否可连接
             try:
-                if hasattr(driver, 'test_connection'):
+                if hasattr(driver, "test_connection"):
                     if not driver.test_connection():
                         logger.error("驱动实例连接测试失败")
                         raise DatabaseError("驱动实例连接测试失败")
@@ -583,12 +584,20 @@ class ConnectionPoolManager:
             if not self._is_connection_in_pool(name):
                 continue
 
-            if name in self._connection_metadata and "last_used" in self._connection_metadata[name]:
+            if (
+                name in self._connection_metadata
+                and "last_used" in self._connection_metadata[name]
+            ):
                 idle_time = current_time - self._connection_metadata[name]["last_used"]
             else:
                 # 如果没有元数据或last_used字段，使用创建时间或当前时间作为默认值
-                if name in self._connection_metadata and "created_at" in self._connection_metadata[name]:
-                    idle_time = current_time - self._connection_metadata[name]["created_at"]
+                if (
+                    name in self._connection_metadata
+                    and "created_at" in self._connection_metadata[name]
+                ):
+                    idle_time = (
+                        current_time - self._connection_metadata[name]["created_at"]
+                    )
                 else:
                     idle_time = 0
 

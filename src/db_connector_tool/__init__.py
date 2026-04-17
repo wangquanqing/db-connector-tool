@@ -26,9 +26,9 @@ from .core.config import ConfigManager
 from .core.connections import DatabaseManager
 from .core.exceptions import (
     ConfigError,
-    DBConnectionError,
     CryptoError,
     DatabaseError,
+    DBConnectionError,
     DBConnectorError,
 )
 

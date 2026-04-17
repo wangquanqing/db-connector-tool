@@ -1,3 +1,24 @@
+"""
+GBase 8s JDBC 驱动模块
+
+该模块提供了 GBase 8s 数据库的 JDBC 驱动实现，基于 SQLAlchemy 框架。
+
+主要功能：
+- 自定义的 GBase 8s 方言实现
+- 支持 GBase 8s 特有的数据类型和语法
+- 优化的连接参数处理
+- 自定义游标实现
+
+使用示例：
+    >>> from db_connector_tool.drivers.gbase8s_jdbc import GBase8sJDBCDialect
+    >>> from sqlalchemy import create_engine
+    >>>
+    >>> # 创建 GBase 8s 连接引擎
+    >>> engine = create_engine(
+    ...     "gbase8s+jdbc://username:password@host:port/database"
+    ... )
+"""
+
 import os
 import re
 import warnings
@@ -33,9 +54,9 @@ class GBase8sCursor(jaydebeapi.Cursor):
             converters: 类型转换器字典
         """
         super().__init__(connection, converters)
-        jaydebeapi._unknownSqlTypeConverter = self._unknownSqlTypeConverter
+        jaydebeapi._unknownSqlTypeConverter = self._unknown_sql_type_converter
 
-    def _unknownSqlTypeConverter(self, result_set: Any, column_index: int) -> Any:
+    def _unknown_sql_type_converter(self, result_set: Any, column_index: int) -> Any:
         """
         处理未知 SQL 类型的转换，特别处理 GBaseClob2 类型。
 
@@ -71,13 +92,13 @@ class ObTimestamp(TypeDecorator):
 
     impl = TIMESTAMP
 
-    def process_bind_param(self, value: Any, dialect: Any) -> Any:
+    def process_bind_param(self, value: Any, _: Any) -> Any:
         """
         处理绑定参数，将 Python datetime 转换为 Java Timestamp。
 
         Args:
             value: 输入值
-            dialect: SQLAlchemy 方言对象
+            _: SQLAlchemy 方言对象
 
         Returns:
             转换后的时间戳值
@@ -89,13 +110,13 @@ class ObTimestamp(TypeDecorator):
             value = timestamp_class.valueOf(value.strftime("%Y-%m-%d %H:%M:%S.%f"))
         return value
 
-    def process_result_value(self, value: Any, dialect: Any) -> datetime | None:
+    def process_result_value(self, value: Any, _: Any) -> datetime | None:
         """
         处理结果值，将字符串解析为 Python datetime 对象。
 
         Args:
             value: 数据库返回的值
-            dialect: SQLAlchemy 方言对象
+            _: SQLAlchemy 方言对象
 
         Returns:
             解析后的 datetime 对象，如果值为 None 则返回 None
@@ -236,14 +257,15 @@ class GBase8sJDBCDialect(OracleDialect, ABC):
         return connect_args
 
     def _handle_jar_path(self, url_obj: Any, kwargs: dict) -> None:
-        """
-        处理 JDBC 驱动 JAR 文件路径。
+        """处理 JDBC 驱动 JAR 文件路径。
 
         优先级：URL参数 > 环境变量 > 默认路径
 
         Args:
             url_obj: SQLAlchemy URL对象
+            kwargs: 连接参数字典
         """
+        # url_obj参数暂未使用，保留以备将来支持URL参数指定jar路径
 
         jar_path = None
 
@@ -295,12 +317,12 @@ class GBase8sJDBCDialect(OracleDialect, ABC):
         """
         return False
 
-    def _check_max_identifier_length(self, connection: Any) -> Literal[30] | None:
+    def _check_max_identifier_length(self, _: Any) -> Literal[30] | None:
         """
         检查最大标识符长度。
 
         Args:
-            connection: 数据库连接对象
+            _: 数据库连接对象
 
         Returns:
             最大标识符长度，如果无法确定则返回 None
@@ -373,11 +395,10 @@ class GBase8sJDBCDialect(OracleDialect, ABC):
                 if match:
                     version_str = match.group(1)
                     return tuple(int(part) for part in version_str.split("."))
-                else:
-                    # 尝试简单版本号提取
-                    simple_match = re.search(r"(\d+)\.(\d+)", banner)
-                    if simple_match:
-                        return (int(simple_match.group(1)), int(simple_match.group(2)))
+                # 尝试简单版本号提取
+                simple_match = re.search(r"(\d+)\.(\d+)", banner)
+                if simple_match:
+                    return (int(simple_match.group(1)), int(simple_match.group(2)))
 
             return None
 
@@ -388,14 +409,14 @@ class GBase8sJDBCDialect(OracleDialect, ABC):
             # 其他异常，返回 None
             return None
 
-    def is_disconnect(self, e: Exception, connection: Any, cursor: Any) -> bool:
+    def is_disconnect(self, e: Exception, _: Any, __: Any) -> bool:
         """
         检查异常是否为连接断开错误。
 
         Args:
             e: 异常对象
-            connection: 连接对象
-            cursor: 游标对象
+            _: 连接对象
+            __: 游标对象
 
         Returns:
             如果是连接断开错误返回 True，否则返回 False
