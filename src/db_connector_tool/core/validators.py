@@ -284,14 +284,13 @@ class PasswordValidator:
         # 评估强度等级
         if length >= 24 and complexity_types == 4:
             return "very_strong"
-        elif length >= 8 and complexity_types == 4:
+        if length >= 8 and complexity_types == 4:
             return "strong"
-        elif complexity_types >= 3:
+        if complexity_types >= 3:
             return "medium"
-        elif length >= 8 and complexity_types >= 2:
+        if length >= 8 and complexity_types >= 2:
             return "medium"
-        else:
-            return "weak"
+        return "weak"
 
     @staticmethod
     def _check_password_requirements(password: str) -> Dict[str, bool]:

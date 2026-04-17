@@ -14,4 +14,4 @@ Example:
 # SPDX-FileCopyrightText: 2025-present wangquanqing <wangquanqing1636@sina.com>
 #
 # SPDX-License-Identifier: MIT
-__version__ = "0.7.0"
+__version__ = "0.8.0"

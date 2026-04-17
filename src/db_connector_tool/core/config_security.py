@@ -22,6 +22,7 @@ from typing import Any, Dict
 import tomli_w
 
 from ..utils.logging_utils import get_logger
+from .crypto import CryptoManager
 from .exceptions import ConfigError
 
 # 获取模块级别的日志记录器
@@ -135,16 +136,13 @@ class ConfigSecurityManager:
         if len(config["metadata"]["audit_log"]) > 100:
             config["metadata"]["audit_log"] = config["metadata"]["audit_log"][-100:]
 
-    def verify_config_signature(self, config: Dict[str, Any]) -> bool:
+    def verify_config_signature(self, config: Dict[str, Any]) -> None:
         """验证配置文件数字签名
 
         验证配置文件的数字签名，确保配置文件未被篡改，并检查签名时间戳。
 
         Args:
             config: 配置字典，包含metadata字段和signature字段
-
-        Returns:
-            bool: 签名是否有效
 
         Raises:
             ConfigError: 签名验证失败
@@ -161,7 +159,7 @@ class ConfigSecurityManager:
             # 如果签名为空，跳过验证（可能是新创建的配置）
             if not signature:
                 logger.debug("配置文件无数字签名，跳过验证")
-                return True
+                return
 
             # 确保加密管理器已初始化
             try:
@@ -217,11 +215,7 @@ class ConfigSecurityManager:
                 raise ConfigError(f"时间戳验证失败: {str(e)}") from e
 
             logger.debug("配置文件数字签名验证成功")
-            return True
 
-        except ConfigError:
-            # 重新抛出ConfigError
-            raise
         except (ValueError, AttributeError, RuntimeError) as e:
             logger.error("配置文件签名验证失败: %s", str(e))
             raise ConfigError(f"配置文件签名验证失败: {str(e)}") from e
@@ -404,15 +398,13 @@ class ConfigSecurityManager:
             if original_key_info:
                 try:
                     # 尝试恢复原始密钥
-                    from .crypto import CryptoManager
-
                     self.key_manager.crypto = CryptoManager.from_saved_key(
                         original_key_info["password"],
                         original_key_info["salt"],
                         original_key_info["iterations"],
                     )
                     logger.debug("已恢复原始加密密钥")
-                except Exception as key_restore_error:
+                except (ConfigError, ValueError, TypeError) as key_restore_error:
                     logger.warning("恢复原始密钥失败: %s", str(key_restore_error))
             raise ConfigError(f"密钥轮换失败: {str(error)}") from error
 

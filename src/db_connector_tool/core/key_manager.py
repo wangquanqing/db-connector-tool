@@ -20,14 +20,10 @@ Example:
 >>> key_manager.rotate_key()
 """
 
-import getpass
 import hashlib
 import json
 import os
-import platform
 import secrets
-import stat
-import subprocess
 import threading
 import tomllib
 from functools import wraps
@@ -195,28 +191,6 @@ class KeyManager:
 
         return decorator
 
-    def get_crypto_manager(self) -> CryptoManager:
-        """获取加密管理器实例
-
-        获取初始化好的加密管理器实例，用于执行加密和解密操作。
-
-        Returns:
-            CryptoManager: 初始化好的加密管理器实例
-
-        Raises:
-            ConfigError: 加密管理器未初始化，无法处理敏感信息
-
-        Example:
-            >>> key_manager = KeyManager()
-            >>> key_manager.load_or_create_key()
-            >>> crypto = key_manager.get_crypto_manager()
-            >>> encrypted = crypto.encrypt("敏感数据")
-        """
-
-        if self.crypto is None:
-            raise ConfigError("加密管理器未初始化，无法处理敏感信息")
-        return self.crypto
-
     @handle_config_operation("安全密钥管理")
     def load_or_create_key(self) -> None:
         """加载或创建加密密钥
@@ -242,16 +216,9 @@ class KeyManager:
                 key_data = json.loads(KeyManager._env_key)
                 self._load_crypto_from_key_data(key_data)
                 logger.debug("使用环境变量中的加密密钥")
-            except (json.JSONDecodeError, TypeError) as e:
+            except (json.JSONDecodeError, TypeError, ConfigError) as e:
                 logger.error(
                     "环境变量密钥格式错误: %s，请检查 DB_CONNECTOR_TOOL_ENCRYPTION_KEY 环境变量的格式",
-                    str(e),
-                )
-                logger.warning("环境变量密钥加载失败，使用文件存储方案")
-                self._load_or_create_key_from_file()
-            except ConfigError as e:
-                logger.error(
-                    "环境变量密钥数据无效: %s，请检查 DB_CONNECTOR_TOOL_ENCRYPTION_KEY 环境变量的内容",
                     str(e),
                 )
                 logger.warning("环境变量密钥加载失败，使用文件存储方案")
@@ -365,7 +332,7 @@ class KeyManager:
                     "      2. 或设置环境变量 DB_CONNECTOR_TOOL_ENCRYPTION_KEY，使用环境变量存储\n"
                     "      3. 确保密钥文件权限设置正确，仅允许所有者访问"
                 )
-            except Exception as e:
+            except (OSError, tomllib.TOMLDecodeError, ConfigError) as e:
                 logger.error("加载密钥文件失败: %s，创建新的密钥文件", str(e))
                 self._create_new_key(key_file_path)
         else:
@@ -439,83 +406,16 @@ class KeyManager:
         Args:
             file_path: 文件路径
 
-        Raises:
-            ConfigError: 权限设置失败
-
         Example:
             >>> key_file = Path("/path/to/encryption.key")
             >>> key_manager._set_secure_file_permissions(key_file)
         """
 
-        try:
-            system = platform.system().lower()
-
-            if system == "windows":
-                self._set_windows_permissions(file_path)
-            else:
-                self._set_unix_permissions(file_path)
-
+        success = PathHelper.set_secure_file_permissions(file_path)
+        if success:
             logger.debug("设置文件权限成功: %s", file_path)
-
-        except (OSError, AttributeError) as e:
-            logger.warning("设置文件权限失败 %s: %s", file_path, str(e))
-            # 权限设置失败不应阻止程序运行，但记录警告
-
-    def _set_windows_permissions(self, file_path: Path) -> None:
-        """设置Windows文件权限（最小权限原则）
-
-        设置Windows系统下的文件权限，确保只有当前用户可以访问。
-
-        Args:
-            file_path: 密钥文件路径
-
-        Example:
-            >>> key_file = Path("C:\\path\\to\\encryption.key")
-            >>> key_manager._set_windows_permissions(key_file)
-        """
-
-        username = getpass.getuser()
-
-        # 使用icacls设置权限：
-        # /inheritance:r - 移除继承权限
-        # /grant:r - 授予当前用户读写权限（最小必要权限）
-        # /remove - 移除其他用户权限
-        result = subprocess.run(
-            [
-                "icacls",
-                str(file_path),
-                "/inheritance:r",
-                "/grant:r",
-                f"{username}:(R,W)",  # 仅读写权限，非完全控制
-                "/remove",
-                "*S-1-1-0",  # 移除Everyone组
-            ],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-
-        if result.returncode != 0:
-            logger.warning("icacls设置权限警告: %s", result.stderr)
         else:
-            logger.debug("Windows: 已设置密钥文件权限为仅当前用户读写")
-
-    def _set_unix_permissions(self, file_path: Path) -> None:
-        """设置Unix/Linux文件权限（最小权限原则）
-
-        设置Unix/Linux系统下的文件权限，确保只有所有者可以访问。
-
-        Args:
-            file_path: 密钥文件路径
-
-        Example:
-            >>> key_file = Path("/path/to/encryption.key")
-            >>> key_manager._set_unix_permissions(key_file)
-        """
-
-        # 设置权限为600：仅所有者可读写
-        file_path.chmod(stat.S_IRUSR | stat.S_IWUSR)
-        logger.debug("Unix/Linux: 已设置密钥文件权限为600（仅所有者可读写）")
+            logger.warning("设置文件权限失败 %s", file_path)
 
     def _handle_crypto_error(
         self, key_file_path: Path, crypto_error: CryptoError

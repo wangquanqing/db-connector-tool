@@ -24,11 +24,15 @@ Example:
 import threading
 import time
 from typing import Any, Dict, List
+import atexit
+
 
 from ..utils.logging_utils import get_logger
 from .config import ConfigManager
 from .connection_pool import ConnectionPoolManager
 from .exceptions import ConfigError, DatabaseError, DBConnectionError
+from ..drivers.sqlalchemy_driver import SQLAlchemyDriver
+
 
 # 获取模块级别的日志记录器
 logger = get_logger(__name__)
@@ -460,8 +464,6 @@ class DatabaseManager:
         )
 
         # 注册临时连接清理函数，在连接不再使用时清理
-        import atexit
-
         def cleanup_temp_connection():
             try:
                 self.pool_manager.remove_connection(temp_connection_name)
@@ -509,8 +511,6 @@ class DatabaseManager:
         # 根据数据库类型选择合适的驱动
         db_type = connection_config.get("type", "mysql")
         if db_type in ["mysql", "postgresql", "oracle", "sqlserver", "sqlite", "gbase"]:
-            from ..drivers.sqlalchemy_driver import SQLAlchemyDriver
-
             return SQLAlchemyDriver(connection_config)
         raise DBConnectionError(f"不支持的数据库类型: {db_type}")
 
@@ -607,9 +607,6 @@ class DatabaseManager:
                 logger.info("连接测试成功: %s", name)
             else:
                 logger.warning("连接测试失败: %s", name)
-
-            # 测试完成后不立即清理连接，保留在连接池中供后续使用
-            # 连接池会通过空闲连接清理机制自动管理
 
             return success
         except (OSError, DBConnectionError) as connect_error:

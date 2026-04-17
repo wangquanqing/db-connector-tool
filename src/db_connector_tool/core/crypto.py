@@ -20,6 +20,7 @@ Example:
 """
 
 import base64
+import gc
 import secrets
 import string
 import time
@@ -258,11 +259,9 @@ class CryptoManager:
 
         # 尝试使用更底层的内存清理方法（如果可用）
         try:
-            import gc
-
             gc.collect()
             logger.debug("已执行垃圾回收，进一步清理敏感数据")
-        except Exception as e:
+        except (MemoryError, RuntimeError) as e:
             logger.debug("垃圾回收执行失败: %s", str(e))
 
         logger.debug("敏感数据已安全清理")
@@ -390,8 +389,7 @@ class CryptoManager:
 
             logger.debug("强制生成的密码强度不足，第%s次重新生成", attempt + 1)
 
-        # 达到最大尝试次数后，确保密码符合要求并返回
-        # 确保返回的密码一定符合强度要求
+        # 达到最大尝试次数后，确保密码符合要求并返回。确保返回的密码一定符合强度要求
         logger.warning("达到最大尝试次数(%s)，确保返回符合强度要求的密码", max_attempts)
         # 直接返回一个符合强度要求的密码，确保包含所有必要的字符类型
         final_password = "".join(

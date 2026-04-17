@@ -11,8 +11,11 @@
 - 目录存在性检查与自动创建
 """
 
+import getpass
 import os
 import platform
+import stat
+import subprocess
 from pathlib import Path
 
 
@@ -415,3 +418,124 @@ class PathHelper:
             raise ValueError("路径遍历检测到安全违规") from exc
 
         return result_path
+
+    @staticmethod
+    def set_secure_file_permissions(file_path: Path | str) -> bool:
+        """
+        设置文件的安全权限（最小权限原则）
+
+        设置文件的安全权限，确保只有所有者可以访问。
+        支持Windows和Unix/Linux系统，提供跨平台的权限设置功能。
+
+        Args:
+            file_path (Path | str): 需要设置权限的文件路径
+
+        Returns:
+            bool: 权限设置是否成功
+
+        Raises:
+            ValueError: 当文件路径为空或无效时
+            OSError: 当文件不存在或无法访问时
+
+        Note:
+            - Windows: 使用icacls命令设置权限，仅当前用户可读写
+            - Unix/Linux: 使用chmod设置权限为600（仅所有者可读写）
+            - 权限设置失败不会抛出异常，返回False
+
+        Example:
+            >>> # 设置配置文件权限
+            >>> PathHelper.set_secure_file_permissions("/path/to/config.toml")
+            True
+            >>>
+            >>> # 设置密钥文件权限
+            >>> key_file = Path("/path/to/encryption.key")
+            >>> success = PathHelper.set_secure_file_permissions(key_file)
+            >>> print(f"权限设置{'成功' if success else '失败'}")
+        """
+        if not file_path:
+            raise ValueError("文件路径不能为空")
+
+        # 转换为Path对象
+        file_path_obj = Path(file_path) if isinstance(file_path, str) else file_path
+
+        # 检查文件是否存在
+        if not file_path_obj.exists():
+            raise OSError(f"文件不存在: {file_path_obj}")
+
+        system = platform.system().lower()
+
+        if system == "windows":
+            return PathHelper._set_windows_file_permissions(file_path_obj)
+        return PathHelper._set_unix_file_permissions(file_path_obj)
+
+    @staticmethod
+    def _set_windows_file_permissions(file_path: Path) -> bool:
+        """
+        设置Windows系统文件权限（内部方法）
+
+        使用icacls命令设置Windows文件权限，确保只有当前用户可以访问。
+
+        Args:
+            file_path (Path): 文件路径
+
+        Returns:
+            bool: 权限设置是否成功
+
+        Note:
+            使用icacls命令设置权限：
+            - /inheritance:r - 移除继承权限
+            - /grant:r - 授予当前用户读写权限（最小必要权限）
+            - /remove - 移除Everyone组权限
+        """
+        try:
+            username = getpass.getuser()
+
+            # 使用icacls设置权限
+            result = subprocess.run(
+                [
+                    "icacls",
+                    str(file_path),
+                    "/inheritance:r",
+                    "/grant:r",
+                    f"{username}:(R,W)",  # 仅读写权限
+                    "/remove",
+                    "*S-1-1-0",  # 移除Everyone组
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            if result.returncode != 0:
+                return False
+
+            return True
+
+        except (OSError, subprocess.SubprocessError):
+            return False
+
+    @staticmethod
+    def _set_unix_file_permissions(file_path: Path) -> bool:
+        """
+        设置Unix/Linux系统文件权限（内部方法）
+
+        使用chmod命令设置Unix/Linux文件权限，确保只有所有者可以访问。
+
+        Args:
+            file_path (Path): 文件路径
+
+        Returns:
+            bool: 权限设置是否成功
+
+        Note:
+            设置权限为600：仅所有者可读写
+            - S_IRUSR: 所有者读权限
+            - S_IWUSR: 所有者写权限
+        """
+        try:
+            # 设置权限为600：仅所有者可读写
+            file_path.chmod(stat.S_IRUSR | stat.S_IWUSR)
+            return True
+
+        except OSError:
+            return False

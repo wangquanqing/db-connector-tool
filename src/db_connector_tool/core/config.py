@@ -13,7 +13,6 @@ Example:
 >>> new_version = config_manager.rotate_encryption_key()
 """
 
-import getpass
 import shutil
 import tomllib
 from datetime import datetime
@@ -184,6 +183,30 @@ class ConfigManager:
         """
         return self.config_dir / self.config_file
 
+    def get_config_info(self) -> Dict[str, Any]:
+        """获取配置文件的基本信息
+
+        Returns:
+            Dict[str, Any]: 配置文件信息字典，包含版本、应用名称、连接数量等信息
+
+        Example:
+            >>> info = config_manager.get_config_info()
+            >>> print(info["version"])
+            "1.0.0"
+            >>> print(info["connection_count"])
+            2
+        """
+
+        config = self._load_config()
+        return {
+            "version": config["version"],
+            "app_name": config["app_name"],
+            "connection_count": len(config["connections"]),
+            "created": config["metadata"]["created"],
+            "last_modified": config["metadata"]["last_modified"],
+            "config_file": str(self.config_path),
+        }
+
     def close(self) -> None:
         """关闭配置管理器，清理敏感数据
 
@@ -238,7 +261,7 @@ class ConfigManager:
         }
         self._save_config(default_config)
         # 设置安全的文件权限
-        self._set_secure_file_permissions()
+        self._set_secure_file_permissions(self.config_path)
         logger.info("默认配置文件已创建: %s", self.config_path)
 
     @KeyManager.handle_config_operation("配置文件保存")
@@ -293,17 +316,27 @@ class ConfigManager:
         self._config_mtime = None
         logger.debug("配置文件已保存: %s", self.config_path)
 
+    def _set_secure_file_permissions(self, file_path: Path) -> None:
+        """设置配置文件的安全权限
+
+        设置配置文件的安全权限，确保只有所有者可以访问。
+
+        Args:
+            file_path: 文件路径
+        """
+
+        success = PathHelper.set_secure_file_permissions(file_path)
+        if success:
+            logger.debug("配置文件权限设置成功: %s", file_path)
+        else:
+            logger.warning("配置文件权限设置失败，可能导致安全风险，请手动设置权限")
+
     def add_config(self, name: str, connection_config: Dict[str, Any]) -> None:
         """添加数据库连接配置
 
         Args:
             name: 连接名称（唯一标识符），不能为空且必须是字符串
             connection_config: 连接配置字典，包含数据库连接所需的参数
-
-        Raises:
-            ConfigError: 连接已存在或添加失败
-            ValueError: 连接名称为空或配置无效
-            OSError: 文件系统操作失败
 
         Example:
             >>> config = {
@@ -360,65 +393,22 @@ class ConfigManager:
             logger.debug("使用缓存的配置")
             return self._config_cache
 
-        try:
-            # 读取TOML文件
-            with open(self.config_path, "rb") as f:
-                config = tomllib.load(f)
+        # 读取TOML文件
+        with open(self.config_path, "rb") as f:
+            config = tomllib.load(f)
 
-            # 验证配置文件结构
-            ConfigValidator.validate_config(config)
+        # 验证配置文件结构
+        ConfigValidator.validate_config(config)
 
-            # 验证数字签名
-            self.security_manager.verify_config_signature(config)
+        # 验证数字签名
+        self.security_manager.verify_config_signature(config)
 
-            # 更新缓存和修改时间
-            self._config_cache = config
-            self._config_mtime = current_mtime
-            logger.debug("配置已加载并缓存")
+        # 更新缓存和修改时间
+        self._config_cache = config
+        self._config_mtime = current_mtime
+        logger.debug("配置已加载并缓存")
 
-            return config
-        except (tomllib.TOMLDecodeError, ConfigError, OSError) as e:
-            # 配置文件加载失败，创建默认配置
-            logger.error("配置文件加载失败: %s，创建默认配置", str(e))
-            # 确保加密管理器已初始化
-            if self.key_manager.crypto is None:
-                self.key_manager.load_or_create_key()
-            # 创建默认配置
-            default_config = {
-                "version": "1.0.0",
-                "app_name": self.app_name,
-                "connections": {},
-                "metadata": {
-                    "created": datetime.now().astimezone().isoformat(),
-                    "last_modified": datetime.now().astimezone().isoformat(),
-                    "config_file": str(self.config_path),
-                    "key_version": "1",
-                    "signature": "",
-                    "audit_log": [],
-                },
-            }
-            # 保存默认配置（会自动生成签名）
-            self._save_config(default_config)
-            # 直接返回默认配置，因为我们已经保存并生成了签名
-            # 下次加载时签名验证会通过
-            self._config_cache = default_config
-            self._config_mtime = self.config_path.stat().st_mtime
-            return default_config
-
-    def refresh_cache(self) -> None:
-        """手动刷新配置缓存
-
-        强制重新加载配置文件，更新缓存。
-
-        Example:
-            >>> config_manager.refresh_cache()
-        """
-        # 清除缓存
-        self._config_cache = None
-        self._config_mtime = None
-        # 重新加载配置
-        self._load_config()
-        logger.debug("配置缓存已手动刷新")
+        return config
 
     def _increment_config_version(self, config: Dict[str, Any]) -> None:
         """递增配置文件版本号
@@ -451,8 +441,7 @@ class ConfigManager:
                 major_num, minor_num, patch_num
             )
 
-            # 移除主版本号限制，允许主版本号自由递增
-            # 检查主版本号是否合理（不再限制主版本号）
+            # 移除主版本号限制，允许主版本号自由递增。检查主版本号是否合理（不再限制主版本号）
             if major_num < 0:
                 raise ConfigError(
                     "版本号递增导致主版本号为负数",
@@ -477,9 +466,6 @@ class ConfigManager:
             config["version"] = new_version
             logger.debug("配置文件版本号已更新: %s -> %s", current_version, new_version)
 
-        except ConfigError:
-            # 重新抛出ConfigError，因为这是需要用户处理的错误
-            raise
         except (ValueError, AttributeError, RuntimeError) as e:
             logger.warning("版本号递增失败，保持原版本号: %s", str(e))
             # 如果版本号递增失败，不影响主要功能，继续使用原版本号
@@ -596,10 +582,6 @@ class ConfigManager:
             name: 连接名称
             connection_config: 新的连接配置字典，包含更新后的连接参数
 
-        Raises:
-            ConfigError: 连接不存在或更新失败
-            ValueError: 连接名称或配置无效
-
         Example:
             >>> new_config = {"host": "new_host", "port": 5433}
             >>> config_manager.update_config("postgres_db", new_config)
@@ -681,106 +663,7 @@ class ConfigManager:
         config = self._load_config()
         return list(config["connections"].keys())
 
-    def get_config_info(self) -> Dict[str, Any]:
-        """获取配置文件的基本信息
-
-        Returns:
-            Dict[str, Any]: 配置文件信息字典，包含版本、应用名称、连接数量等信息
-
-        Example:
-            >>> info = config_manager.get_config_info()
-            >>> print(info["version"])
-            "1.0.0"
-            >>> print(info["connection_count"])
-            2
-        """
-
-        config = self._load_config()
-        return {
-            "version": config["version"],
-            "app_name": config["app_name"],
-            "connection_count": len(config["connections"]),
-            "created": config["metadata"]["created"],
-            "last_modified": config["metadata"]["last_modified"],
-            "config_file": str(self.config_path),
-        }
-
-    def get_key_version(self) -> str:
-        """获取当前密钥版本
-
-        Returns:
-            str: 当前密钥版本号
-
-        Example:
-            >>> version = config_manager.get_key_version()
-            >>> print(version)
-            "1"
-        """
-
-        config = self._load_config()
-        return config.get("metadata", {}).get("key_version", "1")
-
-    def get_audit_log(self) -> List[Dict[str, Any]]:
-        """获取配置变更审计日志
-
-        Returns:
-            List[Dict[str, Any]]: 审计日志列表
-
-        Example:
-            >>> audit_log = config_manager.get_audit_log()
-            >>> print(audit_log[0]["operation"])
-            "add"
-        """
-
-        config = self._load_config()
-        return config.get("metadata", {}).get("audit_log", [])
-
     @KeyManager.handle_config_operation("配置文件备份")
-    def _set_secure_file_permissions(self) -> None:
-        """设置配置文件的安全权限
-
-        设置配置文件的安全权限，确保只有所有者可以访问。
-        """
-        import platform
-        import stat
-
-        try:
-            system = platform.system().lower()
-
-            if system == "windows":
-                # Windows系统权限设置
-                import subprocess
-
-                username = getpass.getuser()
-                result = subprocess.run(
-                    [
-                        "icacls",
-                        str(self.config_path),
-                        "/inheritance:r",
-                        "/grant:r",
-                        f"{username}:(R,W)",
-                        "/remove",
-                        "*S-1-1-0",
-                    ],
-                    capture_output=True,
-                    text=True,
-                    check=False,
-                )
-                if result.returncode != 0:
-                    logger.error("Windows权限设置失败: %s", result.stderr)
-                    logger.warning(
-                        "配置文件权限设置失败，可能导致安全风险，请手动设置权限"
-                    )
-                else:
-                    logger.debug("Windows权限设置成功: %s", self.config_path)
-            else:
-                # Unix/Linux系统权限设置
-                self.config_path.chmod(stat.S_IRUSR | stat.S_IWUSR)
-                logger.debug("Unix/Linux权限设置成功: %s", self.config_path)
-        except Exception as e:
-            logger.error("设置配置文件权限失败: %s", str(e))
-            logger.warning("配置文件权限设置失败，可能导致安全风险，请手动设置权限")
-
     def backup_config(self, backup_path: Path | None = None) -> Path:
         """备份配置文件
 
@@ -807,12 +690,7 @@ class ConfigManager:
 
         shutil.copy2(self.config_path, backup_path)
         # 设置备份文件的安全权限
-        try:
-            import stat
-
-            backup_path.chmod(stat.S_IRUSR | stat.S_IWUSR)
-        except Exception as e:
-            logger.warning("设置备份文件权限失败: %s", str(e))
+        self._set_secure_file_permissions(backup_path)
         logger.debug("配置文件已备份: %s", backup_path)
         return backup_path
 
@@ -868,3 +746,48 @@ class ConfigManager:
         self._save_config(config, "rotate_key")
 
         return new_key_version
+
+    def get_audit_log(self) -> List[Dict[str, Any]]:
+        """获取配置变更审计日志
+
+        Returns:
+            List[Dict[str, Any]]: 审计日志列表
+
+        Example:
+            >>> audit_log = config_manager.get_audit_log()
+            >>> print(audit_log[0]["operation"])
+            "add"
+        """
+
+        config = self._load_config()
+        return config.get("metadata", {}).get("audit_log", [])
+
+    def get_key_version(self) -> str:
+        """获取当前密钥版本
+
+        Returns:
+            str: 当前密钥版本号
+
+        Example:
+            >>> version = config_manager.get_key_version()
+            >>> print(version)
+            "1"
+        """
+
+        config = self._load_config()
+        return config.get("metadata", {}).get("key_version", "1")
+
+    def refresh_cache(self) -> None:
+        """手动刷新配置缓存
+
+        强制重新加载配置文件，更新缓存。
+
+        Example:
+            >>> config_manager.refresh_cache()
+        """
+        # 清除缓存
+        self._config_cache = None
+        self._config_mtime = None
+        # 重新加载配置
+        self._load_config()
+        logger.debug("配置缓存已手动刷新")

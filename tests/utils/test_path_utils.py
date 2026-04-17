@@ -320,6 +320,58 @@ class TestPathHelper(unittest.TestCase):
                 PathHelper.safe_join(base_path, "file.txt")
             self.assertIn("路径遍历检测到安全违规", str(cm.exception))
 
+    def test_set_secure_file_permissions(self):
+        """测试设置文件安全权限"""
+        # 创建测试文件
+        test_file = Path(self.temp_dir) / "test_file.txt"
+        test_file.write_text("test content")
+        
+        # 测试权限设置
+        result = PathHelper.set_secure_file_permissions(test_file)
+        self.assertTrue(result)
+        
+        # 测试无效参数
+        with self.assertRaises(ValueError):
+            PathHelper.set_secure_file_permissions("")
+        
+        with self.assertRaises(ValueError):
+            PathHelper.set_secure_file_permissions(None)  # type: ignore
+        
+        # 测试文件不存在的情况
+        non_existent_file = Path(self.temp_dir) / "non_existent.txt"
+        with self.assertRaises(OSError):
+            PathHelper.set_secure_file_permissions(non_existent_file)
+
+    @mock.patch("src.db_connector_tool.utils.path_utils.platform.system")
+    @mock.patch("src.db_connector_tool.utils.path_utils.subprocess.run")
+    def test_set_windows_permissions(self, mock_run, mock_system):
+        """测试Windows系统权限设置"""
+        mock_system.return_value = "Windows"
+        mock_run.return_value.returncode = 0
+        
+        test_file = Path(self.temp_dir) / "test_file.txt"
+        test_file.write_text("test content")
+        
+        result = PathHelper._set_windows_file_permissions(test_file)
+        self.assertTrue(result)
+        
+        # 测试权限设置失败的情况
+        mock_run.return_value.returncode = 1
+        mock_run.return_value.stderr = "Access denied"
+        result = PathHelper._set_windows_file_permissions(test_file)
+        self.assertFalse(result)
+
+    @mock.patch("src.db_connector_tool.utils.path_utils.platform.system")
+    def test_set_unix_permissions(self, mock_system):
+        """测试Unix系统权限设置"""
+        mock_system.return_value = "Linux"
+        
+        test_file = Path(self.temp_dir) / "test_file.txt"
+        test_file.write_text("test content")
+        
+        result = PathHelper._set_unix_file_permissions(test_file)
+        self.assertTrue(result)
+
 
 if __name__ == "__main__":
     unittest.main()
