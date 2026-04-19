@@ -21,18 +21,16 @@ Example:
 ...     results = dbm.execute_query("postgres_db", "SELECT * FROM products")
 """
 
+import atexit
 import threading
 import time
 from typing import Any, Dict, List
-import atexit
 
-
+from ..drivers.sqlalchemy_driver import SQLAlchemyDriver
 from ..utils.logging_utils import get_logger
 from .config import ConfigManager
 from .connection_pool import ConnectionPoolManager
 from .exceptions import ConfigError, DatabaseError, DBConnectionError
-from ..drivers.sqlalchemy_driver import SQLAlchemyDriver
-
 
 # 获取模块级别的日志记录器
 logger = get_logger(__name__)
@@ -379,7 +377,7 @@ class DatabaseManager:
 
     def get_connection(
         self, name: str, config_overrides: Dict[str, Any] | None = None
-    ) -> Any:
+    ) -> SQLAlchemyDriver:
         """获取数据库连接（连接池管理）
 
         Args:
@@ -388,7 +386,7 @@ class DatabaseManager:
                             例如：{"host": "127.0.0.1", "port": 3306}
 
         Returns:
-            Any: 数据库驱动实例，用于执行数据库操作
+            SQLAlchemyDriver: SQLAlchemy驱动实例，用于执行数据库操作
 
         Raises:
             DatabaseError: 当获取连接失败时
@@ -424,7 +422,7 @@ class DatabaseManager:
 
     def _get_connection_with_overrides(
         self, name: str, config_overrides: Dict[str, Any]
-    ) -> Any:
+    ) -> SQLAlchemyDriver:
         """使用配置覆盖创建临时连接
 
         Args:
@@ -432,7 +430,7 @@ class DatabaseManager:
             config_overrides: 配置覆盖字典
 
         Returns:
-            Any: 数据库驱动实例
+            SQLAlchemyDriver: SQLAlchemy驱动实例
 
         Raises:
             DBConnectionError: 当连接建立失败时
@@ -446,7 +444,7 @@ class DatabaseManager:
         connection_config = {**base_config, **config_overrides}
 
         # 根据数据库类型选择合适的驱动
-        driver = self._create_driver_for_type(connection_config)
+        driver = SQLAlchemyDriver(connection_config)
 
         try:
             driver.connect()
@@ -468,20 +466,20 @@ class DatabaseManager:
             try:
                 self.pool_manager.remove_connection(temp_connection_name)
                 logger.debug("临时连接已清理: %s", temp_connection_name)
-            except Exception as e:
+            except (DatabaseError, OSError) as e:
                 logger.debug("清理临时连接失败: %s", str(e))
 
         atexit.register(cleanup_temp_connection)
         return driver
 
-    def _get_connection_from_pool(self, name: str) -> Any:
+    def _get_connection_from_pool(self, name: str) -> SQLAlchemyDriver:
         """从连接池获取或创建连接
 
         Args:
             name: 连接名称
 
         Returns:
-            Any: 数据库驱动实例
+            SQLAlchemyDriver: SQLAlchemy驱动实例
 
         Raises:
             DBConnectionError: 当连接建立失败时
@@ -496,32 +494,14 @@ class DatabaseManager:
         # 创建新连接
         return self._create_new_connection(name)
 
-    def _create_driver_for_type(self, connection_config: Dict[str, Any]) -> Any:
-        """根据数据库类型创建相应的驱动实例
-
-        Args:
-            connection_config: 连接配置字典
-
-        Returns:
-            Any: 数据库驱动实例
-
-        Raises:
-            DBConnectionError: 当数据库类型不支持时
-        """
-        # 根据数据库类型选择合适的驱动
-        db_type = connection_config.get("type", "mysql")
-        if db_type in ["mysql", "postgresql", "oracle", "sqlserver", "sqlite", "gbase"]:
-            return SQLAlchemyDriver(connection_config)
-        raise DBConnectionError(f"不支持的数据库类型: {db_type}")
-
-    def _create_new_connection(self, name: str) -> Any:
+    def _create_new_connection(self, name: str) -> SQLAlchemyDriver:
         """创建新的数据库连接
 
         Args:
             name: 连接名称
 
         Returns:
-            Any: 数据库驱动实例
+            SQLAlchemyDriver: SQLAlchemy驱动实例
 
         Raises:
             DBConnectionError: 当连接建立失败时
@@ -531,7 +511,7 @@ class DatabaseManager:
         connection_config = self.show_connection(name)
 
         # 根据数据库类型选择合适的驱动
-        driver = self._create_driver_for_type(connection_config)
+        driver = SQLAlchemyDriver(connection_config)
 
         try:
             driver.connect()
@@ -880,7 +860,9 @@ class DatabaseManager:
                 "error": str(connect_error),
             }
 
-    def _diagnose_connection_test(self, driver: Any, diagnosis: Dict[str, Any]) -> None:
+    def _diagnose_connection_test(
+        self, driver: SQLAlchemyDriver, diagnosis: Dict[str, Any]
+    ) -> None:
         """诊断连接测试
 
         Args:

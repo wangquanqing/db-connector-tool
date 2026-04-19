@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Any, Literal, Tuple
 
 import jaydebeapi
+import jpype
 from dateutil import parser
 from sqlalchemy import CHAR, TIMESTAMP, VARCHAR, TypeDecorator, exc, sql, util
 from sqlalchemy.dialects import registry
@@ -83,6 +84,7 @@ class GBase8sCursor(jaydebeapi.Cursor):
         return value
 
 
+# pylint: disable=too-many-ancestors
 class ObTimestamp(TypeDecorator):
     """
     GBase 8s 时间戳类型装饰器。
@@ -92,31 +94,58 @@ class ObTimestamp(TypeDecorator):
 
     impl = TIMESTAMP
 
-    def process_bind_param(self, value: Any, _: Any) -> Any:
+    @property
+    def python_type(self):
+        """
+        返回此类型对应的 Python 类型。
+
+        Returns:
+            type: Python 类型
+        """
+        return datetime
+
+    def process_bind_param(self, value: Any, dialect: Any) -> Any:
         """
         处理绑定参数，将 Python datetime 转换为 Java Timestamp。
 
         Args:
             value: 输入值
-            _: SQLAlchemy 方言对象
+            dialect: SQLAlchemy 方言对象
 
         Returns:
             转换后的时间戳值
         """
         if isinstance(value, datetime):
-            import jpype
-
             timestamp_class = jpype.JClass("java.sql.Timestamp")
             value = timestamp_class.valueOf(value.strftime("%Y-%m-%d %H:%M:%S.%f"))
         return value
 
-    def process_result_value(self, value: Any, _: Any) -> datetime | None:
+    def process_literal_param(self, value: Any, dialect: Any) -> str:
+        """
+        处理字面量参数，将 Python datetime 转换为 SQL 字面量字符串。
+
+        Args:
+            value: 输入值
+            dialect: SQLAlchemy 方言对象
+
+        Returns:
+            转换后的 SQL 字面量字符串
+        """
+        if value is None:
+            return "NULL"
+        if isinstance(value, datetime):
+            # 将 datetime 转换为 SQL 标准的时间戳格式
+            return f"TIMESTAMP '{value.strftime('%Y-%m-%d %H:%M:%S.%f')}'"
+        # 对于其他类型，使用默认的字符串表示
+        return str(value)
+
+    def process_result_value(self, value: Any, dialect: Any) -> datetime | None:
         """
         处理结果值，将字符串解析为 Python datetime 对象。
 
         Args:
             value: 数据库返回的值
-            _: SQLAlchemy 方言对象
+            dialect: SQLAlchemy 方言对象
 
         Returns:
             解析后的 datetime 对象，如果值为 None 则返回 None
@@ -156,29 +185,6 @@ class GBase8sJDBCDialect(OracleDialect, ABC):
     supports_statement_cache = True
     description_encoding = None
 
-    def initialize(self, connection: Any) -> None:
-        """
-        初始化方言，避免调用 OracleDialect 的初始化方法。
-
-        Args:
-            connection: SQLAlchemy 连接对象
-        """
-        # 由于 GBase 8s 与 Oracle 有差异，不调用父类初始化
-        pass
-
-    @classmethod
-    def dbapi(cls) -> Any:
-        """
-        返回数据库 API 模块，使用自定义的 GBase8sCursor。
-
-        Returns:
-            jaydebeapi 模块，使用自定义游标类
-        """
-        import jaydebeapi
-
-        jaydebeapi.Cursor = GBase8sCursor
-        return jaydebeapi
-
     @classmethod
     def import_dbapi(cls) -> DBAPIModule:
         """
@@ -188,18 +194,6 @@ class GBase8sJDBCDialect(OracleDialect, ABC):
             导入的 jaydebeapi 模块
         """
         return __import__("jaydebeapi")
-
-    def do_rollback(self, dbapi_connection: Any) -> None:
-        """
-        执行回滚操作。
-
-        GBase 8s 不支持事务回滚操作，因此该方法为空实现。
-
-        Args:
-            dbapi_connection: 数据库 API 连接对象
-        """
-        # GBase 8s 不支持事务回滚，留空实现
-        pass
 
     def create_connect_args(self, url: Any) -> Tuple[Tuple, dict]:
         """
@@ -226,7 +220,7 @@ class GBase8sJDBCDialect(OracleDialect, ABC):
         }
 
         # 处理 JAR 路径
-        self._handle_jar_path(url_obj, kwargs)
+        self._handle_jar_path(kwargs)
 
         return (), kwargs
 
@@ -256,16 +250,15 @@ class GBase8sJDBCDialect(OracleDialect, ABC):
 
         return connect_args
 
-    def _handle_jar_path(self, url_obj: Any, kwargs: dict) -> None:
+    def _handle_jar_path(self, kwargs: dict) -> None:
         """处理 JDBC 驱动 JAR 文件路径。
 
-        优先级：URL参数 > 环境变量 > 默认路径
+        优先级：环境变量 > 默认路径
 
         Args:
             url_obj: SQLAlchemy URL对象
             kwargs: 连接参数字典
         """
-        # url_obj参数暂未使用，保留以备将来支持URL参数指定jar路径
 
         jar_path = None
 
@@ -317,12 +310,12 @@ class GBase8sJDBCDialect(OracleDialect, ABC):
         """
         return False
 
-    def _check_max_identifier_length(self, _: Any) -> Literal[30] | None:
+    def _check_max_identifier_length(self, connection: Any) -> Literal[30] | None:
         """
         检查最大标识符长度。
 
         Args:
-            _: 数据库连接对象
+            connection: 数据库连接对象
 
         Returns:
             最大标识符长度，如果无法确定则返回 None
@@ -405,18 +398,18 @@ class GBase8sJDBCDialect(OracleDialect, ABC):
         except exc.DBAPIError:
             # 版本查询失败，返回 None
             return None
-        except Exception:
-            # 其他异常，返回 None
+        except (ValueError, re.error, AttributeError):
+            # 正则表达式解析错误或属性访问错误，返回 None
             return None
 
-    def is_disconnect(self, e: Exception, _: Any, __: Any) -> bool:
+    def is_disconnect(self, e: Exception, connection: Any, cursor: Any) -> bool:
         """
         检查异常是否为连接断开错误。
 
         Args:
             e: 异常对象
-            _: 连接对象
-            __: 游标对象
+            connection: 连接对象
+            cursor: 游标对象
 
         Returns:
             如果是连接断开错误返回 True，否则返回 False
