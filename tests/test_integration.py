@@ -4,14 +4,20 @@
 """
 
 import tempfile
+import unittest
 from pathlib import Path
-from unittest import TestCase, mock
+from unittest import TestCase
 
-from db_connector_tool import BatchDatabaseManager, DatabaseManager, generate_ip_range
-from db_connector_tool.core.config import ConfigManager
-from db_connector_tool.core.crypto import CryptoManager
-from db_connector_tool.core.key_manager import KeyManager
-from db_connector_tool.utils.path_utils import PathHelper
+from src.db_connector_tool import (
+    BatchDatabaseManager,
+    DatabaseManager,
+    generate_ip_range,
+)
+from src.db_connector_tool.core.config import ConfigManager
+from src.db_connector_tool.core.crypto import CryptoManager
+from src.db_connector_tool.core.key_manager import KeyManager
+from src.db_connector_tool.core.validators import PasswordValidator
+from src.db_connector_tool.utils.path_utils import PathHelper
 
 
 class TestIntegration(TestCase):
@@ -124,8 +130,6 @@ class TestIntegration(TestCase):
         self.assertEqual(decrypted, test_data)
 
         # 测试密码强度验证
-        from db_connector_tool.core.validators import PasswordValidator
-
         strong_password = "StrongPassword123!"
         weak_password = "weak"
         self.assertTrue(PasswordValidator.validate_strength(strong_password))
@@ -133,6 +137,4 @@ class TestIntegration(TestCase):
 
 
 if __name__ == "__main__":
-    import unittest
-
     unittest.main()

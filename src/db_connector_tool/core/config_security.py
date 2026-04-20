@@ -24,6 +24,7 @@ import tomli_w
 from ..utils.logging_utils import get_logger
 from .crypto import CryptoManager
 from .exceptions import ConfigError
+from .key_manager import KeyManager
 
 # 获取模块级别的日志记录器
 logger = get_logger(__name__)
@@ -46,7 +47,7 @@ class ConfigSecurityManager:
     >>> new_version = security_manager.perform_key_rotation(config)
     """
 
-    def __init__(self, key_manager):
+    def __init__(self, key_manager: KeyManager):
         """初始化安全管理器
 
         创建新的配置安全管理器实例，用于管理配置文件的安全验证和加密操作。
@@ -332,7 +333,7 @@ class ConfigSecurityManager:
                 return str(raw_value)
             return raw_value  # 其他类型直接返回
 
-        except (json.JSONDecodeError, KeyError, TypeError, ValueError) as error:
+        except (KeyError, TypeError, ValueError) as error:
             logger.error("反序列化失败: %s", str(error))
             raise ConfigError(f"反序列化失败: {str(error)}") from error
 

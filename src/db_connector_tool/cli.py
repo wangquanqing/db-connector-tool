@@ -114,7 +114,7 @@ class DBConnectorCLI:
         if self.db_manager is None:
             try:
                 self.db_manager = DatabaseManager()
-            except (DBConnectorError, DatabaseError, ConfigError) as e:
+            except DBConnectorError as e:
                 logger.error("初始化数据库管理器失败: %s", e)
                 print(f"❌ 初始化数据库管理器失败: {e}")
                 sys.exit(1)

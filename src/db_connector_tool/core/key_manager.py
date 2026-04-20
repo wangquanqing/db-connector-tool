@@ -177,7 +177,7 @@ class KeyManager:
                 except OSError as error:
                     logger.error("配置文件操作失败: %s", str(error))
                     raise ConfigError(f"{operation_name}失败: {str(error)}") from error
-                except (json.JSONDecodeError, TypeError, ValueError) as error:
+                except (TypeError, ValueError) as error:
                     logger.error("配置数据处理失败: %s", str(error))
                     raise ConfigError(f"{operation_name}失败: {str(error)}") from error
                 except (AttributeError, RuntimeError, MemoryError) as error:
@@ -556,6 +556,28 @@ class KeyManager:
             "轮换密钥已保存到文件（安全性较低）。建议使用keyring或环境变量存储"
         )
         logger.debug("轮换密钥文件保存成功: %s", key_file)
+
+    def get_crypto_manager(self) -> CryptoManager:
+        """获取加密管理器实例
+
+        获取当前密钥管理器关联的加密管理器实例，
+        如果加密管理器未初始化，则会自动初始化。
+
+        Returns:
+            CryptoManager: 加密管理器实例
+
+        Raises:
+            ConfigError: 加密管理器初始化失败
+
+        Example:
+            >>> key_manager = KeyManager()
+            >>> key_manager.load_or_create_key()
+            >>> crypto_manager = key_manager.get_crypto_manager()
+        """
+
+        if self.crypto is None:
+            raise ConfigError("加密管理器初始化失败")
+        return self.crypto
 
     @classmethod
     def _check_dependencies(cls) -> None:

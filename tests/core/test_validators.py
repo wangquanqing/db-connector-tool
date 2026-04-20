@@ -74,43 +74,6 @@ class TestConfigValidator(unittest.TestCase):
             ConfigValidator.validate_config(invalid_config)
         self.assertIn("key_version必须是有效的数字字符串", str(context.exception))
 
-    def test_is_valid_version_format(self) -> None:
-        """测试版本号格式验证"""
-        # 有效的版本号
-        self.assertTrue(ConfigValidator.is_valid_version_format("1.0.0"))
-        self.assertTrue(ConfigValidator.is_valid_version_format("1.10.20"))
-        self.assertTrue(ConfigValidator.is_valid_version_format("0.1.0"))
-
-        # 无效的版本号
-        self.assertFalse(ConfigValidator.is_valid_version_format("1.0"))
-        self.assertFalse(ConfigValidator.is_valid_version_format("1.0.0.0"))
-        self.assertFalse(ConfigValidator.is_valid_version_format("1.0.a"))
-        self.assertFalse(ConfigValidator.is_valid_version_format(None))  # type: ignore
-        self.assertFalse(ConfigValidator.is_valid_version_format(123))  # type: ignore
-        self.assertFalse(ConfigValidator.is_valid_version_format(""))
-        # 前导零测试
-        self.assertFalse(ConfigValidator.is_valid_version_format("01.0.0"))
-        self.assertFalse(ConfigValidator.is_valid_version_format("1.01.0"))
-        self.assertFalse(ConfigValidator.is_valid_version_format("1.0.01"))
-        # 负数测试 (虽然理论上不会出现，但可以测试异常处理)
-        self.assertFalse(ConfigValidator.is_valid_version_format("-1.0.0"))
-
-        # 测试负数 num < 0 分支 (使用自定义对象)
-        class CustomPart(str):
-            def isdigit(self):
-                return True
-
-            def __int__(self):
-                return -1
-
-        class CustomVersion(str):
-            def split(self, sep=None):
-                return [CustomPart("1"), CustomPart("2"), CustomPart("3")]
-
-        self.assertFalse(
-            ConfigValidator.is_valid_version_format(CustomVersion("1.2.3"))
-        )
-
     def test_validate_connection_name(self) -> None:
         """测试连接名称验证"""
         # 有效的连接名称

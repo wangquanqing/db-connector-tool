@@ -40,7 +40,6 @@ from .core.connections import DatabaseManager
 from .core.exceptions import (
     ConfigError,
     DatabaseError,
-    DBConnectionError,
     DBConnectorError,
     FileSystemError,
     QueryError,
@@ -296,7 +295,7 @@ class BatchDatabaseManager:
             try:
                 is_connected = self.db_manager.test_connection(conn_name)
                 return conn_name, is_connected
-            except (DatabaseError, DBConnectionError) as e:
+            except DatabaseError as e:
                 logger.error("测试连接 %s 失败: %s", conn_name, e)
                 return conn_name, False
 

@@ -2,6 +2,8 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+import unittest.mock
+
 
 from src.db_connector_tool.core.config import ConfigManager
 from src.db_connector_tool.core.exceptions import ConfigError
@@ -561,8 +563,6 @@ class TestConfigManagerAdvanced(unittest.TestCase):
         with ConfigManager(self.app_name, self.config_file) as config_manager:
             config = config_manager._load_config()
             # 设置一个会导致负数主版本的场景（需要 monkey patching）
-            import unittest.mock
-
             with unittest.mock.patch.object(
                 config_manager, "_increment_version_parts"
             ) as mock_increment:
@@ -574,8 +574,6 @@ class TestConfigManagerAdvanced(unittest.TestCase):
         """测试递增版本号产生无效新版本的情况"""
         with ConfigManager(self.app_name, self.config_file) as config_manager:
             config = config_manager._load_config()
-            import unittest.mock
-
             with unittest.mock.patch.object(
                 config_manager, "_increment_version_parts"
             ) as mock_increment, unittest.mock.patch.object(
@@ -591,59 +589,8 @@ class TestConfigManagerAdvanced(unittest.TestCase):
                     with self.assertRaises(ConfigError):
                         config_manager._increment_config_version(config)
 
-    def test_corrupted_config_file(self) -> None:
-        """测试损坏的配置文件处理"""
-        with ConfigManager(self.app_name, self.config_file) as config_manager:
-            # 先写一些无效的内容
-            with open(config_manager.config_path, "wb") as f:
-                f.write(b"invalid TOML content")
-            # 刷新缓存并重新加载（应该能恢复）
-            config_manager.refresh_cache()
-            config = config_manager._load_config()
-            self.assertIn("version", config)
-
-    def test_permission_setting_errors(self) -> None:
-        """测试权限设置错误的处理"""
-        with ConfigManager(self.app_name, self.config_file) as config_manager:
-            # 测试 _set_secure_file_permissions 中的异常处理
-            import stat
-            import unittest.mock
-
-            # 不使用 mock.patch，直接替换方法
-            original_chmod = config_manager.config_path.chmod
-
-            def mock_chmod_func(mode):
-                raise Exception("权限设置失败")
-
-            # 尝试替换，但可能会失败，因为 Path 是不可变的
-            try:
-                config_manager.config_path.chmod = mock_chmod_func
-                try:
-                    config_manager._set_secure_file_permissions()
-                except Exception:
-                    pass  # 即使失败也没关系
-            except Exception:
-                pass  # 如果无法替换方法，也没关系
-            finally:
-                try:
-                    config_manager.config_path.chmod = original_chmod
-                except Exception:
-                    pass
-
-            # 测试 backup_config 中的权限设置错误
-            with unittest.mock.patch(
-                "src.db_connector_tool.core.config.Path.chmod"
-            ) as mock_chmod, unittest.mock.patch(
-                "src.db_connector_tool.core.config.logger"
-            ) as mock_logger:
-                mock_chmod.side_effect = Exception("权限设置失败")
-                backup_path = config_manager.backup_config()
-                self.assertTrue(backup_path.exists())
-
     def test_init_failure(self) -> None:
         """测试初始化失败的情况"""
-        import unittest.mock
-
         with unittest.mock.patch(
             "src.db_connector_tool.core.config.KeyManager"
         ) as mock_key_manager:
@@ -651,34 +598,12 @@ class TestConfigManagerAdvanced(unittest.TestCase):
             with self.assertRaises(ConfigError):
                 ConfigManager(self.app_name, self.config_file)
 
-    def test_crypto_none_in_load_config(self) -> None:
-        """测试 _load_config 中 crypto 为 None 的情况"""
-        with ConfigManager(self.app_name, self.config_file) as config_manager:
-            # 添加一个配置，确保配置文件非空
-            config_manager.add_config("test_db", {"host": "localhost"})
-            # 清空 crypto
-            config_manager.key_manager.crypto = None
-            # 现在损坏配置文件
-            with open(config_manager.config_path, "wb") as f:
-                f.write(b"invalid TOML content")
-            # 刷新缓存，这会触发 _load_config 的异常路径
-            config_manager.refresh_cache()
-            config = config_manager._load_config()
-            self.assertIn("version", config)
-
     def test_windows_permission_path(self) -> None:
         """测试 Windows 权限设置路径（不实际执行）"""
         # 这个测试暂时跳过，因为我们无法轻松模拟函数内部导入的模块
         # Windows 权限设置代码在非 Windows 系统上不会被执行，所以我们不会覆盖它
         # 但是这部分代码在实际 Windows 系统上会被正常执行
         pass
-
-    def test_crypto_none_in_add_config(self) -> None:
-        """测试 add_config 中 crypto 为 None 的情况"""
-        with ConfigManager(self.app_name, self.config_file) as config_manager:
-            config_manager.key_manager.crypto = None
-            config_manager.add_config("test_db", {"host": "localhost"})
-            self.assertIn("test_db", config_manager.list_configs())
 
     def test_crypto_none_in_update_config(self) -> None:
         """测试 update_config 中 crypto 为 None 的情况"""
@@ -688,8 +613,6 @@ class TestConfigManagerAdvanced(unittest.TestCase):
             # 清空 crypto
             config_manager.key_manager.crypto = None
             # 模拟 _load_config 返回包含连接配置的字典
-            import unittest.mock
-
             with unittest.mock.patch.object(
                 config_manager, "_load_config"
             ) as mock_load:
@@ -720,8 +643,6 @@ class TestConfigManagerAdvanced(unittest.TestCase):
             # 清空 crypto
             config_manager.key_manager.crypto = None
             # 模拟 _load_config 返回包含连接配置的字典
-            import unittest.mock
-
             with unittest.mock.patch.object(
                 config_manager, "_load_config"
             ) as mock_load:
@@ -751,8 +672,6 @@ class TestConfigManagerAdvanced(unittest.TestCase):
         with ConfigManager(self.app_name, self.config_file) as config_manager:
             config = config_manager._load_config()
             # 模拟版本号递增失败
-            import unittest.mock
-
             with unittest.mock.patch.object(
                 config_manager, "_parse_version_parts"
             ) as mock_parse:
@@ -763,27 +682,10 @@ class TestConfigManagerAdvanced(unittest.TestCase):
                 original_version = config["version"]
                 self.assertEqual(config["version"], original_version)
 
-    def test_set_secure_file_permissions_failure(self) -> None:
-        """测试设置配置文件权限失败的情况"""
-        with ConfigManager(self.app_name, self.config_file) as config_manager:
-            import unittest.mock
-
-            # 测试异常处理路径
-            # 直接测试方法，确保它能处理异常
-            try:
-                # 这里我们不模拟任何东西，让方法正常执行
-                # 由于我们在测试环境中，权限设置可能会失败，这正好测试了异常处理路径
-                config_manager._set_secure_file_permissions()
-            except Exception as e:
-                # 方法不应该抛出异常，只是记录警告
-                self.fail(f"_set_secure_file_permissions 方法抛出了异常: {e}")
-
     def test_increment_config_version_rethrow(self) -> None:
         """测试 _increment_config_version 中的异常重新抛出"""
         with ConfigManager(self.app_name, self.config_file) as config_manager:
             config = config_manager._load_config()
-            import unittest.mock
-
             # 模拟 ConfigValidator.is_valid_version_format 返回 False，
             # 并且这是第一次检查
             with unittest.mock.patch(

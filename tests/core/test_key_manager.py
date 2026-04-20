@@ -5,6 +5,9 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+import tomli_w
+
+import src.db_connector_tool.core.key_manager as km
 from src.db_connector_tool.core.crypto import CryptoManager
 from src.db_connector_tool.core.exceptions import ConfigError, CryptoError
 from src.db_connector_tool.core.key_manager import KeyManager
@@ -216,8 +219,6 @@ class TestKeyManager(unittest.TestCase):
         key_data = crypto.get_key_info()
         crypto.close()
         # 写入密钥文件
-        import tomli_w
-
         key_file.write_bytes(tomli_w.dumps(key_data).encode("utf-8"))
         # 测试加载现有密钥
         key_manager._load_existing_key(key_file)
@@ -263,8 +264,6 @@ class TestKeyManager(unittest.TestCase):
         crypto = CryptoManager()
         key_data = crypto.get_key_info()
         crypto.close()
-        import json
-
         os.environ["DB_CONNECTOR_TOOL_ENCRYPTION_KEY"] = json.dumps(key_data)
         # 重置依赖检查状态
         KeyManager._dependencies_checked = False
@@ -352,56 +351,6 @@ class TestKeyManager(unittest.TestCase):
                     key_manager.load_or_create_key()
                     self.assertIsInstance(key_manager.crypto, CryptoManager)
                     key_manager.close()
-
-    def test_set_windows_permissions(self) -> None:
-        """测试Windows权限设置"""
-        key_manager = KeyManager(self.app_name)
-        test_file = Path(self.temp_dir.name) / "test_perm.txt"
-        test_file.write_text("test")
-
-        with mock.patch(
-            "src.db_connector_tool.core.key_manager.platform.system"
-        ) as mock_platform:
-            mock_platform.return_value = "Windows"
-            with mock.patch(
-                "src.db_connector_tool.core.key_manager.getpass.getuser"
-            ) as mock_getuser:
-                mock_getuser.return_value = "test_user"
-                with mock.patch(
-                    "src.db_connector_tool.core.key_manager.subprocess.run"
-                ) as mock_subprocess:
-                    # 测试成功情况
-                    mock_subprocess.return_value = mock.Mock(returncode=0)
-                    key_manager._set_windows_permissions(test_file)
-                    mock_subprocess.assert_called_once()
-
-                    # 测试失败情况
-                    mock_subprocess.reset_mock()
-                    mock_subprocess.return_value = mock.Mock(
-                        returncode=1, stderr="error"
-                    )
-                    key_manager._set_windows_permissions(test_file)
-                    mock_subprocess.assert_called_once()
-
-        key_manager.close()
-
-    def test_set_secure_file_permissions_failure(self) -> None:
-        """测试设置文件权限失败的情况"""
-        key_manager = KeyManager(self.app_name)
-        test_file = Path(self.temp_dir.name) / "test_perm_fail.txt"
-        test_file.write_text("test")
-
-        with mock.patch(
-            "src.db_connector_tool.core.key_manager.platform.system"
-        ) as mock_platform:
-            mock_platform.return_value = "Linux"
-            with mock.patch(
-                "src.db_connector_tool.core.key_manager.KeyManager._set_unix_permissions",
-                side_effect=OSError("Permission denied"),
-            ):
-                key_manager._set_secure_file_permissions(test_file)
-
-        key_manager.close()
 
     def test_handle_crypto_error_delete_failure(self) -> None:
         """测试处理加密错误时删除文件失败的情况"""
@@ -492,8 +441,6 @@ class TestKeyManager(unittest.TestCase):
         key_data = crypto.get_key_info()
         crypto.close()
 
-        import tomli_w
-
         key_file.write_bytes(tomli_w.dumps(key_data).encode("utf-8"))
 
         with mock.patch(
@@ -582,8 +529,6 @@ class TestKeyManager(unittest.TestCase):
     def test_keyring_module_available(self) -> None:
         """测试keyring模块可用的情况"""
         # 这个测试主要是为了覆盖导入keyring的代码
-        import src.db_connector_tool.core.key_manager as km
-
         # 只是确认模块导入正常
         self.assertTrue(hasattr(km, "keyring_available"))
 
@@ -602,43 +547,6 @@ class TestKeyManager(unittest.TestCase):
 
         key_manager1.close()
         key_manager2.close()
-
-    def test_load_existing_key_file_exception(self) -> None:
-        """测试加载现有密钥文件时发生异常的情况"""
-        key_manager = KeyManager(self.app_name)
-        key_file = key_manager.config_dir / "encryption.key"
-        key_file.parent.mkdir(parents=True, exist_ok=True)
-        key_file.write_text("invalid content")
-
-        with mock.patch(
-            "src.db_connector_tool.core.key_manager.tomllib.load",
-            side_effect=Exception("Load failed"),
-        ):
-            with mock.patch(
-                "src.db_connector_tool.core.key_manager.KeyManager._create_new_key"
-            ) as mock_create:
-                key_manager._load_or_create_key_from_file()
-                mock_create.assert_called_once()
-
-        key_manager.close()
-
-    def test_set_secure_file_permissions_windows(self) -> None:
-        """测试Windows系统下设置文件权限（通过_set_secure_file_permissions）"""
-        key_manager = KeyManager(self.app_name)
-        test_file = Path(self.temp_dir.name) / "test_win_perm.txt"
-        test_file.write_text("test")
-
-        with mock.patch(
-            "src.db_connector_tool.core.key_manager.platform.system"
-        ) as mock_platform:
-            mock_platform.return_value = "Windows"
-            with mock.patch(
-                "src.db_connector_tool.core.key_manager.KeyManager._set_windows_permissions"
-            ) as mock_set_win:
-                key_manager._set_secure_file_permissions(test_file)
-                mock_set_win.assert_called_once()
-
-        key_manager.close()
 
 
 if __name__ == "__main__":

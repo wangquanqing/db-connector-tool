@@ -1,8 +1,9 @@
 import os
+import sys
 import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from src.db_connector_tool.core.config_security import ConfigSecurityManager
 from src.db_connector_tool.core.exceptions import ConfigError
@@ -533,9 +534,6 @@ class TestConfigSecurityManager(unittest.TestCase):
         config["connections"]["test_db"] = encrypted_connections
 
         # 模拟密钥轮换过程中的错误，并模拟 CryptoManager
-        import sys
-        from unittest.mock import MagicMock
-
         # 创建模拟的 CryptoManager
         mock_crypto_module = MagicMock()
         mock_crypto_class = MagicMock()

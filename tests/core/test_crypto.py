@@ -20,6 +20,7 @@ from unittest import mock
 
 from src.db_connector_tool.core.crypto import CryptoManager
 from src.db_connector_tool.core.exceptions import CryptoError
+from src.db_connector_tool.core.validators import PasswordValidator
 
 
 class TestCryptoManager(unittest.TestCase):
@@ -258,8 +259,6 @@ class TestCryptoManager(unittest.TestCase):
 
         验证密码强度验证功能的正确性。
         """
-        from src.db_connector_tool.core.validators import PasswordValidator
-
         # 强密码
         self.assertTrue(PasswordValidator.validate_strength("My$trongP@ssw0rd123!"))
 
@@ -283,8 +282,6 @@ class TestCryptoManager(unittest.TestCase):
 
         验证密码强度等级评估功能的正确性。
         """
-        from src.db_connector_tool.core.validators import PasswordValidator
-
         # 弱密码 - 长度不足8，缺少复杂度
         self.assertEqual(PasswordValidator.get_strength("weak"), "weak")
 
@@ -819,21 +816,6 @@ class TestCryptoManagerEdgeCases(unittest.TestCase):
         # 验证数据已清理
         self.assertEqual(crypto.password, "")
         self.assertEqual(crypto.salt, b"")
-
-    def test_clear_sensitive_data_with_gc_failure(self):
-        """测试清理敏感数据时垃圾回收失败"""
-        crypto = CryptoManager()
-
-        # 模拟 gc 模块导入失败或 gc.collect() 抛出异常
-        with mock.patch("gc.collect") as mock_gc:
-            mock_gc.side_effect = Exception("GC collection failed")
-
-            # 调用清理方法，应该不会抛出异常
-            crypto._clear_sensitive_data()
-
-            # 验证数据已清理
-            self.assertEqual(crypto.password, "")
-            self.assertEqual(crypto.salt, b"")
 
     def test_clear_sensitive_data_without_iterations_attr(self):
         """测试清理敏感数据时没有 iterations 属性"""

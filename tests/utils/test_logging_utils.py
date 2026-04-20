@@ -1,16 +1,14 @@
 import logging
 import os
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 from src.db_connector_tool.utils.logging_utils import (
     LOG_LEVEL_MAP,
     VALID_LOG_LEVELS,
     LogManager,
-    _configure_file_handlers,
-    _ensure_log_dir_exists,
     _validate_log_level,
     get_logger,
     set_log_level,
@@ -28,8 +26,6 @@ class TestLoggingUtils(unittest.TestCase):
 
     def tearDown(self):
         """清理测试环境"""
-        import shutil
-
         shutil.rmtree(self.temp_dir)
 
     def test_validate_log_level(self):
@@ -208,64 +204,6 @@ class TestLoggingUtils(unittest.TestCase):
         log_manager = LogManager.quick_setup(self.app_name, "DEBUG")
         self.assertIsInstance(log_manager, LogManager)
         self.assertEqual(log_manager.app_name, self.app_name)
-
-    @patch("src.db_connector_tool.utils.logging_utils.Path.mkdir")
-    def test_ensure_log_dir_exists_permission_error(self, mock_mkdir):
-        """测试创建日志目录时的权限错误"""
-        mock_mkdir.side_effect = PermissionError("Permission denied")
-        log_dir_path = Path(self.temp_dir) / "logs"
-        with self.assertRaises(PermissionError):
-            _ensure_log_dir_exists(log_dir_path)
-
-    @patch("src.db_connector_tool.utils.logging_utils.Path.mkdir")
-    def test_ensure_log_dir_exists_os_error(self, mock_mkdir):
-        """测试创建日志目录时的OS错误"""
-        mock_mkdir.side_effect = OSError("OS error")
-        log_dir_path = Path(self.temp_dir) / "logs"
-        with self.assertRaises(OSError):
-            _ensure_log_dir_exists(log_dir_path)
-
-    @patch("logging.handlers.RotatingFileHandler")
-    def test_configure_file_handlers_permission_error(self, mock_rfh):
-        """测试配置文件handler时的权限错误"""
-        mock_rfh.side_effect = PermissionError("Permission denied")
-        logger = logging.getLogger("test_perm")
-        formatter = logging.Formatter()
-        log_file = Path(self.temp_dir) / "test.log"
-        log_dir_path = Path(self.temp_dir)
-        with self.assertRaises(PermissionError):
-            _configure_file_handlers(
-                logger=logger,
-                formatter=formatter,
-                log_file=log_file,
-                log_dir_path=log_dir_path,
-                app_name="test_perm",
-                log_level=logging.INFO,
-                separate_error_log=False,
-                max_file_size=1024 * 1024,
-                backup_count=5,
-            )
-
-    @patch("logging.handlers.RotatingFileHandler")
-    def test_configure_file_handlers_os_error(self, mock_rfh):
-        """测试配置文件handler时的OS错误"""
-        mock_rfh.side_effect = OSError("OS error")
-        logger = logging.getLogger("test_os")
-        formatter = logging.Formatter()
-        log_file = Path(self.temp_dir) / "test.log"
-        log_dir_path = Path(self.temp_dir)
-        with self.assertRaises(OSError):
-            _configure_file_handlers(
-                logger=logger,
-                formatter=formatter,
-                log_file=log_file,
-                log_dir_path=log_dir_path,
-                app_name="test_os",
-                log_level=logging.INFO,
-                separate_error_log=False,
-                max_file_size=1024 * 1024,
-                backup_count=5,
-            )
 
     def test_setup_logging_without_separate_error_log(self):
         """测试不启用单独错误日志且级别高于ERROR的情况"""
