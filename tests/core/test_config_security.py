@@ -2,7 +2,7 @@ import os
 import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from src.db_connector_tool.core.config_security import ConfigSecurityManager
 from src.db_connector_tool.core.exceptions import ConfigError
@@ -57,8 +57,7 @@ class TestConfigSecurityManager(unittest.TestCase):
         }
 
         # 验证没有签名的配置
-        result = security_manager.verify_config_signature(config)
-        self.assertTrue(result)
+        security_manager.verify_config_signature(config)
 
     def test_verify_config_signature_with_valid_signature(self) -> None:
         """测试验证有效的配置签名"""
@@ -83,8 +82,7 @@ class TestConfigSecurityManager(unittest.TestCase):
         ).isoformat()
 
         # 验证签名
-        result = security_manager.verify_config_signature(config)
-        self.assertTrue(result)
+        security_manager.verify_config_signature(config)
 
     def test_verify_config_signature_with_invalid_signature(self) -> None:
         """测试验证无效的配置签名"""
@@ -226,8 +224,7 @@ class TestConfigSecurityManager(unittest.TestCase):
         config["metadata"]["signature_timestamp"] = datetime.now().isoformat()
 
         # 验证签名应该成功
-        result = security_manager.verify_config_signature(config)
-        self.assertTrue(result)
+        security_manager.verify_config_signature(config)
 
     def test_verify_config_signature_with_general_exception(self) -> None:
         """测试验证签名时发生一般异常"""

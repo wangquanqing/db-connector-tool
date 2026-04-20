@@ -32,7 +32,8 @@
 
 import ipaddress
 import threading
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import as_completed
+from concurrent.futures.thread import ThreadPoolExecutor
 from typing import Any, Dict, List, Optional, Tuple
 
 from .core.connections import DatabaseManager

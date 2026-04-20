@@ -1,74 +1,25 @@
 # SPDX-FileCopyrightText: 2025-present wangquanqing <wangquanqing1636@sina.com>
 #
 # SPDX-License-Identifier: MIT
-"""
-DB Connector - 跨平台数据库连接管理模块
-======================================
+"""数据库连接管理模块 (DB Connector)"""
 
-一个功能强大的数据库连接管理工具，支持多种数据库类型。
-
-主要特性:
-- 支持 Oracle, PostgreSQL, SQL Server, MySQL, SQLite, GBase 8s
-- 统一的连接配置管理
-- 安全的密码加密存储
-- 命令行界面和API接口
-- 跨平台兼容
-
-使用示例:
-    >>> from db_connector_tool import DatabaseManager, ConfigManager
-    >>> config = ConfigManager()
-    >>> db_manager = DatabaseManager(config)
-    >>> connection = db_manager.get_connection('oracle')
-"""
+from .batch_manager import BatchDatabaseManager, cleanup_temp_configs, generate_ip_range
 
 # 核心模块导入
 from .core.config import ConfigManager
 from .core.connections import DatabaseManager
-from .core.exceptions import (
-    ConfigError,
-    CryptoError,
-    DatabaseError,
-    DBConnectionError,
-    DBConnectorError,
-)
-
-# CLI模块导入（可选，安装时可能不可用）
-try:
-    from .cli import DBConnectorCLI
-    from .cli import main as cli_main
-except ImportError:
-    # 在安装过程中或缺少依赖时，CLI模块可能不可用
-    DBConnectorCLI = None
-    cli_main = None
-
-# 批量管理器导入
-try:
-    from .batch_manager import (
-        BatchDatabaseManager,
-        cleanup_temp_configs,
-        generate_ip_range,
-    )
-except ImportError:
-    # 在安装过程中或缺少依赖时，批量管理器可能不可用
-    BatchDatabaseManager = None
-    generate_ip_range = None
+from .core.crypto import CryptoManager
+from .core.key_manager import KeyManager
+from .drivers.sqlalchemy_driver import SQLAlchemyDriver
 
 # 公共API导出列表
 __all__ = [
-    # 核心管理器
-    "ConfigManager",
-    "DatabaseManager",
-    # 批量管理器
-    "BatchDatabaseManager",
     "cleanup_temp_configs",
     "generate_ip_range",
-    # 异常类
-    "DBConnectorError",
-    "ConfigError",
-    "CryptoError",
-    "DatabaseError",
-    "DBConnectionError",
-    # CLI相关（可选）
-    "DBConnectorCLI",
-    "cli_main",
+    "BatchDatabaseManager",
+    "ConfigManager",
+    "CryptoManager",
+    "DatabaseManager",
+    "KeyManager",
+    "SQLAlchemyDriver",
 ]

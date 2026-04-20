@@ -1,14 +1,22 @@
-"""
-数据库连接器路径处理工具模块
+"""路径处理工具模块 (Path Utilities)
 
-提供跨平台的路径处理功能，包括配置目录获取、目录创建、路径验证、安全连接等工具方法。
-支持 Windows、macOS 和 Linux 系统，确保路径操作的安全性和一致性。
-
-主要功能：
-- 跨平台配置目录获取
-- 路径规范化与验证
-- 安全路径连接（防止路径遍历攻击）
-- 目录存在性检查与自动创建
+Example:
+>>> from db_connector_tool.utils.path_utils import PathHelper
+>>>
+>>> # 获取用户配置目录
+>>> config_dir = PathHelper.get_user_config_dir("my_app")
+>>> print(config_dir)
+Windows: C:/Users/username/AppData/Roaming/my_app
+macOS: /Users/username/Library/Application Support/my_app
+Linux: /home/username/.config/my_app
+>>>
+>>> # 安全连接路径
+>>> safe_path = PathHelper.safe_join("/base", "subdir", "file.txt")
+>>> print(safe_path)  # /base/subdir/file.txt
+>>>
+>>> # 验证路径有效性
+>>> is_valid = PathHelper.is_valid_path("/valid/path")
+>>> print(is_valid)  # True
 """
 
 import getpass
@@ -20,14 +28,7 @@ from pathlib import Path
 
 
 class PathHelper:
-    """
-    路径辅助类 - 提供跨平台的路径处理功能
-
-    封装了常见的路径操作和系统特定的路径获取逻辑，所有方法均为静态方法，
-    无需实例化即可使用。支持线程安全的路径操作。
-
-    Attributes:
-        所有方法均为静态方法，无实例属性
+    """路径辅助类 (Path Helper)
 
     Example:
         >>> # 获取用户配置目录
@@ -41,91 +42,11 @@ class PathHelper:
     """
 
     @staticmethod
-    def get_user_config_dir(app_name: str = "db_connector_tool") -> Path:
-        """
-        获取用户配置目录路径
-
-        根据操作系统类型获取标准的用户配置目录，并创建应用特定的子目录。
-        支持自动回退机制，当标准目录创建失败时回退到当前工作目录。
-
-        Args:
-            app_name (str): 应用名称，默认为"db_connector_tool"
-
-        Returns:
-            Path: 配置目录的Path对象
-
-        Raises:
-            ValueError: 当应用名称为空或不是字符串时
-            OSError: 当无法创建目录时（仅在回退方案也失败时）
-
-        Note:
-            - Windows: %APPDATA%\\{app_name}
-            - macOS: ~/Library/Application Support/{app_name}
-            - Linux: ~/.config/{app_name}
-
-        Example:
-            >>> config_dir = PathHelper.get_user_config_dir("my_app")
-            >>> print(config_dir)
-            Windows: C:\\Users\\username\\AppData\\Roaming\\my_app
-            macOS: /Users/username/Library/Application Support/my_app
-            Linux: /home/username/.config/my_app
-        """
-        if not app_name or not isinstance(app_name, str):
-            raise ValueError("应用名称不能为空且必须是字符串")
-
-        system = platform.system().lower()
-
-        try:
-            # 根据操作系统选择基础配置目录
-            if system == "windows":
-                base_dir = Path(os.environ.get("APPDATA", Path.home()))
-            elif system == "darwin":  # macOS
-                base_dir = Path.home() / "Library" / "Application Support"
-            else:  # Linux和其他Unix系统
-                base_dir = Path.home() / ".config"
-
-            # 创建应用特定的配置目录
-            config_dir = base_dir / app_name
-            config_dir.mkdir(parents=True, exist_ok=True)
-
-            return config_dir
-
-        except OSError:
-            # 回退到当前目录（隐藏目录）
-            fallback_dir = Path.cwd() / f".{app_name}"
-            try:
-                fallback_dir.mkdir(exist_ok=True)
-                return fallback_dir
-            except OSError as exc:
-                raise OSError(f"无法创建配置目录: {str(exc)}") from exc
-
-    @staticmethod
-    def get_user_home_dir() -> Path:
-        """
-        获取用户主目录路径
-
-        返回当前用户的主目录路径，跨平台兼容。
-
-        Returns:
-            Path: 用户主目录的Path对象
-
-        Example:
-            >>> home_dir = PathHelper.get_user_home_dir()
-            >>> print(home_dir)
-            Windows: C:\\Users\\username
-            Unix: /home/username
-        """
-        return Path.home()
-
-    @staticmethod
     def ensure_dir_exists(dir_path: str | Path) -> bool:
-        """
-        确保目录存在，如果不存在则递归创建
-
-        此方法会递归创建所有必要的父目录，提供安全的目录创建功能。
+        """确保目录存在，如果不存在则递归创建
 
         Args:
-            dir_path (str | Path): 需要确保存在的目录路径
+            dir_path: 需要确保存在的目录路径
 
         Returns:
             bool: 目录是否存在或是否成功创建
@@ -163,60 +84,14 @@ class PathHelper:
             return False
 
     @staticmethod
-    def normalize_path(path: str | Path) -> Path:
-        """
-        规范化路径字符串
-
-        将路径转换为绝对路径，解析符号链接，展开用户主目录(~)，
-        并处理路径中的相对引用(.., .)。
-
-        Args:
-            path (str | Path): 需要规范化的路径字符串或Path对象
-
-        Returns:
-            Path: 规范化后的Path对象
-
-        Raises:
-            ValueError: 当路径为空或无效时
-            OSError: 当路径解析失败时（如符号链接损坏）
-
-        Example:
-            >>> # 展开用户主目录
-            >>> normalized = PathHelper.normalize_path("~/documents")
-            >>> print(normalized)  # /home/username/documents
-            >>>
-            >>> # 解析相对路径
-            >>> normalized = PathHelper.normalize_path("../parent/file.txt")
-            >>> print(normalized)  # /absolute/path/to/parent/file.txt
-        """
-        if not path:
-            raise ValueError("路径不能为空")
-
-        try:
-            path_obj = Path(path) if isinstance(path, str) else path
-            # 展开用户主目录并解析为绝对路径
-            return path_obj.expanduser().resolve()
-        except OSError as e:
-            raise OSError(f"无法解析路径 '{path}': {str(e)}") from e
-        except (TypeError, ValueError) as e:
-            raise ValueError(f"无效的路径格式 '{path}': {str(e)}") from e
-
-    @staticmethod
     def is_valid_path(path: str | Path) -> bool:
-        """
-        检查路径是否有效（不包含非法字符）
-
-        此方法仅检查路径格式的字符有效性，不检查路径是否存在或可访问。
+        """检查路径是否有效（不包含非法字符）
 
         Args:
-            path (str | Path): 需要检查的路径
+            path: 需要检查的路径
 
         Returns:
             bool: 路径是否有效（不包含非法字符）
-
-        Note:
-            - 对于 Windows 系统，会特殊处理驱动器字母
-            - 此方法不验证路径是否存在或可访问
 
         Example:
             >>> # 有效路径
@@ -246,20 +121,17 @@ class PathHelper:
 
     @staticmethod
     def _is_valid_path_windows(path_str: str) -> bool:
-        """
-        检查 Windows 系统下的路径有效性（内部方法）
-
-        Windows 路径的特殊处理：允许驱动器字母（如 C:），
-        但检查路径部分的非法字符。
+        """检查 Windows 系统下的路径有效性（内部方法）
 
         Args:
-            path_str (str): 路径字符串
+            path_str: 路径字符串
 
         Returns:
             bool: 路径是否有效（不包含非法字符）
 
-        Note:
-            此方法仅检查字符有效性，不检查路径是否存在
+        Example:
+            >>> # 内部使用，由 is_valid_path 方法调用
+            >>> # 无需手动调用
         """
         # 处理驱动器字母（如 C:\path\to\file）
         if ":" in path_str and path_str.index(":") == 1 and path_str[0].isalpha():
@@ -287,17 +159,17 @@ class PathHelper:
 
     @staticmethod
     def _is_valid_path_unix(path_str: str) -> bool:
-        """
-        检查 Unix/Linux/macOS 系统下的路径有效性（内部方法）
+        """检查 Unix/Linux/macOS 系统下的路径有效性（内部方法）
 
         Args:
-            path_str (str): 路径字符串
+            path_str: 路径字符串
 
         Returns:
             bool: 路径是否有效（不包含非法字符）
 
-        Note:
-            此方法仅检查字符有效性，不检查路径是否存在
+        Example:
+            >>> # 内部使用，由 is_valid_path 方法调用
+            >>> # 无需手动调用
         """
         # Unix 系统的非法字符
         # 虽然技术上某些字符是允许的，但为了跨平台一致性和安全性，我们限制一些特殊字符
@@ -312,14 +184,11 @@ class PathHelper:
     def get_absolute_path(
         relative_path: str | Path, base_dir: str | Path | None = None
     ) -> Path:
-        """
-        获取相对路径的绝对路径
-
-        将相对路径转换为基于指定基准目录的绝对路径。
+        """获取相对路径的绝对路径
 
         Args:
-            relative_path (str | Path): 相对路径
-            base_dir (str | Path | None): 基准目录，如果为None则使用当前工作目录
+            relative_path: 相对路径
+            base_dir: 基准目录，如果为None则使用当前工作目录
 
         Returns:
             Path: 绝对路径
@@ -351,16 +220,151 @@ class PathHelper:
             raise OSError(f"无法解析路径 '{relative_path}': {str(e)}") from e
 
     @staticmethod
-    def safe_join(base_path: str | Path, *paths: str) -> Path:
-        """
-        安全地连接路径，防止路径遍历攻击
-
-        此方法提供多层安全验证，确保最终路径不会超出基础路径范围。
-        防止常见的路径遍历攻击（如使用".."跳出基础目录）。
+    def get_user_config_dir(app_name: str) -> Path:
+        """获取用户配置目录路径
 
         Args:
-            base_path (str | Path): 基础路径
-            *paths (str): 要连接的路径部分
+            app_name: 应用名称
+
+        Returns:
+            Path: 配置目录的Path对象
+
+        Raises:
+            ValueError: 当应用名称为空或不是字符串时
+            OSError: 当无法创建目录时（仅在回退方案也失败时）
+
+        Example:
+            >>> config_dir = PathHelper.get_user_config_dir("my_app")
+            >>> print(config_dir)
+            Windows: C:/Users/username/AppData/Roaming/my_app
+            macOS: /Users/username/Library/Application Support/my_app
+            Linux: /home/username/.config/my_app
+        """
+        if not app_name or not isinstance(app_name, str):
+            raise ValueError("应用名称不能为空且必须是字符串")
+
+        system = platform.system().lower()
+
+        try:
+            # 根据操作系统选择基础配置目录
+            if system == "windows":
+                base_dir = Path(os.environ.get("APPDATA", Path.home()))
+            elif system == "darwin":  # macOS
+                base_dir = Path.home() / "Library" / "Application Support"
+            else:  # Linux和其他Unix系统
+                base_dir = Path.home() / ".config"
+
+            # 创建应用特定的配置目录
+            config_dir = base_dir / app_name
+            config_dir.mkdir(parents=True, exist_ok=True)
+
+            return config_dir
+
+        except OSError:
+            # 回退到当前目录（隐藏目录）
+            fallback_dir = Path.cwd() / f".{app_name}"
+            try:
+                fallback_dir.mkdir(exist_ok=True)
+                return fallback_dir
+            except OSError as exc:
+                raise OSError(f"无法创建配置目录: {str(exc)}") from exc
+
+    @staticmethod
+    def get_user_home_dir() -> Path:
+        """获取用户主目录路径
+
+        Returns:
+            Path: 用户主目录的Path对象
+
+        Example:
+            >>> home_dir = PathHelper.get_user_home_dir()
+            >>> print(home_dir)
+            Windows: C:/Users/username
+            Unix: /home/username
+        """
+        return Path.home()
+
+    @staticmethod
+    def normalize_path(path: str | Path) -> Path:
+        """规范化路径字符串
+
+        Args:
+            path: 需要规范化的路径字符串或Path对象
+
+        Returns:
+            Path: 规范化后的Path对象
+
+        Raises:
+            ValueError: 当路径为空或无效时
+            OSError: 当路径解析失败时（如符号链接损坏）
+
+        Example:
+            >>> # 展开用户主目录
+            >>> normalized = PathHelper.normalize_path("~/documents")
+            >>> print(normalized)  # /home/username/documents
+            >>>
+            >>> # 解析相对路径
+            >>> normalized = PathHelper.normalize_path("../parent/file.txt")
+            >>> print(normalized)  # /absolute/path/to/parent/file.txt
+        """
+        if not path:
+            raise ValueError("路径不能为空")
+
+        try:
+            path_obj = Path(path) if isinstance(path, str) else path
+            # 展开用户主目录并解析为绝对路径
+            return path_obj.expanduser().resolve()
+        except OSError as e:
+            raise OSError(f"无法解析路径 '{path}': {str(e)}") from e
+        except (TypeError, ValueError) as e:
+            raise ValueError(f"无效的路径格式 '{path}': {str(e)}") from e
+
+    @staticmethod
+    def rename_if_exists(file_path: str | Path) -> Path:
+        """如果文件存在，自动重命名文件（Windows风格）
+
+        采用Windows系统的重命名逻辑，当文件存在时，在文件名后添加 (1), (2) 等后缀。
+
+        Args:
+            file_path: 文件路径
+
+        Returns:
+            Path: 重命名后的文件路径，如果文件不存在则返回原路径
+
+        Example:
+            >>> # 重命名已存在的文件
+            >>> new_path = PathHelper.rename_if_exists("/path/to/file.txt")
+            >>> print(new_path)  # /path/to/file (1).txt
+        """
+        file_path_obj = Path(file_path) if isinstance(file_path, str) else file_path
+
+        # 检查文件是否存在
+        if not file_path_obj.exists():
+            return file_path_obj
+
+        # 分离文件名和扩展名
+        stem = file_path_obj.stem
+        suffix = file_path_obj.suffix
+        parent = file_path_obj.parent
+
+        # 生成新文件名，直到找到不存在的文件名
+        counter = 1
+        while True:
+            new_name = f"{stem} ({counter}){suffix}"
+            new_path = parent / new_name
+            if not new_path.exists():
+                # 重命名文件
+                file_path_obj.rename(new_path)
+                return new_path
+            counter += 1
+
+    @staticmethod
+    def safe_join(base_path: str | Path, *paths: str) -> Path:
+        """安全地连接路径，防止路径遍历攻击
+
+        Args:
+            base_path: 基础路径
+            *paths: 要连接的路径部分
 
         Returns:
             Path: 连接后的安全路径
@@ -421,14 +425,10 @@ class PathHelper:
 
     @staticmethod
     def set_secure_file_permissions(file_path: Path | str) -> bool:
-        """
-        设置文件的安全权限（最小权限原则）
-
-        设置文件的安全权限，确保只有所有者可以访问。
-        支持Windows和Unix/Linux系统，提供跨平台的权限设置功能。
+        """设置文件的安全权限（最小权限原则）
 
         Args:
-            file_path (Path | str): 需要设置权限的文件路径
+            file_path: 需要设置权限的文件路径
 
         Returns:
             bool: 权限设置是否成功
@@ -436,11 +436,6 @@ class PathHelper:
         Raises:
             ValueError: 当文件路径为空或无效时
             OSError: 当文件不存在或无法访问时
-
-        Note:
-            - Windows: 使用icacls命令设置权限，仅当前用户可读写
-            - Unix/Linux: 使用chmod设置权限为600（仅所有者可读写）
-            - 权限设置失败不会抛出异常，返回False
 
         Example:
             >>> # 设置配置文件权限
@@ -470,22 +465,17 @@ class PathHelper:
 
     @staticmethod
     def _set_windows_file_permissions(file_path: Path) -> bool:
-        """
-        设置Windows系统文件权限（内部方法）
-
-        使用icacls命令设置Windows文件权限，确保只有当前用户可以访问。
+        """设置Windows系统文件权限（内部方法）
 
         Args:
-            file_path (Path): 文件路径
+            file_path: 文件路径
 
         Returns:
             bool: 权限设置是否成功
 
-        Note:
-            使用icacls命令设置权限：
-            - /inheritance:r - 移除继承权限
-            - /grant:r - 授予当前用户读写权限（最小必要权限）
-            - /remove - 移除Everyone组权限
+        Example:
+            >>> # 内部使用，由 set_secure_file_permissions 方法调用
+            >>> # 无需手动调用
         """
         try:
             username = getpass.getuser()
@@ -516,21 +506,17 @@ class PathHelper:
 
     @staticmethod
     def _set_unix_file_permissions(file_path: Path) -> bool:
-        """
-        设置Unix/Linux系统文件权限（内部方法）
-
-        使用chmod命令设置Unix/Linux文件权限，确保只有所有者可以访问。
+        """设置Unix/Linux系统文件权限（内部方法）
 
         Args:
-            file_path (Path): 文件路径
+            file_path: 文件路径
 
         Returns:
             bool: 权限设置是否成功
 
-        Note:
-            设置权限为600：仅所有者可读写
-            - S_IRUSR: 所有者读权限
-            - S_IWUSR: 所有者写权限
+        Example:
+            >>> # 内部使用，由 set_secure_file_permissions 方法调用
+            >>> # 无需手动调用
         """
         try:
             # 设置权限为600：仅所有者可读写

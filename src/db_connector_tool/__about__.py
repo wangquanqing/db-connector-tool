@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2025-present wangquanqing <wangquanqing1636@sina.com>
+#
+# SPDX-License-Identifier: MIT
 """
 项目版本和元数据模块
 
@@ -11,7 +14,4 @@ Example:
     >>> print(f"DB Connector Tool 版本: {__version__}")
 """
 
-# SPDX-FileCopyrightText: 2025-present wangquanqing <wangquanqing1636@sina.com>
-#
-# SPDX-License-Identifier: MIT
-__version__ = "0.8.0"
+__version__ = "0.9.0"
