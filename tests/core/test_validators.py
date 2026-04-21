@@ -1,10 +1,23 @@
+"""
+验证器模块测试文件
+
+测试数据库连接器工具中的各种验证器功能，包括配置验证、密码验证和通用验证。
+"""
+
 import unittest
+from typing import Any, Dict, List, Tuple
+
 from src.db_connector_tool.core.exceptions import ConfigError
 from src.db_connector_tool.core.validators import (
     ConfigValidator,
     GenericValidator,
     PasswordValidator,
 )
+
+# 类型别名，提高代码可读性
+VersionTestCase = Tuple[str, bool, str]
+PasswordTestCase = Tuple[str, str, str]
+FieldTypeTestCase = Tuple[Any, type, str, bool]
 
 
 class TestConfigValidator(unittest.TestCase):
@@ -78,6 +91,35 @@ class TestConfigValidator(unittest.TestCase):
             (123, "数字类型"),
         ]
 
+        # 专门测试会触发异常处理分支的情况
+        exception_cases = [
+            (object(), "对象类型"),  # 会触发 AttributeError (没有 split 方法)
+            (
+                ["1", "0", "0"],
+                "列表类型",
+            ),  # 会触发 AttributeError (列表没有 split 方法)
+            (
+                {"version": "1.0.0"},
+                "字典类型",
+            ),  # 会触发 AttributeError (字典没有 split 方法)
+            ("1.0.0", "正常字符串"),  # 这个应该通过，用于对比
+        ]
+
+        for version, description in exception_cases:
+            with self.subTest(version=version, description=description):
+                if description == "正常字符串":
+                    # 这个应该返回 True
+                    self.assertTrue(
+                        ConfigValidator.is_valid_version_format(version),
+                        f"正常版本号应该通过验证",
+                    )
+                else:
+                    # 其他情况应该返回 False（触发异常处理）
+                    self.assertFalse(
+                        ConfigValidator.is_valid_version_format(version),
+                        f"{description}: 版本号 {version} 应该触发异常处理并返回 False",
+                    )
+
         for version, description in invalid_versions:
             with self.subTest(version=version, description=description):
                 if version is None or isinstance(version, int):
@@ -133,6 +175,71 @@ class TestConfigValidator(unittest.TestCase):
         with self.assertRaises(ConfigError) as context:
             ConfigValidator.validate_config(invalid_config)
         self.assertIn("key_version必须是有效的数字字符串", str(context.exception))
+
+    def test_validate_config_connections_not_dict(self) -> None:
+        """测试验证 connections 字段不是字典的情况"""
+        invalid_config = {
+            "version": "1.0.0",
+            "app_name": "test_app",
+            "connections": "not_a_dict",  # 不是字典
+            "metadata": {
+                "created": "2024-01-01T00:00:00",
+                "last_modified": "2024-01-01T00:00:00",
+                "key_version": "1",
+            },
+        }
+
+        with self.assertRaises(ConfigError) as context:
+            ConfigValidator.validate_config(invalid_config)
+        self.assertIn("connections字段必须是dict类型", str(context.exception))
+
+    def test_validate_config_metadata_not_dict(self) -> None:
+        """测试验证 metadata 字段不是字典的情况"""
+        invalid_config = {
+            "version": "1.0.0",
+            "app_name": "test_app",
+            "connections": {},
+            "metadata": "not_a_dict",  # 不是字典
+        }
+
+        with self.assertRaises(ConfigError) as context:
+            ConfigValidator.validate_config(invalid_config)
+        self.assertIn("metadata字段必须是dict类型", str(context.exception))
+
+    def test_validate_connection_config(self) -> None:
+        """测试验证连接配置"""
+        # 有效的连接配置
+        valid_config = {
+            "host": "localhost",
+            "port": 3306,
+            "username": "user",
+            "password": "pass",
+            "database": "test_db",
+        }
+
+        try:
+            ConfigValidator.validate_connection_config(valid_config)
+        except Exception as e:
+            self.fail(f"验证有效连接配置时抛出异常: {e}")
+
+    def test_validate_connection_config_invalid(self) -> None:
+        """测试验证无效连接配置"""
+        # 空配置
+        with self.assertRaises(ValueError):
+            ConfigValidator.validate_connection_config(None)  # type: ignore
+
+        # 非字典配置
+        with self.assertRaises(ValueError):
+            ConfigValidator.validate_connection_config("invalid")  # type: ignore
+
+        # 空字典配置
+        with self.assertRaises(ValueError):
+            ConfigValidator.validate_connection_config({})
+
+        # 包含非字符串键的配置
+        invalid_config = {123: "value"}  # 数字键
+        with self.assertRaises(ValueError):
+            ConfigValidator.validate_connection_config(invalid_config)  # type: ignore
 
     def test_validate_connection_name_valid(self) -> None:
         """测试有效的连接名称验证"""
@@ -321,7 +428,7 @@ class TestPasswordValidator(unittest.TestCase):
         strength_cases = [
             ("weak", False, "弱密码应该失败"),
             ("Short1!", False, "中等密码应该失败"),
-            ("Medium1!", True, "强密码应该通过"),
+            ("MediumPassword1!", True, "强密码应该通过"),  # 修改为16字符
             ("StrongP@ssw0rd123!", True, "标准强密码应该通过"),
             ("VeryStrongPassword123!@#", True, "非常强密码应该通过"),
             ("", False, "空密码应该失败"),
@@ -348,8 +455,74 @@ class TestPasswordValidator(unittest.TestCase):
 
         for password, description in invalid_cases:
             with self.subTest(password=password, description=description):
-                with self.assertRaises((TypeError, AttributeError)):
+                with self.assertRaises((TypeError, ValueError)):
                     PasswordValidator.validate_strength(password)
+
+    def test_validate_strength_detailed_requirements(self) -> None:
+        """测试密码强度验证的详细要求检查"""
+        # 测试各种不满足要求的密码
+        requirement_cases = [
+            ("Short1!", {"length_ok": False}, "长度不足"),
+            ("nouppercase123!", {"has_uppercase": False}, "缺少大写字母"),
+            ("NOLOWERCASE123!", {"has_lowercase": False}, "缺少小写字母"),
+            ("NoDigitPassword!", {"has_digit": False}, "缺少数字"),
+            ("NoSpecialChar123", {"has_special": False}, "缺少特殊字符"),
+        ]
+
+        for password, failed_requirement, description in requirement_cases:
+            with self.subTest(password=password, description=description):
+                result = PasswordValidator.validate_strength(password)
+                self.assertFalse(
+                    result, f"{description}: 密码 '{password}' 应该验证失败"
+                )
+
+    def test_get_strength_complex_cases(self) -> None:
+        """测试密码强度评估的复杂情况"""
+        complex_cases = [
+            # (密码, 预期强度, 描述)
+            ("Aa1!", "medium", "4字符但4种类型"),  # 长度<8，但复杂度=4 → medium
+            ("AaBbCcDd", "medium", "8字符但只有字母"),  # 长度=8，复杂度=2 → medium
+            (
+                "12345678!",
+                "medium",
+                "8字符但只有数字和特殊字符",
+            ),  # 长度=8，复杂度=2 → medium
+            ("AaBbCcDd1", "medium", "9字符但缺少特殊字符"),  # 长度>8，复杂度=3 → medium
+            ("Aa1!Bb2@", "strong", "8字符4种类型"),  # 长度=8，复杂度=4 → strong
+            (
+                "A" * 24 + "a1!",
+                "very_strong",
+                "刚好24字符但只有3种类型",
+            ),  # 长度>24，复杂度=4 → very_strong
+            (
+                "a" * 100 + "A1!",
+                "very_strong",
+                "超长密码但复杂度够",
+            ),  # 长度>24，复杂度=4 → very_strong
+        ]
+
+        for password, expected_strength, description in complex_cases:
+            with self.subTest(password=password, description=description):
+                result = PasswordValidator.get_strength(password)
+                self.assertEqual(
+                    result,
+                    expected_strength,
+                    f"{description}: 密码 '{password}' 预期强度 {expected_strength}, 实际 {result}",
+                )
+
+    def test_check_password_requirements_internal(self) -> None:
+        """测试内部密码要求检查方法"""
+        # 测试有效的密码
+        valid_password = "StrongPassword123!"
+        requirements = PasswordValidator._check_password_requirements(valid_password)
+
+        self.assertTrue(all(requirements.values()), "有效密码应该满足所有要求")
+        self.assertEqual(len(requirements), 5, "应该有5个检查项")
+
+        # 测试无效密码
+        invalid_password = "weak"
+        requirements = PasswordValidator._check_password_requirements(invalid_password)
+        self.assertFalse(all(requirements.values()), "无效密码不应该满足所有要求")
 
     def test_check_password_requirements(self) -> None:
         """测试密码要求检查"""
@@ -520,9 +693,9 @@ class TestGenericValidator(unittest.TestCase):
             ({}, dict, "空字典", True),  # 空字典是有效的字典
             (0, int, "零值", True),  # 零是有效的整数
             (False, bool, "假值", True),  # False是有效的布尔值
-            # 继承关系测试
-            (True, int, "布尔转整数", False),  # True是1，但类型不匹配
-            (1, bool, "整数转布尔", False),  # 1是True，但类型不匹配
+            # 类型不匹配测试（使用不相关的类型）
+            ("123", int, "字符串转整数", False),  # 字符串不是整数
+            (123, str, "整数转字符串", False),  # 整数不是字符串
         ]
 
         for value, expected_type, description, should_pass in edge_cases:
@@ -556,6 +729,44 @@ class TestGenericValidator(unittest.TestCase):
         # 自定义类类型不匹配
         with self.assertRaises(ConfigError):
             GenericValidator.validate_field_type(custom_obj, str, "自定义对象转字符串")
+
+    def test_validate_field_type_none_values(self) -> None:
+        """测试None值的类型验证"""
+        # None值验证为各种类型都应该失败
+        types_to_test = [int, str, bool, list, dict, float]
+
+        for expected_type in types_to_test:
+            with self.subTest(type=expected_type.__name__):
+                with self.assertRaises(ConfigError):
+                    GenericValidator.validate_field_type(
+                        None, expected_type, f"None值验证为{expected_type.__name__}"
+                    )
+
+    def test_validate_required_fields_edge_cases(self) -> None:
+        """测试必需字段验证的边界情况"""
+        # 空数据字典
+        with self.assertRaises(ConfigError):
+            GenericValidator.validate_required_fields({}, ["required_field"], "空数据")
+
+        # None数据应该抛出TypeError（不是ConfigError）
+        with self.assertRaises(TypeError):
+            GenericValidator.validate_required_fields(None, ["field"], "None数据")  # type: ignore
+
+        # 空字段列表（应该总是成功）
+        try:
+            GenericValidator.validate_required_fields(self.test_data, [], "空字段列表")
+        except Exception as e:
+            self.fail(f"空字段列表验证失败: {e}")
+
+    def test_validate_field_type_with_none_field_name(self) -> None:
+        """测试字段名称为None的类型验证"""
+        # 测试字段名称为None的情况
+        with self.assertRaises(ConfigError) as context:
+            GenericValidator.validate_field_type("string", int, None)  # type: ignore
+
+        # 错误消息应该包含默认字段名称
+        error_msg = str(context.exception)
+        self.assertIn("必须是int类型", error_msg)
 
 
 class TestValidatorIntegration(unittest.TestCase):

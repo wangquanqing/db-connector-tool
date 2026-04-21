@@ -146,9 +146,10 @@ class ConfigValidator:
                     return False
                 if len(part) > 1 and part.startswith("0"):
                     return False  # 不允许前导零
-                num = int(part)
-                if num < 0:
-                    return False
+                # 负数检查是冗余的，因为 isdigit() 已经确保了非负数字符串
+                # num = int(part)
+                # if num < 0:
+                #     return False
 
             return True
         except (ValueError, AttributeError):

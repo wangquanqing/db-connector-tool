@@ -166,7 +166,7 @@ def _setup_connection_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "-g",
         "--gssencmode",
-        choices=["disable", "allow", "prefer", "require"],
+        choices=["disable", "prefer", "require"],
         help="PostgreSQL GSSENCMODE 参数",
     )
     parser.add_argument(

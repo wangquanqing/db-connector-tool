@@ -58,6 +58,21 @@ class DBConnectorCLI:
         """
         self.db_manager: Optional[DatabaseManager] = None
 
+    def show_version(self, _: argparse.Namespace) -> None:
+        """显示当前模块版本信息
+
+        Args:
+            _: 命令行参数
+
+        Example:
+            >>> # 命令行使用
+            >>> # db-connector --version
+        """
+        print(f"DB Connector Tool 版本: {__version__}")
+        print("支持的数据类型: Oracle, PostgreSQL, MySQL, SQL Server, SQLite, GBase 8s")
+        print("许可证: MIT")
+        print("作者: wangquanqing")
+
     def add_connection(self, args: argparse.Namespace) -> None:
         """添加新的数据库连接配置
 
@@ -83,21 +98,6 @@ class DBConnectorCLI:
             logger.error("添加连接失败: %s", e)
             print(f"❌ 添加连接失败: {e}")
             sys.exit(1)
-
-    def show_version(self, _: argparse.Namespace) -> None:
-        """显示当前模块版本信息
-
-        Args:
-            _: 命令行参数
-
-        Example:
-            >>> # 命令行使用
-            >>> # db-connector --version
-        """
-        print(f"DB Connector Tool 版本: {__version__}")
-        print("支持的数据类型: Oracle, PostgreSQL, MySQL, SQL Server, SQLite, GBase 8s")
-        print("许可证: MIT")
-        print("作者: wangquanqing")
 
     def _ensure_db_manager_initialized(self) -> DatabaseManager:
         """确保数据库管理器已初始化
