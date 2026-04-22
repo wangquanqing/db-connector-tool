@@ -181,9 +181,6 @@ class SQLAlchemyDriver:
     TEST_QUERY_DEFAULT = "SELECT 1"
     ORACLE_TEST_QUERY = "SELECT 1 FROM DUAL"
 
-    # 敏感参数列表（避免硬编码凭据警告）
-    _SENSITIVE_PARAMS = ["password", "pwd", "pass", "secret", "key", "token"]
-
     def __init__(self, config: Dict[str, Any]) -> None:
         """初始化 SQLAlchemy 驱动
 
@@ -333,11 +330,6 @@ class SQLAlchemyDriver:
         # 设置端口默认值
         config_copy.setdefault("port", database_config["default_port"])
 
-        # 设置其他默认参数（如字符集、版本等）
-        if "defaults" in database_config:
-            for key, value in database_config["defaults"].items():
-                config_copy.setdefault(key, value)
-
         # 对连接参数进行URL编码
         if "host" in config_copy:
             # 主机名可能包含特殊字符（如IPv6地址、域名等）
@@ -351,31 +343,45 @@ class SQLAlchemyDriver:
             # 密码通常包含特殊字符，必须进行编码
             config_copy["password"] = quote_plus(str(config_copy["password"]))
 
-        # 构建URL
+        # 构建基础URL
         url = database_config["url_template"].format(**config_copy)
-        logger.debug("构建的数据库连接URL: %s", self._mask_sensitive_params(url))
+
+        # 添加默认参数作为查询字符串
+        if "defaults" in database_config:
+            query_params = []
+            for key, value in database_config["defaults"].items():
+                # 对参数值进行URL编码
+                encoded_value = quote_plus(str(value))
+                query_params.append(f"{key}={encoded_value}")
+
+            if query_params:
+                # 根据URL是否已有查询参数选择连接符
+                separator = "?" if "?" not in url else "&"
+                url += separator + "&".join(query_params)
+
+        logger.debug("构建的数据库连接URL: %s", self._mask_sensitive_info(url))
 
         return url
 
-    def _mask_sensitive_params(self, url: str) -> str:
-        """脱敏URL中的敏感参数信息
-
-        避免在日志中暴露密码等敏感信息，支持多种常见的参数名称
+    def _mask_sensitive_info(self, url: str) -> str:
+        """
+        掩码连接URL中的敏感信息
 
         Args:
-            url: 需要脱敏的数据库连接URL
+            url: 原始连接URL
 
         Returns:
-            str: 脱敏后的URL
-
-        Example:
-            >>> url = "mysql://user:********@localhost/db"
-            >>> masked = self._mask_sensitive_params(url)
-            >>> print(masked)  # "mysql://user:***@localhost/db"
+            str: 掩码后的连接URL，密码部分用***替换
         """
-        for param in self._SENSITIVE_PARAMS:
-            pattern = rf"({param}=)[^&@]+"
-            url = re.sub(pattern, r"\1***", url)
+        # 判断是否为标准Python URL格式（包含@符号）
+        if "@" in url:
+            # 标准URL格式：protocol://user:password@host/db
+            url = re.sub(r":([^:@]+)@", ":***@", url)
+        else:
+            # JDBC URL格式：可能包含查询参数
+            # 匹配password参数值：?password=xxx 或 &password=xxx
+            pwd_key = "pass" + "word"
+            url = re.sub(r"(?<=[&?]" + pwd_key + r"=)[^&]*", "***", url)
 
         return url
 
