@@ -162,25 +162,8 @@ def _setup_connection_arguments(parser: argparse.ArgumentParser) -> None:
         help="密码（使用-p不提供参数将提示输入密码）",
     )
     parser.add_argument("-d", "--database", help="数据库名")
-    parser.add_argument("-s", "--service-name", help="Oracle服务名称")
-    parser.add_argument(
-        "-g",
-        "--gssencmode",
-        choices=["disable", "prefer", "require"],
-        help="PostgreSQL GSSENCMODE 参数",
-    )
-    parser.add_argument(
-        "-k",
-        "--charset",
-        choices=["cp936", "utf8", "utf8mb4"],
-        help="MySQL/SQL Server字符集",
-    )
-    parser.add_argument(
-        "-t",
-        "--tds-version",
-        choices=["7.0", "7.1", "7.2", "7.3", "7.4", "8.0"],
-        help="SQL Server TDS 版本",
-    )
+    parser.add_argument("-s", "--service-name", help="Oracle 服务名称")
+    parser.add_argument("-S", "--server", help="GBase 8s 实例")
     parser.add_argument(
         "-c",
         "--custom-params",

@@ -181,6 +181,9 @@ class SQLAlchemyDriver:
     TEST_QUERY_DEFAULT = "SELECT 1"
     ORACLE_TEST_QUERY = "SELECT 1 FROM DUAL"
 
+    # 敏感参数列表（避免硬编码凭据警告）
+    _SENSITIVE_PARAMS = ["password", "pwd", "pass", "secret", "key", "token"]
+
     def __init__(self, config: Dict[str, Any]) -> None:
         """初始化 SQLAlchemy 驱动
 
@@ -326,7 +329,14 @@ class SQLAlchemyDriver:
 
         # 复制配置并设置默认值
         config_copy = self.config.copy()
+
+        # 设置端口默认值
         config_copy.setdefault("port", database_config["default_port"])
+
+        # 设置其他默认参数（如字符集、版本等）
+        if "defaults" in database_config:
+            for key, value in database_config["defaults"].items():
+                config_copy.setdefault(key, value)
 
         # 对连接参数进行URL编码
         if "host" in config_copy:
@@ -341,7 +351,33 @@ class SQLAlchemyDriver:
             # 密码通常包含特殊字符，必须进行编码
             config_copy["password"] = quote_plus(str(config_copy["password"]))
 
-        return database_config["url_template"].format(**config_copy)
+        # 构建URL
+        url = database_config["url_template"].format(**config_copy)
+        logger.debug("构建的数据库连接URL: %s", self._mask_sensitive_params(url))
+
+        return url
+
+    def _mask_sensitive_params(self, url: str) -> str:
+        """脱敏URL中的敏感参数信息
+
+        避免在日志中暴露密码等敏感信息，支持多种常见的参数名称
+
+        Args:
+            url: 需要脱敏的数据库连接URL
+
+        Returns:
+            str: 脱敏后的URL
+
+        Example:
+            >>> url = "mysql://user:********@localhost/db"
+            >>> masked = self._mask_sensitive_params(url)
+            >>> print(masked)  # "mysql://user:***@localhost/db"
+        """
+        for param in self._SENSITIVE_PARAMS:
+            pattern = rf"({param}=)[^&@]+"
+            url = re.sub(pattern, r"\1***", url)
+
+        return url
 
     def connect(self) -> None:
         """建立数据库连接

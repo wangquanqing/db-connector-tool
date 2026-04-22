@@ -340,7 +340,7 @@ class GBase8sJDBCDialect(OracleDialect, ABC):
             kwargs["jars"] = jar_path
         else:
             # 处理jar_path为None的情况，提供更友好的显示
-            path_display = jar_path if jar_path is not None else "未找到任何搜索路径"
+            path_display = jar_path if jar_path is not None else "未找到"
             # 获取正确的默认目录路径，使用os.path.join确保路径分隔符正确
             default_jar_dir = PathHelper.get_user_config_dir("db_connector_tool")
             default_jar_path = os.path.join(default_jar_dir, "jars")

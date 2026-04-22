@@ -45,9 +45,7 @@ class DBConnectorCLI:
         "password",
         "database",
         "service_name",
-        "gssencmode",
-        "charset",
-        "tds_version",
+        "server",
     ]
 
     def __init__(self):
