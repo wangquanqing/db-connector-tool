@@ -23,7 +23,7 @@ DBConnectorError
 └── DBTimeoutError (超时异常)
 
 Example:
->>> from db_connector_tool.core.exceptions import DBConnectorError, ConfigError
+>>> from db_connector_tool import DBConnectorError, ConfigError
 >>> try:
 ...     # 执行可能抛出异常的操作
 ...     raise ConfigError("配置文件格式错误", "CONFIG_001", config_file="connections.toml")

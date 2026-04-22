@@ -5,7 +5,7 @@
 数据加密解密等操作。
 
 Example:
->>> from db_connector_tool.core.crypto import CryptoManager
+>>> from db_connector_tool import CryptoManager
 >>>
 >>> # 创建加密管理器实例
 >>> crypto = CryptoManager()

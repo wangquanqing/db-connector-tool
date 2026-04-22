@@ -1,7 +1,7 @@
 """路径处理工具模块 (Path Utilities)
 
 Example:
->>> from db_connector_tool.utils.path_utils import PathHelper
+>>> from db_connector_tool import PathHelper
 >>>
 >>> # 获取用户配置目录
 >>> config_dir = PathHelper.get_user_config_dir("my_app")

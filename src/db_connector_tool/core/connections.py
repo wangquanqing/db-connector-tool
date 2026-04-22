@@ -3,7 +3,7 @@
 提供统一的数据库连接管理接口，实现连接池管理和生命周期控制。
 
 Example:
->>> from db_connector_tool.core.connections import DatabaseManager
+>>> from db_connector_tool import DatabaseManager
 >>> db_manager = DatabaseManager("my_app")
 >>> config = {
 ...     "type": "mysql",

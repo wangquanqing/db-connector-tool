@@ -5,7 +5,7 @@
 提供线程安全的数据库操作接口。
 
 Example:
->>> from db_connector_tool.drivers.sqlalchemy_driver import SQLAlchemyDriver
+>>> from db_connector_tool import SQLAlchemyDriver
 >>>
 >>> # 创建数据库驱动实例
 >>> config = {

@@ -3,8 +3,8 @@
 负责配置文件的安全验证、数字签名、审计日志管理和密钥轮换功能。
 
 Example:
->>> from db_connector_tool.core.config_security import ConfigSecurityManager
->>> from db_connector_tool.core.key_manager import KeyManager
+>>> from db_connector_tool import ConfigSecurityManager
+>>> from db_connector_tool import KeyManager
 >>> key_manager = KeyManager("my_app")
 >>> security_manager = ConfigSecurityManager(key_manager)
 >>> config = {"connections": {}, "metadata": {}}
@@ -37,8 +37,8 @@ class ConfigSecurityManager:
     提供配置文件的完整性验证和敏感数据的加密存储。
 
     Example:
-    >>> from db_connector_tool.core.config_security import ConfigSecurityManager
-    >>> from db_connector_tool.core.key_manager import KeyManager
+    >>> from db_connector_tool import ConfigSecurityManager
+    >>> from db_connector_tool import KeyManager
     >>> key_manager = KeyManager("my_app")
     >>> security_manager = ConfigSecurityManager(key_manager)
     >>> config = {"connections": {}, "metadata": {}}
@@ -56,8 +56,8 @@ class ConfigSecurityManager:
             key_manager: 密钥管理器实例，用于获取加密密钥
 
         Example:
-            >>> from db_connector_tool.core.config_security import ConfigSecurityManager
-            >>> from db_connector_tool.core.key_manager import KeyManager
+            >>> from db_connector_tool import ConfigSecurityManager
+            >>> from db_connector_tool import KeyManager
             >>> key_manager = KeyManager("my_app")
             >>> security_manager = ConfigSecurityManager(key_manager)
         """

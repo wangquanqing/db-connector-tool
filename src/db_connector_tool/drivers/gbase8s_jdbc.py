@@ -1,7 +1,7 @@
 """GBase 8s JDBC 驱动模块 (GBase8sJDBCDialect)
 
 Example:
->>> from db_connector_tool.drivers.gbase8s_jdbc import GBase8sJDBCDialect
+>>> from db_connector_tool import GBase8sJDBCDialect
 >>> from sqlalchemy import create_engine
 >>>
 >>> # 创建 GBase 8s 连接引擎
@@ -185,7 +185,7 @@ class GBase8sJDBCDialect(OracleDialect, ABC):
     """GBase 8s JDBC 方言实现 (GBase8s JDBC Dialect)
 
     Example:
-        >>> from db_connector_tool.drivers.gbase8s_jdbc import GBase8sJDBCDialect
+        >>> from db_connector_tool import GBase8sJDBCDialect
         >>> from sqlalchemy import create_engine
         >>>
         >>> # 创建 GBase 8s 连接引擎

@@ -10,8 +10,8 @@ Attributes:
     __version__ (str): 项目的版本号，遵循语义化版本规范
 
 Example:
-    >>> from db_connector_tool.__about__ import __version__
+    >>> from db_connector_tool import __version__
     >>> print(f"DB Connector Tool 版本: {__version__}")
 """
 
-__version__ = "0.9.0"
+__version__ = "0.9.3"

@@ -27,7 +27,7 @@ from .core.exceptions import (
 from .utils.argparse_utils import create_argument_parser
 from .utils.logging_utils import setup_logging
 
-logger = setup_logging(level="debug")
+logger = setup_logging(app_name="db_connector_tool", level="debug")
 
 
 class DBConnectorCLI:

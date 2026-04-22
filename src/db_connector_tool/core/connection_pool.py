@@ -4,7 +4,7 @@
 负责连接的创建、复用、清理和性能监控。
 
 Example:
->>> from db_connector_tool.core.connection_pool import ConnectionPoolManager
+>>> from db_connector_tool import ConnectionPoolManager
 >>> pool_manager = ConnectionPoolManager()
 >>> pool_manager.add_connection('mysql_db', driver_instance)
 >>> driver = pool_manager.get_connection('mysql_db')

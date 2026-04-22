@@ -1,7 +1,7 @@
 """日志配置管理模块 (Logging Utilities)
 
 Example:
->>> from db_connector_tool.utils.logging_utils import setup_logging, get_logger
+>>> from db_connector_tool import setup_logging, get_logger
 >>>
 >>> # 基本配置
 >>> logger = setup_logging("my_app", "DEBUG")

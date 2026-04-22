@@ -4,9 +4,7 @@
 所有验证方法集中管理，便于维护和复用。
 
 Example:
->>> from db_connector_tool.core.validators import (
-...     ConfigValidator, PasswordValidator, GenericValidator
-... )
+>>> from db_connector_tool import (ConfigValidator, PasswordValidator, GenericValidator)
 >>> # 验证配置文件结构
 >>> config = {
 ...     "version": "1.0.0",

@@ -5,7 +5,7 @@
 确保加密密钥的安全性和可用性。
 
 Example:
->>> from db_connector_tool.core.key_manager import KeyManager
+>>> from db_connector_tool import KeyManager
 >>>
 >>> # 创建密钥管理器
 >>> key_manager = KeyManager("my_app")
@@ -263,16 +263,20 @@ class KeyManager:
     def _load_crypto_from_key_data(self, key_data: Dict[str, Any]) -> None:
         """从密钥数据加载加密管理器
 
-        从包含密码和盐值的密钥数据中加载加密管理器。
+        从包含密码、盐值和迭代次数的密钥数据中加载加密管理器。
 
         Args:
-            key_data: 包含password和salt的密钥数据字典
+            key_data: 包含password、salt和iterations的密钥数据字典
 
         Raises:
             ConfigError: 密钥数据无效
 
         Example:
-            >>> key_data = {"password": "secure_password", "salt": "random_salt"}
+            >>> key_data = {
+            ...     "password": "secure_password",
+            ...     "salt": "random_salt",
+            ...     "iterations": 480000
+            ... }
             >>> key_manager._load_crypto_from_key_data(key_data)
         """
 
@@ -280,9 +284,11 @@ class KeyManager:
         if "password" not in key_data or "salt" not in key_data:
             raise ConfigError("密钥数据格式无效")
 
-        # 加载加密管理器
+        # 加载加密管理器（必须使用相同的迭代次数）
         self.crypto = CryptoManager.from_saved_key(
-            key_data["password"], key_data["salt"]
+            key_data["password"],
+            key_data["salt"],
+            key_data["iterations"],  # 传递迭代次数参数
         )
         logger.debug("加密密钥加载成功")
 

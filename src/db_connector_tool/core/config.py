@@ -3,7 +3,7 @@
 使用 TOML 格式进行配置管理，提供数据库连接配置的加密存储和管理功能。
 
 Example:
->>> from db_connector_tool.core.config import ConfigManager
+>>> from db_connector_tool import ConfigManager
 >>> config_manager = ConfigManager("my_app", "database.toml")
 >>> with ConfigManager("my_app") as cm:
 ...     cm.add_config("test", {"host": "localhost", "port": 5432})
@@ -91,11 +91,7 @@ class ConfigManager:
             # 确保配置文件存在
             self._ensure_config_exists()
 
-            logger.info(
-                "配置管理器初始化成功: 应用=%s, 配置文件=%s",
-                app_name,
-                self.config_path,
-            )
+            logger.info("配置管理器初始化成功: %s", app_name)
 
         except Exception as error:
             logger.error("初始化配置管理器失败: %s", str(error))
@@ -266,7 +262,7 @@ class ConfigManager:
 
     @KeyManager.handle_config_operation("配置文件保存")
     def _save_config(
-        self, config: Dict[str, Any], operation: str = OPERATION_UPDATE
+        self, config: Dict[str, Any], operation: str = OPERATION_ADD
     ) -> None:
         """保存配置文件
 
@@ -327,7 +323,7 @@ class ConfigManager:
 
         success = PathHelper.set_secure_file_permissions(file_path)
         if success:
-            logger.debug("配置文件权限设置成功: %s", file_path)
+            logger.debug("配置文件权限设置成功")
         else:
             logger.warning("配置文件权限设置失败，可能导致安全风险，请手动设置权限")
 
@@ -743,7 +739,7 @@ class ConfigManager:
         self._increment_config_version(config)
 
         # 保存更新后的配置
-        self._save_config(config, "rotate_key")
+        self._save_config(config, self.OPERATION_ROTATE_KEY)
 
         return new_key_version
 
