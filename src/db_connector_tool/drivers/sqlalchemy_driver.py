@@ -152,7 +152,7 @@ class SQLAlchemyDriver:
             "url_template": "mssql+pymssql://{username}:{password}@{host}:{port}/{database}",
             "required_params": ["host", "database", "username", "password"],
             "default_port": 1433,
-            "defaults": {"charset": "cp936", "tds_version": "7.0"},
+            "defaults": {"charset": "utf8", "tds_version": "7.3"},
         },
         "sqlite": {
             "url_template": "sqlite:///{database}",
@@ -594,9 +594,8 @@ class SQLAlchemyDriver:
             >>> for row in results:
             ...     print(row["name"], row["age"])
         """
-        query_result = self._execute_sql(query, parameters)
-        column_names = query_result.keys()
-        return [dict(zip(column_names, row)) for row in query_result.fetchall()]
+        column_names, rows = self._execute_sql(query, parameters)
+        return [dict(zip(column_names, row)) for row in rows]
 
     def execute_command(
         self, command: str, parameters: Dict[str, Any] | None = None
@@ -648,7 +647,7 @@ class SQLAlchemyDriver:
 
         Returns:
             Any: 执行结果
-                - 当 commit=False 时返回 ResultProxy 对象
+                - 当 commit=False 时返回元组 (column_names, rows)
                 - 当 commit=True 时返回受影响的行数
 
         Raises:
@@ -670,7 +669,11 @@ class SQLAlchemyDriver:
                 if commit:
                     connection.commit()
                     return sql_result.rowcount
-                return sql_result
+                
+                # 在连接关闭前就获取所有结果
+                column_names = list(sql_result.keys())
+                rows = sql_result.fetchall()
+                return (column_names, rows)
 
         except SQLAlchemyError as error:
             raise QueryError(f"SQL执行失败: 数据库错误 - {str(error)}") from error
