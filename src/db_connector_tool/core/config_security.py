@@ -16,7 +16,7 @@ Example:
 import hashlib
 import hmac
 import json
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any, Dict
 
 import tomli_w
@@ -191,29 +191,16 @@ class ConfigSecurityManager:
                 logger.error("配置文件数字签名验证失败，可能被篡改")
                 raise ConfigError("配置文件数字签名验证失败，可能被篡改")
 
-            # 验证时间戳，防止重放攻击
+            # 配置文件应该长期有效，移除时间戳验证。签名时间戳仅用于审计目的，不用于有效性验证
             signature_timestamp = config.get("metadata", {}).get("signature_timestamp")
-            if not signature_timestamp:
-                logger.error("配置文件缺少签名时间戳，可能是重放攻击")
-                raise ConfigError("配置文件缺少签名时间戳，可能是重放攻击")
-
-            try:
-                signature_time = datetime.fromisoformat(signature_timestamp)
-                # 确保签名时间是带时区的
-                if signature_time.tzinfo is None:
-                    # 如果没有时区信息，假设是本地时间
-                    signature_time = signature_time.astimezone()
-                current_time = datetime.now(timezone.utc)
-                # 确保当前时间也是带时区的
-                current_time = current_time.astimezone()
-                # 允许1小时的时间差（防止时钟同步问题）
-                time_diff = (current_time - signature_time).total_seconds()
-                if abs(time_diff) > 3600:
-                    logger.error("配置文件签名时间戳过期，可能是重放攻击")
-                    raise ConfigError("配置文件签名时间戳过期，可能是重放攻击")
-            except (ValueError, TypeError) as e:
-                logger.error("时间戳验证失败: %s", str(e))
-                raise ConfigError(f"时间戳验证失败: {str(e)}") from e
+            if signature_timestamp:
+                try:
+                    # 验证时间戳格式（仅用于日志记录）
+                    datetime.fromisoformat(signature_timestamp)
+                    logger.debug("配置文件签名时间戳格式正确: %s", signature_timestamp)
+                except (ValueError, TypeError):
+                    # 时间戳格式错误不影响配置文件有效性
+                    logger.warning("配置文件签名时间戳格式错误，但配置文件仍然有效")
 
             logger.debug("配置文件数字签名验证成功")
 

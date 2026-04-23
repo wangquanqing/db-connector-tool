@@ -594,9 +594,7 @@ class SQLAlchemyDriver:
             >>> for row in results:
             ...     print(row["name"], row["age"])
         """
-        query_result = self._execute_sql(query, parameters)
-        column_names = query_result.keys()
-        return [dict(zip(column_names, row)) for row in query_result.fetchall()]
+        return self._execute_sql(query, parameters)
 
     def execute_command(
         self, command: str, parameters: Dict[str, Any] | None = None
@@ -670,7 +668,10 @@ class SQLAlchemyDriver:
                 if commit:
                     connection.commit()
                     return sql_result.rowcount
-                return sql_result
+                else:
+                    # 查询操作：在连接关闭前获取所有结果
+                    results = sql_result.mappings().all()
+                    return results
 
         except SQLAlchemyError as error:
             raise QueryError(f"SQL执行失败: 数据库错误 - {str(error)}") from error
