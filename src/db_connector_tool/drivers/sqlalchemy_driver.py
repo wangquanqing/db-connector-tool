@@ -177,6 +177,31 @@ class SQLAlchemyDriver:
         },
     }
 
+    BASIC_PARAMS = [
+        "type",
+        "host",
+        "port",
+        "username",
+        "password",
+        "database",
+        "service_name",
+        "server",
+    ]
+
+    POOL_PARAMS = {
+        "pool_size",
+        "max_overflow",
+        "pool_timeout",
+        "pool_recycle",
+        "pool_pre_ping",
+        "echo",
+        "poolclass",
+        "pool_reset_on_return",
+        "pool_use_lifo",
+        "pool_logging_name",
+        "pool_events",
+    }
+
     # 测试查询语句
     TEST_QUERY_DEFAULT = "SELECT 1"
     ORACLE_TEST_QUERY = "SELECT 1 FROM DUAL"
@@ -346,18 +371,50 @@ class SQLAlchemyDriver:
         # 构建基础URL
         url = database_config["url_template"].format(**config_copy)
 
-        # 添加默认参数作为查询字符串
+        # 收集所有查询参数
+        query_params = {}
+
+        # 首先添加自定义参数（优先级最高）
+        for key, value in config_copy.items():
+            # 跳过基础参数
+            if key in self.BASIC_PARAMS:
+                continue
+
+            # 跳过连接池参数
+            if key in self.POOL_PARAMS:
+                logger.debug("跳过连接池参数 '%s'，将通过SQLAlchemy配置处理", key)
+                continue
+
+            # 跳过pool_config参数
+            if key == "pool_config":
+                logger.debug("跳过pool_config参数，将通过SQLAlchemy配置处理")
+                continue
+
+            # 跳过空值
+            if value is None:
+                continue
+
+            # 对参数值进行URL编码
+            encoded_value = quote_plus(str(value))
+            query_params[key] = f"{key}={encoded_value}"
+
+        # 然后添加默认参数（如果自定义参数中没有覆盖）
         if "defaults" in database_config:
-            query_params = []
             for key, value in database_config["defaults"].items():
+                # 如果自定义参数中已经存在相同key，则跳过默认参数（自定义参数优先级更高）
+                if key in query_params:
+                    logger.debug("自定义参数 '%s' 覆盖了默认参数", key)
+                    continue
+
                 # 对参数值进行URL编码
                 encoded_value = quote_plus(str(value))
-                query_params.append(f"{key}={encoded_value}")
+                query_params[key] = f"{key}={encoded_value}"
 
-            if query_params:
-                # 根据URL是否已有查询参数选择连接符
-                separator = "?" if "?" not in url else "&"
-                url += separator + "&".join(query_params)
+        # 添加查询参数到URL
+        if query_params:
+            # 根据URL是否已有查询参数选择连接符
+            separator = "?" if "?" not in url else "&"
+            url += separator + "&".join(query_params)
 
         logger.debug("构建的数据库连接URL: %s", self._mask_sensitive_info(url))
 
