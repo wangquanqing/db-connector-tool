@@ -410,11 +410,14 @@ class SQLAlchemyDriver:
                 encoded_value = quote_plus(str(value))
                 query_params[key] = f"{key}={encoded_value}"
 
+        # 转换为列表用于URL构建
+        query_params_list = list(query_params.values())
+
         # 添加查询参数到URL
-        if query_params:
+        if query_params_list:
             # 根据URL是否已有查询参数选择连接符
             separator = "?" if "?" not in url else "&"
-            url += separator + "&".join(query_params)
+            url += separator + "&".join(query_params_list)
 
         logger.debug("构建的数据库连接URL: %s", self._mask_sensitive_info(url))
 
