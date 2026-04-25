@@ -47,6 +47,31 @@ from ..utils.logging_utils import get_logger
 
 logger = get_logger(__name__)
 
+BASIC_PARAMS = [
+    "type",
+    "host",
+    "port",
+    "username",
+    "password",
+    "database",
+    "service_name",
+    "server",
+]
+
+POOL_PARAMS = {
+    "pool_size",
+    "max_overflow",
+    "pool_timeout",
+    "pool_recycle",
+    "pool_pre_ping",
+    "echo",
+    "poolclass",
+    "pool_reset_on_return",
+    "pool_use_lifo",
+    "pool_logging_name",
+    "pool_events",
+}
+
 
 # pylint: disable=unused-argument
 def parse_kingbase_version(self, connection: Any) -> Tuple[int, ...]:
@@ -175,31 +200,6 @@ class SQLAlchemyDriver:
             "default_port": 9088,
             "defaults": {},
         },
-    }
-
-    BASIC_PARAMS = [
-        "type",
-        "host",
-        "port",
-        "username",
-        "password",
-        "database",
-        "service_name",
-        "server",
-    ]
-
-    POOL_PARAMS = {
-        "pool_size",
-        "max_overflow",
-        "pool_timeout",
-        "pool_recycle",
-        "pool_pre_ping",
-        "echo",
-        "poolclass",
-        "pool_reset_on_return",
-        "pool_use_lifo",
-        "pool_logging_name",
-        "pool_events",
     }
 
     # 测试查询语句
@@ -349,77 +349,153 @@ class SQLAlchemyDriver:
         database_type = self.config["type"].lower()
         database_config = self.DB_CONFIGS[database_type]
 
-        # 复制配置并设置默认值
-        config_copy = self.config.copy()
+        # 准备基础配置
+        config_copy = self._prepare_base_config(database_config)
 
-        # 设置端口默认值
-        config_copy.setdefault("port", database_config["default_port"])
-
-        # 对连接参数进行URL编码
-        if "host" in config_copy:
-            # 主机名可能包含特殊字符（如IPv6地址、域名等）
-            config_copy["host"] = quote_plus(str(config_copy["host"]))
-
-        if "username" in config_copy:
-            # 用户名可能包含特殊字符（如邮箱地址、包含空格的用户名等）
-            config_copy["username"] = quote_plus(str(config_copy["username"]))
-
-        if "password" in config_copy:
-            # 密码通常包含特殊字符，必须进行编码
-            config_copy["password"] = quote_plus(str(config_copy["password"]))
+        # 编码敏感参数
+        self._encode_sensitive_params(config_copy)
 
         # 构建基础URL
         url = database_config["url_template"].format(**config_copy)
 
-        # 收集所有查询参数
+        # 构建查询参数
+        query_params = self._build_query_params(config_copy, database_config)
+
+        # 添加查询参数到URL
+        url = self._append_query_params(url, query_params)
+
+        logger.debug("构建的数据库连接URL: %s", self._mask_sensitive_info(url))
+
+        return url
+
+    def _prepare_base_config(self, database_config: dict) -> dict:
+        """准备基础配置，设置默认值
+
+        Args:
+            database_config: 数据库配置信息
+
+        Returns:
+            dict: 处理后的配置副本
+        """
+        config_copy = self.config.copy()
+        config_copy.setdefault("port", database_config["default_port"])
+        return config_copy
+
+    def _encode_sensitive_params(self, config_copy: dict) -> None:
+        """对敏感参数进行URL编码
+
+        Args:
+            config_copy: 配置字典
+        """
+        sensitive_params = ["host", "username", "password"]
+        for param in sensitive_params:
+            if param in config_copy:
+                config_copy[param] = quote_plus(str(config_copy[param]))
+
+    def _build_query_params(self, config_copy: dict, database_config: dict) -> list:
+        """构建查询参数列表
+
+        Args:
+            config_copy: 配置字典
+            database_config: 数据库配置信息
+
+        Returns:
+            list: 查询参数列表
+        """
+        # 收集自定义参数
+        custom_params = self._collect_custom_params(config_copy)
+
+        # 添加默认参数（如果自定义参数中没有覆盖）
+        if "defaults" in database_config:
+            self._merge_default_params(custom_params, database_config["defaults"])
+
+        return list(custom_params.values())
+
+    def _collect_custom_params(self, config_copy: dict) -> dict:
+        """收集自定义参数
+
+        Args:
+            config_copy: 配置字典
+
+        Returns:
+            dict: 自定义参数字典
+        """
         query_params = {}
 
-        # 首先添加自定义参数（优先级最高）
         for key, value in config_copy.items():
-            # 跳过基础参数
-            if key in self.BASIC_PARAMS:
-                continue
-
-            # 跳过连接池参数
-            if key in self.POOL_PARAMS:
-                logger.debug("跳过连接池参数 '%s'，将通过SQLAlchemy配置处理", key)
-                continue
-
-            # 跳过pool_config参数
-            if key == "pool_config":
-                logger.debug("跳过pool_config参数，将通过SQLAlchemy配置处理")
-                continue
-
-            # 跳过空值
-            if value is None:
+            # 跳过不需要处理的参数
+            if self._should_skip_param(key, value):
                 continue
 
             # 对参数值进行URL编码
             encoded_value = quote_plus(str(value))
             query_params[key] = f"{key}={encoded_value}"
 
-        # 然后添加默认参数（如果自定义参数中没有覆盖）
-        if "defaults" in database_config:
-            for key, value in database_config["defaults"].items():
-                # 如果自定义参数中已经存在相同key，则跳过默认参数（自定义参数优先级更高）
-                if key in query_params:
-                    logger.debug("自定义参数 '%s' 覆盖了默认参数", key)
-                    continue
+        return query_params
 
-                # 对参数值进行URL编码
-                encoded_value = quote_plus(str(value))
-                query_params[key] = f"{key}={encoded_value}"
+    def _should_skip_param(self, key: str, value: Any) -> bool:
+        """判断是否应该跳过参数
 
-        # 转换为列表用于URL构建
-        query_params_list = list(query_params.values())
+        Args:
+            key: 参数键
+            value: 参数值
 
-        # 添加查询参数到URL
-        if query_params_list:
-            # 根据URL是否已有查询参数选择连接符
-            separator = "?" if "?" not in url else "&"
-            url += separator + "&".join(query_params_list)
+        Returns:
+            bool: 是否跳过
+        """
+        # 跳过基础参数
+        if key in BASIC_PARAMS:
+            return True
 
-        logger.debug("构建的数据库连接URL: %s", self._mask_sensitive_info(url))
+        # 跳过连接池参数
+        if key in POOL_PARAMS:
+            logger.debug("跳过连接池参数 '%s'，将通过SQLAlchemy配置处理", key)
+            return True
+
+        # 跳过pool_config参数
+        if key == "pool_config":
+            logger.debug("跳过pool_config参数，将通过SQLAlchemy配置处理")
+            return True
+
+        # 跳过空值
+        if value is None:
+            return True
+
+        return False
+
+    def _merge_default_params(self, query_params: dict, defaults: dict) -> None:
+        """合并默认参数
+
+        Args:
+            query_params: 查询参数字典
+            defaults: 默认参数字典
+        """
+        for key, value in defaults.items():
+            # 如果自定义参数中已经存在相同key，则跳过默认参数（自定义参数优先级更高）
+            if key in query_params:
+                logger.debug("自定义参数 '%s' 覆盖了默认参数", key)
+                continue
+
+            # 对参数值进行URL编码
+            encoded_value = quote_plus(str(value))
+            query_params[key] = f"{key}={encoded_value}"
+
+    def _append_query_params(self, url: str, query_params: list) -> str:
+        """添加查询参数到URL
+
+        Args:
+            url: 基础URL
+            query_params: 查询参数列表
+
+        Returns:
+            str: 完整的URL
+        """
+        if not query_params:
+            return url
+
+        # 根据URL是否已有查询参数选择连接符
+        separator = "?" if "?" not in url else "&"
+        url += separator + "&".join(query_params)
 
         return url
 
@@ -728,10 +804,9 @@ class SQLAlchemyDriver:
                 if commit:
                     connection.commit()
                     return sql_result.rowcount
-                else:
-                    # 查询操作：在连接关闭前获取所有结果
-                    results = sql_result.mappings().all()
-                    return results
+                # 查询操作：在连接关闭前获取所有结果
+                results = sql_result.mappings().all()
+                return results
 
         except SQLAlchemyError as error:
             raise QueryError(f"SQL执行失败: 数据库错误 - {str(error)}") from error

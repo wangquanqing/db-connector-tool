@@ -24,6 +24,7 @@ from .core.exceptions import (
     DBConnectorError,
     FileSystemError,
 )
+from .drivers.sqlalchemy_driver import BASIC_PARAMS
 from .utils.argparse_utils import create_argument_parser
 from .utils.logging_utils import setup_logging
 
@@ -36,17 +37,6 @@ class DBConnectorCLI:
     Example:
         >>> cli = DBConnectorCLI()
     """
-
-    BASIC_PARAMS = [
-        "type",
-        "host",
-        "port",
-        "username",
-        "password",
-        "database",
-        "service_name",
-        "server",
-    ]
 
     def __init__(self):
         """初始化DB Connector CLI
@@ -133,7 +123,7 @@ class DBConnectorCLI:
         config = {}
 
         # 添加基本参数
-        for param in self.BASIC_PARAMS:
+        for param in BASIC_PARAMS:
             value = getattr(args, param, None)
             if value is not None:
                 config[param] = value
@@ -236,7 +226,7 @@ class DBConnectorCLI:
         Example:
             >>> cli._print_custom_params(config)
         """
-        custom_params = [k for k in config.keys() if k not in self.BASIC_PARAMS]
+        custom_params = [k for k in config.keys() if k not in BASIC_PARAMS]
         if custom_params:
             print(f"📋 自定义参数: {', '.join(custom_params)}")
 
@@ -310,7 +300,7 @@ class DBConnectorCLI:
         update_config = existing_config.copy()
 
         # 更新基本参数
-        for param in self.BASIC_PARAMS:
+        for param in BASIC_PARAMS:
             value = getattr(args, param, None)
             if value is not None:
                 update_config[param] = value
@@ -388,12 +378,12 @@ class DBConnectorCLI:
             >>> cli._display_connection_details(config)
         """
         # 显示基本参数
-        for key in self.BASIC_PARAMS:
+        for key in BASIC_PARAMS:
             if key in config:
                 print(f"  {key}: {config[key]}")
 
         # 显示自定义参数
-        custom_params = [k for k in config.keys() if k not in self.BASIC_PARAMS]
+        custom_params = [k for k in config.keys() if k not in BASIC_PARAMS]
         if custom_params:
             print("\n  📋 自定义参数:")
             for key in custom_params:
