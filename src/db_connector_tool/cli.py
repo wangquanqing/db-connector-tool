@@ -459,10 +459,9 @@ class DBConnectorCLI:
         db_manager = self._ensure_db_manager_initialized()
 
         try:
-            results = db_manager.execute_query(args.connection, args.query)
-            response_time = db_manager.pool_manager.get_connection_info(
-                args.connection
-            )["response_time"]
+            results, response_time = db_manager.execute_query(
+                args.connection, args.query
+            )
 
             if args.output:
                 self._save_output(results, args.output, args.format)
@@ -938,10 +937,9 @@ class DBConnectorCLI:
 
                     # 执行SQL
                     if sql.lower().startswith("select"):
-                        results = db_manager.execute_query(args.connection, sql)
-                        response_time = db_manager.pool_manager.get_connection_info(
-                            args.connection
-                        )["response_time"]
+                        results, response_time = db_manager.execute_query(
+                            args.connection, sql
+                        )
                         self._display_results(results, response_time, "table")
                     else:
                         affected = db_manager.execute_command(args.connection, sql)

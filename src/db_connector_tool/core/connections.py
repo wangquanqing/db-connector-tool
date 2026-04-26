@@ -598,7 +598,7 @@ class DatabaseManager:
 
     def execute_query(
         self, connection_name: str, query: str, params: Dict[str, Any] | None = None
-    ) -> List[Dict[str, Any]]:
+    ) -> tuple[List[Dict[str, Any]], float]:
         """执行SQL查询语句
 
         Args:
@@ -607,7 +607,7 @@ class DatabaseManager:
             params: 查询参数字典，可选
 
         Returns:
-            List[Dict[str, Any]]: 查询结果列表，每行数据为字典格式
+            Tuple[List[Dict[str, Any]], float]: 查询结果列表和执行时间
 
         Raises:
             DatabaseError: 当查询执行失败时
@@ -635,7 +635,7 @@ class DatabaseManager:
             # 更新连接元数据
             self.pool_manager.update_query_metadata(connection_name, response_time)
 
-            return result
+            return result, response_time
 
         try:
             return _execute_query()
