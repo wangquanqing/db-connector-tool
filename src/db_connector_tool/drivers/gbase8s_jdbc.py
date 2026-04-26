@@ -223,6 +223,17 @@ class GBase8sJDBCDialect(OracleDialect, ABC):
         """
         return __import__("jaydebeapi")
 
+    def do_rollback(self, dbapi_connection: Any) -> None:
+        """
+        执行回滚操作。
+
+        GBase 8s 不支持事务回滚操作，因此该方法为空实现。
+
+        Args:
+            dbapi_connection: 数据库 API 连接对象
+        """
+        # GBase 8s 不支持事务回滚，留空实现
+
     def create_connect_args(self, url: Any) -> Tuple[Tuple, dict]:
         """创建连接参数
 

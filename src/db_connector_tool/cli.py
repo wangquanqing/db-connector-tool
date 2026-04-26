@@ -460,11 +460,14 @@ class DBConnectorCLI:
 
         try:
             results = db_manager.execute_query(args.connection, args.query)
+            response_time = db_manager.pool_manager.get_connection_info(
+                args.connection
+            )["response_time"]
 
             if args.output:
                 self._save_output(results, args.output, args.format)
             else:
-                self._display_results(results, args.format)
+                self._display_results(results, response_time, args.format)
 
         except (DatabaseError, ConfigError) as e:
             logger.error("执行查询失败: %s", e)
@@ -512,8 +515,8 @@ class DBConnectorCLI:
             print(f"❌ 保存结果失败: {e}")
             sys.exit(1)
 
-    def _display_table(self, results: List[Dict]) -> None:
-        """以表格形式显示查询结果
+    def _display_table(self, results: List[Dict], response_time: float = 0) -> None:
+        """以表格形式显示查询结果（带边框，居中显示，MySQL风格）
 
         Args:
             results: 查询结果列表
@@ -526,71 +529,131 @@ class DBConnectorCLI:
 
         headers = list(results[0].keys())
 
-        # 计算每列的最大宽度
+        # 计算每列的最大宽度（考虑中文字符宽度）
         col_widths = {}
         for header in headers:
-            col_widths[header] = len(str(header))
+            col_widths[header] = self._get_display_width(str(header))
 
         for row in results:
             for header in headers:
                 value = str(row.get(header, ""))
-                col_widths[header] = max(col_widths[header], len(value))
+                col_widths[header] = max(
+                    col_widths[header], self._get_display_width(value)
+                )
 
         # 限制最大列宽
         max_col_width = 50
         for header in headers:
             col_widths[header] = min(col_widths[header], max_col_width)
 
-        # 打印表头
-        header_line = " | ".join(
-            [f"{header:<{col_widths[header]}}" for header in headers]
+        # 分隔线
+        separator = (
+            "+" + "+".join(["-" * (col_widths[header] + 2) for header in headers]) + "+"
         )
-        separator = "-+-".join(["-" * col_widths[header] for header in headers])
 
-        print(separator)
-        print(header_line)
+        # 打印顶部边框
         print(separator)
 
-        # 打印数据行
-        for row in results:
-            row_line = " | ".join(
-                [
-                    f"{self._truncate_value(
-                        str(row.get(header, '')),
-                        col_widths[header]
-                    ):<{col_widths[header]}}"
-                    for header in headers
-                ]
+        # 打印表头（智能居中显示，带边框）
+        header_cells = []
+        for header in headers:
+            header_text = str(header)
+            actual_width = self._get_display_width(header_text)
+            # 计算需要的空格数量
+            padding = col_widths[header] - actual_width
+            left_padding = padding // 2
+            right_padding = padding - left_padding
+            header_cells.append(
+                f"{' ' * left_padding}{header_text}{' ' * right_padding}"
             )
+
+        header_line = f"| {" | ".join(header_cells)} |"  # 左右加边框
+        print(header_line)
+
+        # 打印分隔线
+        print(separator)
+
+        # 打印数据行（智能居中显示，带边框）
+        for row in results:
+            row_cells = []
+            for header in headers:
+                value_text = self._truncate_value(
+                    str(row.get(header, "")), col_widths[header]
+                )
+                actual_width = self._get_display_width(value_text)
+                # 计算需要的空格数量
+                padding = col_widths[header] - actual_width
+                left_padding = padding // 2
+                right_padding = padding - left_padding
+                row_cells.append(
+                    f"{' ' * left_padding}{value_text}{' ' * right_padding}"
+                )
+
+            row_line = f"| {" | ".join(row_cells)} |"  # 左右加边框
             print(row_line)
 
         print(separator)
-        print(f"总计: {len(results)} 行")
+        print(f"总计: {len(results)} 行 ({response_time:.3f} 秒)")
 
+    # 添加新的辅助方法
+    def _get_display_width(self, text: str) -> int:
+        """计算字符串在终端中的显示宽度
+
+        Args:
+            text: 输入字符串
+
+        Returns:
+            int: 显示宽度（中文字符占2，英文字符占1）
+        """
+        width = 0
+        for char in text:
+            # 中文字符通常占2个宽度，英文字符占1个
+            if "\u4e00" <= char <= "\u9fff":  # 中文字符范围
+                width += 2
+            else:
+                width += 1
+        return width
+
+    # 修改现有的 _truncate_value 方法
     def _truncate_value(self, value: str, max_length: int) -> str:
-        """截断过长的值用于表格显示
+        """截断过长的值用于表格显示，考虑中文字符宽度
 
         Args:
             value: 原始值
-            max_length: 最大长度
+            max_length: 最大显示宽度
 
         Returns:
             str: 截断后的值
 
         Example:
-            >>> truncated = cli._truncate_value("long_string", 10)
+            >>> truncated = cli._truncate_value("长文本", 5)
         """
-        if len(value) <= max_length:
+        if self._get_display_width(value) <= max_length:
             return value
-        return value[: max_length - 3] + "..."
+
+        # 智能截断，考虑中文字符
+        current_width = 0
+        truncated = ""
+        for char in value:
+            char_width = 2 if "\u4e00" <= char <= "\u9fff" else 1
+            if current_width + char_width > max_length - 3:  # 留3个字符给"..."
+                break
+            truncated += char
+            current_width += char_width
+
+        return truncated + "..."
 
     def _display_results(
-        self, results: List[Dict], output_format: str = "table"
+        self,
+        results: List[Dict],
+        response_time: float = 0,
+        output_format: str = "table",
     ) -> None:
         """以指定格式显示查询结果
 
         Args:
             results: 查询结果列表
+            response_time: 查询响应时间
             output_format: 显示格式 (table/json/csv)
 
         Raises:
@@ -604,7 +667,7 @@ class DBConnectorCLI:
             return
 
         if output_format == "table":
-            self._display_table(results)
+            self._display_table(results, response_time)
         elif output_format == "json":
             self._display_json(results)
         elif output_format == "csv":
@@ -876,7 +939,10 @@ class DBConnectorCLI:
                     # 执行SQL
                     if sql.lower().startswith("select"):
                         results = db_manager.execute_query(args.connection, sql)
-                        self._display_results(results, "table")
+                        response_time = db_manager.pool_manager.get_connection_info(
+                            args.connection
+                        )["response_time"]
+                        self._display_results(results, response_time, "table")
                     else:
                         affected = db_manager.execute_command(args.connection, sql)
                         print(f"影响行数: {affected}")
