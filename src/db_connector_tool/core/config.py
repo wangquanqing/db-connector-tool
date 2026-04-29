@@ -17,7 +17,7 @@ import shutil
 import tomllib
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import tomli_w
 
@@ -466,14 +466,14 @@ class ConfigManager:
             logger.warning("版本号递增失败，保持原版本号: %s", str(e))
             # 如果版本号递增失败，不影响主要功能，继续使用原版本号
 
-    def _parse_version_parts(self, version: str) -> tuple[int, int, int]:
+    def _parse_version_parts(self, version: str) -> Tuple[int, int, int]:
         """解析版本号各部分
 
         Args:
             version: 版本号字符串，格式为 "x.y.z"
 
         Returns:
-            tuple[int, int, int]: (主版本号, 次版本号, 修订号)
+            Tuple[int, int, int]: (主版本号, 次版本号, 修订号)
 
         Raises:
             ValueError: 版本号格式无效
@@ -488,7 +488,7 @@ class ConfigManager:
 
     def _increment_version_parts(
         self, major: int, minor: int, patch: int
-    ) -> tuple[int, int, int]:
+    ) -> Tuple[int, int, int]:
         """递增版本号各部分并处理进位逻辑
 
         Args:
@@ -497,7 +497,7 @@ class ConfigManager:
             patch: 修订号
 
         Returns:
-            tuple[int, int, int]: 递增后的(主版本号, 次版本号, 修订号)
+            Tuple[int, int, int]: 递增后的(主版本号, 次版本号, 修订号)
 
         Example:
             >>> self._increment_version_parts(1, 2, 3)

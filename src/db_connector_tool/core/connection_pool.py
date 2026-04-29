@@ -14,7 +14,7 @@ Example:
 
 import threading
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from ..drivers.sqlalchemy_driver import SQLAlchemyDriver
 from ..utils.logging_utils import get_logger
@@ -93,13 +93,13 @@ class ConnectionPoolManager:
             stats["connection_pool_size"] = len(self.connection_pool)
             return stats
 
-    def close_all_connections(self) -> tuple[int, int]:
+    def close_all_connections(self) -> Tuple[int, int]:
         """关闭所有数据库连接
 
         关闭所有数据库连接，返回成功和失败的数量。
 
         Returns:
-            tuple[int, int]: (成功数量, 失败数量)
+            Tuple[int, int]: (成功数量, 失败数量)
 
         Example:
             >>> success_count, error_count = pool_manager.close_all_connections()
@@ -140,7 +140,7 @@ class ConnectionPoolManager:
 
             return success_count, error_count
 
-    def _close_all_connections(self, connection_names: List[str]) -> tuple[int, int]:
+    def _close_all_connections(self, connection_names: List[str]) -> Tuple[int, int]:
         """关闭所有连接并返回成功和失败的数量
 
         关闭所有指定的连接并返回成功和失败的数量。
@@ -149,7 +149,7 @@ class ConnectionPoolManager:
             connection_names: 连接名称列表
 
         Returns:
-            tuple[int, int]: (成功数量, 失败数量)
+            Tuple[int, int]: (成功数量, 失败数量)
 
         Example:
             >>> success_count, error_count = pool_manager._close_all_connections(names)

@@ -187,7 +187,7 @@ class SQLAlchemyDriver:
         },
         "gbase": {
             "url_template": (
-                "jdbcgbase8s://{host}:{port}/{database}:GBASEDBTSERVER={server}"
+                "jdbcgbase8s://{host}:{port}/{database}:GBASEDBTSERVER={server}"  # server暂时未使用
                 "?user={username}&password={password}"
             ),
             "required_params": [

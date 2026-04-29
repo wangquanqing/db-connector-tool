@@ -24,7 +24,7 @@ Example:
 import atexit
 import threading
 import time
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
 
 from ..drivers.sqlalchemy_driver import SQLAlchemyDriver
 from ..utils.logging_utils import get_logger
@@ -598,7 +598,7 @@ class DatabaseManager:
 
     def execute_query(
         self, connection_name: str, query: str, params: Dict[str, Any] | None = None
-    ) -> tuple[List[Dict[str, Any]], float]:
+    ) -> Tuple[List[Dict[str, Any]], float]:
         """执行SQL查询语句
 
         Args:
@@ -651,7 +651,7 @@ class DatabaseManager:
         connection_name: str,
         command: str,
         params: Dict[str, Any] | None = None,
-    ) -> int:
+    ) -> Tuple[int, float]:
         """执行非查询SQL命令（INSERT/UPDATE/DELETE等）
 
         Args:
@@ -660,7 +660,7 @@ class DatabaseManager:
             params: 命令参数字典，可选
 
         Returns:
-            int: 影响的行数
+            Tuple[int, float]: 影响的行数和执行时间
 
         Raises:
             DatabaseError: 当命令执行失败时
@@ -691,7 +691,7 @@ class DatabaseManager:
             # 更新连接元数据
             self.pool_manager.update_command_metadata(connection_name, response_time)
 
-            return result
+            return result, response_time
 
         try:
             return _execute_command()

@@ -4,6 +4,7 @@
 from .argparse_utils import ChineseHelpFormatter, create_argument_parser
 from .logging_utils import LogManager, get_logger, set_log_level, setup_logging
 from .path_utils import PathHelper
+from .sqlparse_utils import SQLStatementParser, read_and_split_sql_file
 
 # 公共API导出列表
 __all__ = [
@@ -11,7 +12,9 @@ __all__ = [
     "get_logger",
     "setup_logging",
     "set_log_level",
+    "read_and_split_sql_file",
     "ChineseHelpFormatter",
     "LogManager",
     "PathHelper",
+    "SQLStatementParser",
 ]

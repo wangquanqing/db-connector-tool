@@ -12,7 +12,6 @@ import csv
 import getpass
 import json
 import os
-import re
 import sys
 from typing import Any, Dict, List, Optional, Tuple, Union
 
@@ -27,6 +26,7 @@ from .core.exceptions import (
 from .drivers.sqlalchemy_driver import BASIC_PARAMS
 from .utils.argparse_utils import create_argument_parser
 from .utils.logging_utils import setup_logging
+from .utils.sqlparse_utils import read_and_split_sql_file
 
 logger = setup_logging(app_name="db_connector_tool", level="debug")
 
@@ -444,380 +444,55 @@ class DBConnectorCLI:
             sys.exit(1)
 
     def execute_query(self, args: argparse.Namespace) -> None:
-        """在指定连接上执行SQL查询
+        """执行SQL查询或SQL文件
+
+        根据传入的是SQL字符串还是文件路径自动判断执行方式
 
         Args:
-            args: 命令行参数，包含连接名称、查询语句和输出选项
+            args: 命令行参数，包含连接名称、SQL内容/文件路径和输出选项
 
         Raises:
-            SystemExit: 如果执行查询失败则退出程序
+            SystemExit: 如果执行失败则退出程序
 
         Example:
-            >>> # 命令行使用
-            >>> # db-connector query mysql-dev "SELECT * FROM users"
+            >>> # 执行SQL查询
+            >>> # db-connector sql mysql-dev "SELECT * FROM users"
+            >>> # 执行SQL文件
+            >>> # db-connector sql mysql-dev script.sql
         """
         db_manager = self._ensure_db_manager_initialized()
 
         try:
-            results, response_time = db_manager.execute_query(
-                args.connection, args.query
-            )
+            # 判断是SQL字符串还是文件路径
+            if os.path.exists(args.sql_content):
+                # 执行SQL文件（文件存在）
+                statements = read_and_split_sql_file(args.sql_content)
+                if not statements:
+                    print("ℹ️  SQL文件中没有有效的SQL语句")
+                    return
 
+                results, success_count, error_count = self._execute_sql_statements(
+                    db_manager, statements, args.connection, args.continue_on_error
+                )
+
+                self._print_execution_summary(success_count, error_count)
+                response_time = 0  # 文件执行不统计响应时间
+            else:
+                # 执行SQL查询
+                results, response_time = db_manager.execute_query(
+                    args.connection, args.sql_content
+                )
+
+            # 处理输出
             if args.output:
                 self._save_output(results, args.output, args.format)
             else:
                 self._display_results(results, response_time, args.format)
 
-        except (DatabaseError, ConfigError) as e:
-            logger.error("执行查询失败: %s", e)
-            print(f"❌ 执行查询失败: {e}")
-            sys.exit(1)
-
-    def _save_output(
-        self, results: List[Dict], output_path: str, output_format: str
-    ) -> None:
-        """将查询结果保存到文件
-
-        Args:
-            results: 查询结果列表
-            output_path: 输出文件路径
-            output_format: 输出格式
-
-        Raises:
-            SystemExit: 如果保存失败
-
-        Example:
-            >>> cli._save_output(results, "output.json", "json")
-        """
-        try:
-            if output_format == "json":
-                with open(output_path, "w", encoding="utf-8") as f:
-                    json.dump(results, f, indent=2, ensure_ascii=False)
-            elif output_format == "csv":
-                with open(output_path, "w", newline="", encoding="utf-8") as f:
-                    if results:
-                        headers = list(results[0].keys())
-                        writer = csv.DictWriter(f, fieldnames=headers)
-                        writer.writeheader()
-                        writer.writerows(results)
-            else:  # table格式保存为文本
-                with open(output_path, "w", encoding="utf-8") as f:
-                    # 重定向标准输出到文件
-                    original_stdout = sys.stdout
-                    sys.stdout = f
-                    self._display_table(results)
-                    sys.stdout = original_stdout
-
-            print(f"✅ 结果已保存到: {output_path}")
         except (DatabaseError, ConfigError, FileSystemError) as e:
-            logger.error("保存结果失败: %s", e)
-            print(f"❌ 保存结果失败: {e}")
+            logger.error("执行SQL失败: %s", e)
+            print(f"❌ 执行SQL失败: {e}")
             sys.exit(1)
-
-    def _display_table(self, results: List[Dict], response_time: float = 0) -> None:
-        """以表格形式显示查询结果（带边框，居中显示，MySQL风格）
-
-        Args:
-            results: 查询结果列表
-
-        Example:
-            >>> cli._display_table(results)
-        """
-        if not results:
-            return
-
-        headers = list(results[0].keys())
-
-        # 计算每列的最大宽度（考虑中文字符宽度）
-        col_widths = {}
-        for header in headers:
-            col_widths[header] = self._get_display_width(str(header))
-
-        for row in results:
-            for header in headers:
-                value = str(row.get(header, ""))
-                col_widths[header] = max(
-                    col_widths[header], self._get_display_width(value)
-                )
-
-        # 限制最大列宽
-        max_col_width = 50
-        for header in headers:
-            col_widths[header] = min(col_widths[header], max_col_width)
-
-        # 分隔线
-        separator = (
-            "+" + "+".join(["-" * (col_widths[header] + 2) for header in headers]) + "+"
-        )
-
-        # 打印顶部边框
-        print(separator)
-
-        # 打印表头（智能居中显示，带边框）
-        header_cells = []
-        for header in headers:
-            header_text = str(header)
-            actual_width = self._get_display_width(header_text)
-            # 计算需要的空格数量
-            padding = col_widths[header] - actual_width
-            left_padding = padding // 2
-            right_padding = padding - left_padding
-            header_cells.append(
-                f"{' ' * left_padding}{header_text}{' ' * right_padding}"
-            )
-
-        header_line = f"| {" | ".join(header_cells)} |"  # 左右加边框
-        print(header_line)
-
-        # 打印分隔线
-        print(separator)
-
-        # 打印数据行（智能居中显示，带边框）
-        for row in results:
-            row_cells = []
-            for header in headers:
-                value_text = self._truncate_value(
-                    str(row.get(header, "")), col_widths[header]
-                )
-                actual_width = self._get_display_width(value_text)
-                # 计算需要的空格数量
-                padding = col_widths[header] - actual_width
-                left_padding = padding // 2
-                right_padding = padding - left_padding
-                row_cells.append(
-                    f"{' ' * left_padding}{value_text}{' ' * right_padding}"
-                )
-
-            row_line = f"| {" | ".join(row_cells)} |"  # 左右加边框
-            print(row_line)
-
-        print(separator)
-        print(f"总计: {len(results)} 行 ({response_time:.3f} 秒)")
-
-    # 添加新的辅助方法
-    def _get_display_width(self, text: str) -> int:
-        """计算字符串在终端中的显示宽度
-
-        Args:
-            text: 输入字符串
-
-        Returns:
-            int: 显示宽度（中文字符占2，英文字符占1）
-        """
-        width = 0
-        for char in text:
-            # 中文字符通常占2个宽度，英文字符占1个
-            if "\u4e00" <= char <= "\u9fff":  # 中文字符范围
-                width += 2
-            else:
-                width += 1
-        return width
-
-    # 修改现有的 _truncate_value 方法
-    def _truncate_value(self, value: str, max_length: int) -> str:
-        """截断过长的值用于表格显示，考虑中文字符宽度
-
-        Args:
-            value: 原始值
-            max_length: 最大显示宽度
-
-        Returns:
-            str: 截断后的值
-
-        Example:
-            >>> truncated = cli._truncate_value("长文本", 5)
-        """
-        if self._get_display_width(value) <= max_length:
-            return value
-
-        # 智能截断，考虑中文字符
-        current_width = 0
-        truncated = ""
-        for char in value:
-            char_width = 2 if "\u4e00" <= char <= "\u9fff" else 1
-            if current_width + char_width > max_length - 3:  # 留3个字符给"..."
-                break
-            truncated += char
-            current_width += char_width
-
-        return truncated + "..."
-
-    def _display_results(
-        self,
-        results: List[Dict],
-        response_time: float = 0,
-        output_format: str = "table",
-    ) -> None:
-        """以指定格式显示查询结果
-
-        Args:
-            results: 查询结果列表
-            response_time: 查询响应时间
-            output_format: 显示格式 (table/json/csv)
-
-        Raises:
-            ValueError: 如果格式不支持
-
-        Example:
-            >>> cli._display_results(results, "json")
-        """
-        if not results:
-            print("没有结果")
-            return
-
-        if output_format == "table":
-            self._display_table(results, response_time)
-        elif output_format == "json":
-            self._display_json(results)
-        elif output_format == "csv":
-            self._display_csv(results)
-        else:
-            print(f"❌ 不支持的输出格式: {format}")
-            print("✅ 支持的格式: table, json, csv")
-            sys.exit(1)
-
-    def _display_json(self, results: List[Dict]) -> None:
-        """以JSON格式显示查询结果
-
-        Args:
-            results: 查询结果列表
-
-        Example:
-            >>> cli._display_json(results)
-        """
-        try:
-            print(json.dumps(results, indent=2, ensure_ascii=False))
-        except (ValueError, TypeError) as e:
-            logger.error("JSON序列化失败: %s", e)
-            print(f"❌ JSON序列化失败: {e}")
-            sys.exit(1)
-
-    def _display_csv(self, results: List[Dict]) -> None:
-        """以CSV格式显示查询结果
-
-        Args:
-            results: 查询结果列表
-
-        Example:
-            >>> cli._display_csv(results)
-        """
-        if not results:
-            return
-
-        headers = list(results[0].keys())
-        writer = csv.DictWriter(sys.stdout, fieldnames=headers)
-        writer.writeheader()
-        for row in results:
-            writer.writerow(row)
-
-    def execute_file(self, args: argparse.Namespace) -> None:
-        """执行SQL文件中的多个语句
-
-        Args:
-            args: 命令行参数，包含连接名称、文件路径和执行选项
-
-        Raises:
-            SystemExit: 如果执行文件失败则退出程序
-
-        Example:
-            >>> # 命令行使用
-            >>> # db-connector execute mysql-dev script.sql
-        """
-        db_manager = self._ensure_db_manager_initialized()
-
-        # 验证文件存在性
-        if not os.path.exists(args.file):
-            logger.error("SQL文件不存在: %s", args.file)
-            print(f"❌ SQL文件不存在: {args.file}")
-            sys.exit(1)
-
-        try:
-            statements = self._read_and_split_sql_file(args.file)
-            if not statements:
-                print("ℹ️  SQL文件中没有有效的SQL语句")
-                return
-
-            results, success_count, error_count = self._execute_sql_statements(
-                db_manager, statements, args.connection, args.continue_on_error
-            )
-
-            self._print_execution_summary(success_count, error_count)
-
-            if results and args.output:
-                self._save_output(results, args.output, args.format)
-            elif results:
-                self._display_results(results, args.format)
-
-        except (DatabaseError, ConfigError, FileSystemError) as e:
-            logger.error("执行SQL文件失败: %s", e)
-            print(f"❌ 执行SQL文件失败: {e}")
-            sys.exit(1)
-
-    def _read_and_split_sql_file(self, file_path: str) -> List[str]:
-        """读取SQL文件内容并分割为独立的SQL语句
-
-        Args:
-            file_path: SQL文件路径
-
-        Returns:
-            List[str]: 分割后的SQL语句列表
-
-        Raises:
-            UnicodeDecodeError: 如果文件编码不支持
-
-        Example:
-            >>> statements = cli._read_and_split_sql_file("script.sql")
-        """
-        try:
-            with open(file_path, "r", encoding="utf-8") as f:
-                sql_content = f.read()
-            return self._split_sql_statements(sql_content)
-        except UnicodeDecodeError:
-            # 尝试其他编码
-            try:
-                with open(file_path, "r", encoding="gbk") as f:
-                    sql_content = f.read()
-                return self._split_sql_statements(sql_content)
-            except UnicodeDecodeError as e:
-                logger.error("无法解码SQL文件: %s", e)
-                print("❌ 无法解码SQL文件，请检查文件编码")
-                sys.exit(1)
-
-    def _split_sql_statements(self, sql_content: str) -> List[str]:
-        """将SQL内容分割为独立的语句
-
-        Args:
-            sql_content: 原始SQL内容
-
-        Returns:
-            List[str]: 分割后的SQL语句列表
-
-        Example:
-            >>> statements = cli._split_sql_statements(
-            ...     "SELECT * FROM users; INSERT INTO users VALUES (1, 'test');"
-            ... )
-        """
-        # 移除多行注释
-        sql_content = re.sub(r"/\*.*?\*/", "", sql_content, flags=re.DOTALL)
-
-        # 按分号分割语句
-        statements = []
-        current_statement = ""
-
-        for line in sql_content.split("\n"):
-            line = line.strip()
-            if line.startswith("--"):  # 跳过单行注释
-                continue
-            current_statement += " " + line
-            if line.endswith(";"):
-                statements.append(current_statement.strip())
-                current_statement = ""
-
-        # 处理最后可能没有分号的语句
-        if current_statement.strip():
-            statements.append(current_statement.strip())
-
-        return [stmt for stmt in statements if stmt and not stmt.isspace()]
 
     def _execute_sql_statements(
         self,
@@ -903,6 +578,563 @@ class DBConnectorCLI:
         success_rate = (success_count / total * 100) if total > 0 else 0
         print(f"\n执行完成: 成功 {success_count} 条，失败 {error_count} 条")
         print(f"成功率: {success_rate:.1f}%")
+
+    def _save_output(
+        self, results: List[Dict], output_path: str, output_format: str
+    ) -> None:
+        """将查询结果保存到文件
+
+        Args:
+            results: 查询结果列表
+            output_path: 输出文件路径
+            output_format: 输出格式
+
+        Raises:
+            SystemExit: 如果保存失败
+
+        Example:
+            >>> cli._save_output(results, "output.json", "json")
+        """
+        try:
+            converted_results = self._convert_results_for_saving(results)
+            self._save_results_to_file(converted_results, output_path, output_format)
+            print(f"✅ 结果已保存到: {output_path}")
+        except (DatabaseError, ConfigError, FileSystemError) as e:
+            logger.error("保存结果失败: %s", e)
+            print(f"❌ 保存结果失败: {e}")
+            sys.exit(1)
+
+    def _convert_results_for_saving(self, results: List[Dict]) -> List[Dict]:
+        """转换查询结果为适合保存的格式
+
+        Args:
+            results: 原始查询结果列表
+
+        Returns:
+            List[Dict]: 转换后的结果列表
+        """
+        converted_results = []
+        for row in results:
+            converted_row = {}
+            for key, value in row.items():
+                converted_row[key] = self._convert_single_value(value)
+            converted_results.append(converted_row)
+
+        return converted_results
+
+    def _convert_single_value(self, obj: Any) -> Any:
+        """转换单个值为适合保存的格式
+
+        Args:
+            obj: 需要转换的对象
+
+        Returns:
+            Any: 转换后的值
+        """
+        # 尝试标准字典转换
+        dict_result = self._try_dict_conversion(obj)
+        if dict_result is not None:
+            return dict_result
+
+        # 尝试_asdict方法转换
+        asdict_result = self._try_asdict_conversion(obj)
+        if asdict_result is not None:
+            return asdict_result
+
+        # 尝试__dict__属性转换
+        dict_attr_result = self._try_dict_attr_conversion(obj)
+        if dict_attr_result is not None:
+            return dict_attr_result
+
+        # 尝试可迭代对象转换
+        iterable_result = self._try_iterable_conversion(obj)
+        if iterable_result is not None:
+            return iterable_result
+
+        # 对于无法转换的对象，返回原样
+        return obj
+
+    def _try_dict_conversion(self, obj: Any) -> Any | None:
+        """尝试将对象转换为字典
+
+        Args:
+            obj: 需要转换的对象
+
+        Returns:
+            Any | None: 转换后的字典，如果转换失败返回None
+        """
+        try:
+            return dict(obj)
+        except (TypeError, ValueError):
+            return None
+
+    def _try_asdict_conversion(self, obj: Any) -> Any | None:
+        """尝试使用_asdict方法转换对象
+
+        Args:
+            obj: 需要转换的对象
+
+        Returns:
+            Any | None: 转换后的字典，如果转换失败返回None
+        """
+        if hasattr(obj, "_asdict") and callable(getattr(obj, "_asdict")):
+            try:
+                return obj._asdict()
+            except (TypeError, ValueError):
+                return None
+        return None
+
+    def _try_dict_attr_conversion(self, obj: Any) -> Any | None:
+        """尝试使用__dict__属性转换对象
+
+        Args:
+            obj: 需要转换的对象
+
+        Returns:
+            Any | None: 转换后的字典，如果转换失败返回None
+        """
+        if hasattr(obj, "__dict__"):
+            return obj.__dict__
+        return None
+
+    def _try_iterable_conversion(self, obj: Any) -> Any | None:
+        """尝试将可迭代对象转换为列表
+
+        Args:
+            obj: 需要转换的对象
+
+        Returns:
+            Any | None: 转换后的列表，如果转换失败返回None
+        """
+        if hasattr(obj, "__iter__") and not isinstance(obj, (str, bytes)):
+            try:
+                return list(obj)
+            except (TypeError, ValueError):
+                return None
+        return None
+
+    def _save_results_to_file(
+        self, results: List[Dict], output_path: str, output_format: str
+    ) -> None:
+        """将转换后的结果保存到文件
+
+        Args:
+            results: 转换后的结果列表
+            output_path: 输出文件路径
+            output_format: 输出格式
+        """
+        if output_format == "json":
+            self._save_as_json(results, output_path)
+        elif output_format == "csv":
+            self._save_as_csv(results, output_path)
+        else:  # table格式保存为文本
+            self._save_as_table(results, output_path)
+
+    def _save_as_json(self, results: List[Dict], output_path: str) -> None:
+        """将结果保存为JSON格式
+
+        Args:
+            results: 转换后的结果列表
+            output_path: 输出文件路径
+        """
+        try:
+            # 自定义JSON序列化器，处理RowMapping等特殊对象
+            def default_serializer(obj):
+                # 首先尝试标准字典转换
+                try:
+                    return dict(obj)
+                except (TypeError, ValueError):
+                    pass
+
+                # 处理有_asdict方法的对象（如SQLAlchemy Row）
+                if hasattr(obj, "_asdict") and callable(getattr(obj, "_asdict")):
+                    try:
+                        return obj._asdict()
+                    except (TypeError, ValueError):
+                        pass
+
+                # 处理有__dict__属性的普通对象
+                if hasattr(obj, "__dict__"):
+                    return obj.__dict__
+
+                # 处理可迭代对象
+                try:
+                    return list(obj)
+                except (TypeError, ValueError):
+                    pass
+
+                # 对于无法序列化的对象，返回字符串表示
+                return str(obj)
+
+            with open(output_path, "w", encoding="utf-8") as f:
+                json.dump(
+                    results, f, indent=2, ensure_ascii=False, default=default_serializer
+                )
+        except (ValueError, TypeError) as e:
+            logger.error("JSON序列化失败: %s", e)
+            print(f"❌ JSON保存失败: {e}")
+            sys.exit(1)
+
+    def _save_as_csv(self, results: List[Dict], output_path: str) -> None:
+        """将结果保存为CSV格式
+
+        Args:
+            results: 转换后的结果列表
+            output_path: 输出文件路径
+        """
+        if not results:
+            return
+
+        with open(output_path, "w", newline="", encoding="utf-8") as f:
+            headers = list(results[0].keys())
+            writer = csv.DictWriter(f, fieldnames=headers)
+            writer.writeheader()
+            writer.writerows(results)
+
+    def _save_as_table(self, results: List[Dict], output_path: str) -> None:
+        """将结果保存为表格格式（文本）
+
+        Args:
+            results: 转换后的结果列表
+            output_path: 输出文件路径
+        """
+        with open(output_path, "w", encoding="utf-8") as f:
+            # 重定向标准输出到文件
+            original_stdout = sys.stdout
+            sys.stdout = f
+            self._display_table(results)
+            sys.stdout = original_stdout
+
+    def _display_results(
+        self,
+        results: List[Dict],
+        response_time: float = 0,
+        output_format: str = "table",
+    ) -> None:
+        """以指定格式显示查询结果
+
+        Args:
+            results: 查询结果列表
+            response_time: 查询响应时间
+            output_format: 显示格式 (table/json/csv)
+
+        Raises:
+            ValueError: 如果格式不支持
+
+        Example:
+            >>> cli._display_results(results, "json")
+        """
+        if not results:
+            print("没有结果")
+            return
+
+        if output_format == "json":
+            self._display_json(results)
+        elif output_format == "csv":
+            self._display_csv(results)
+        else:
+            self._display_table(results)
+        print(f"总计: {len(results)} 行 ({response_time:.3f} 秒)")
+
+    def _display_json(self, results: List[Dict]) -> None:
+        """以JSON格式显示查询结果
+
+        Args:
+            results: 查询结果列表
+
+        Example:
+            >>> cli._display_json(results)
+        """
+        try:
+            # 自定义JSON序列化器，处理RowMapping等特殊对象
+            def default_serializer(obj):
+                # 首先尝试标准字典转换
+                try:
+                    return dict(obj)
+                except (TypeError, ValueError):
+                    pass
+
+                # 处理有_asdict方法的对象（如SQLAlchemy Row）
+                if hasattr(obj, "_asdict") and callable(getattr(obj, "_asdict")):
+                    try:
+                        return obj._asdict()
+                    except (TypeError, ValueError):
+                        pass
+
+                # 处理有__dict__属性的普通对象
+                if hasattr(obj, "__dict__"):
+                    return obj.__dict__
+
+                # 处理可迭代对象
+                try:
+                    return list(obj)
+                except (TypeError, ValueError):
+                    pass
+
+                # 对于无法序列化的对象，返回字符串表示
+                return str(obj)
+
+            print(
+                json.dumps(
+                    results, indent=2, ensure_ascii=False, default=default_serializer
+                )
+            )
+        except (ValueError, TypeError) as e:
+            logger.error("JSON序列化失败: %s", e)
+            print(f"❌ JSON序列化失败: {e}")
+            sys.exit(1)
+
+    def _display_csv(self, results: List[Dict]) -> None:
+        """以CSV格式显示查询结果
+
+        Args:
+            results: 查询结果列表
+
+        Example:
+            >>> cli._display_csv(results)
+        """
+        if not results:
+            return
+
+        headers = list(results[0].keys())
+        writer = csv.DictWriter(sys.stdout, fieldnames=headers)
+        writer.writeheader()
+        for row in results:
+            writer.writerow(row)
+
+    def _display_table(self, results: List[Dict]) -> None:
+        """以表格形式显示查询结果（带边框，居中显示，MySQL风格）
+
+        Args:
+            results: 查询结果列表
+
+        Example:
+            >>> cli._display_table(results)
+        """
+        if not results:
+            return
+
+        headers = list(results[0].keys())
+        col_widths = self._calculate_column_widths(headers, results)
+        separator = self._create_separator(headers, col_widths)
+
+        # 打印表格
+        print(separator)
+        self._print_header_row(headers, col_widths)
+        print(separator)
+        self._print_data_rows(results, headers, col_widths)
+        print(separator)
+
+    def _calculate_column_widths(
+        self, headers: List[str], results: List[Dict]
+    ) -> Dict[str, int]:
+        """计算每列的最大显示宽度
+
+        Args:
+            headers: 表头列表
+            results: 查询结果列表
+
+        Returns:
+            Dict[str, int]: 列名到宽度的映射
+        """
+        col_widths = {}
+        max_col_width = 50
+
+        # 计算表头宽度
+        for header in headers:
+            col_widths[header] = self._get_display_width(str(header))
+
+        # 计算数据行宽度
+        for row in results:
+            for header in headers:
+                value = str(row.get(header, ""))
+                value_width = self._get_display_width(value)
+                col_widths[header] = max(col_widths[header], value_width)
+
+        # 限制最大列宽
+        for header in headers:
+            col_widths[header] = min(col_widths[header], max_col_width)
+
+        return col_widths
+
+    def _create_separator(self, headers: List[str], col_widths: Dict[str, int]) -> str:
+        """创建表格分隔线
+
+        Args:
+            headers: 表头列表
+            col_widths: 列宽度映射
+
+        Returns:
+            str: 分隔线字符串
+        """
+        separator_parts = ["-" * (col_widths[header] + 2) for header in headers]
+        return "+" + "+".join(separator_parts) + "+"
+
+    def _print_header_row(self, headers: List[str], col_widths: Dict[str, int]) -> None:
+        """打印表头行
+
+        Args:
+            headers: 表头列表
+            col_widths: 列宽度映射
+        """
+        header_cells = []
+        for header in headers:
+            header_text = str(header)
+            actual_width = self._get_display_width(header_text)
+            padding = col_widths[header] - actual_width
+            left_padding = padding // 2
+            right_padding = padding - left_padding
+            header_cells.append(
+                f"{' ' * left_padding}{header_text}{' ' * right_padding}"
+            )
+
+        header_line = f"| {" | ".join(header_cells)} |"
+        print(header_line)
+
+    def _print_data_rows(
+        self, results: List[Dict], headers: List[str], col_widths: Dict[str, int]
+    ) -> None:
+        """打印数据行
+
+        Args:
+            results: 查询结果列表
+            headers: 表头列表
+            col_widths: 列宽度映射
+        """
+        for row in results:
+            row_cells = []
+            for header in headers:
+                value_text = self._truncate_value(
+                    str(row.get(header, "")), col_widths[header]
+                )
+                actual_width = self._get_display_width(value_text)
+                padding = col_widths[header] - actual_width
+                left_padding = padding // 2
+                right_padding = padding - left_padding
+                row_cells.append(
+                    f"{' ' * left_padding}{value_text}{' ' * right_padding}"
+                )
+
+            row_line = f"| {" | ".join(row_cells)} |"
+            print(row_line)
+
+    # 添加新的辅助方法
+    def _get_display_width(self, text: str) -> int:
+        """计算字符串在终端中的显示宽度
+
+        Args:
+            text: 输入字符串
+
+        Returns:
+            int: 显示宽度（中文字符和中文标点占2，英文字符占1）
+        """
+        width = 0
+        for char in text:
+            # 中文字符和中文标点通常占2个宽度，英文字符占1个
+            if (
+                "\u4e00" <= char <= "\u9fff"  # 中文字符范围
+                or "\u3000" <= char <= "\u303f"  # CJK标点符号
+                or "\uff00" <= char <= "\uffef"
+            ):  # 全角字符（包括全角标点）
+                width += 2
+            else:
+                width += 1
+        return width
+
+    # 修改现有的 _truncate_value 方法
+    def _truncate_value(self, value: str, max_length: int) -> str:
+        """截断过长的值用于表格显示，考虑中文字符宽度
+
+        Args:
+            value: 原始值
+            max_length: 最大显示宽度
+
+        Returns:
+            str: 截断后的值
+
+        Example:
+            >>> truncated = cli._truncate_value("长文本", 5)
+        """
+        if self._get_display_width(value) <= max_length:
+            return value
+
+        # 智能截断，考虑中文字符和中文标点
+        current_width = 0
+        truncated = ""
+        for char in value:
+            # 中文字符和中文标点通常占2个宽度，英文字符占1个
+            char_width = (
+                2
+                if (
+                    "\u4e00" <= char <= "\u9fff"  # 中文字符范围
+                    or "\u3000" <= char <= "\u303f"  # CJK标点符号
+                    or "\uff00" <= char <= "\uffef"
+                )
+                else 1
+            )  # 全角字符
+            if current_width + char_width > max_length - 3:  # 留3个字符给"..."
+                break
+            truncated += char
+            current_width += char_width
+
+        return truncated + "..."
+
+    def execute_command(self, args: argparse.Namespace) -> None:
+        """执行增删改操作（INSERT/UPDATE/DELETE等）
+
+        与execute_sql方法类似，但专门用于非查询操作
+
+        Args:
+            args: 命令行参数，包含连接名称、SQL内容/文件路径和执行选项
+
+        Raises:
+            SystemExit: 如果执行失败则退出程序
+
+        Example:
+            >>> # 执行SQL命令
+            >>> # db-connector command mysql-dev "INSERT INTO users VALUES (1, 'John')"
+            >>> # 执行SQL文件
+            >>> # db-connector command mysql-dev script.sql
+        """
+        db_manager = self._ensure_db_manager_initialized()
+
+        try:
+            # 判断是SQL字符串还是文件路径
+            if os.path.exists(args.sql_content):
+                # 执行SQL文件
+                if not os.path.exists(args.sql_content):
+                    logger.error("SQL文件不存在: %s", args.sql_content)
+                    print(f"❌ SQL文件不存在: {args.sql_content}")
+                    sys.exit(1)
+
+                statements = read_and_split_sql_file(args.sql_content)
+                if not statements:
+                    print("ℹ️  SQL文件中没有有效的SQL语句")
+                    return
+
+                results, success_count, error_count = self._execute_sql_statements(
+                    db_manager, statements, args.connection, args.continue_on_error
+                )
+
+                self._print_execution_summary(success_count, error_count)
+
+                # 对于增删改操作，显示受影响的行数
+                if results:
+                    total_affected = sum(
+                        r.get("affected_rows", 0) for r in results if r
+                    )
+                    print(f"✅ 总共影响行数: {total_affected}")
+            else:
+                # 执行SQL命令
+                affected_rows = db_manager.execute_command(
+                    args.connection, args.sql_content
+                )
+                print(f"✅ 影响行数: {affected_rows}")
+
+        except (DatabaseError, ConfigError, FileSystemError) as e:
+            logger.error("执行命令失败: %s", e)
+            print(f"❌ 执行命令失败: {e}")
+            sys.exit(1)
 
     def interactive_shell(self, args: argparse.Namespace) -> None:
         """启动交互式SQL Shell

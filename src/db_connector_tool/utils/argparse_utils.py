@@ -96,34 +96,39 @@ def create_argument_parser(cli_instance) -> argparse.ArgumentParser:
     test_parser.add_argument("name", help="连接名称")
     test_parser.set_defaults(func=cli_instance.test_connection)
 
-    # query 命令
-    query_parser = subparsers.add_parser("query", help="执行SQL查询")
+    # query 命令（整合查询和文件执行）
+    query_parser = subparsers.add_parser("query", help="执行SQL查询或SQL文件")
     query_parser.add_argument("connection", help="连接名称")
-    query_parser.add_argument("query", help="SQL查询语句")
+    query_parser.add_argument("sql_content", help="SQL查询语句或SQL文件路径")
     query_parser.add_argument(
+        "-f",
         "--format",
         choices=["table", "json", "csv"],
         default="table",
         help="输出格式 (默认: table)",
     )
-    query_parser.add_argument("--output", help="输出文件路径")
+    query_parser.add_argument("-o", "--output", help="输出文件路径")
+    query_parser.add_argument(
+        "-c", "--continue-on-error", action="store_true", help="遇到错误时继续执行"
+    )
     query_parser.set_defaults(func=cli_instance.execute_query)
 
-    # execute 命令
-    execute_parser = subparsers.add_parser("execute", help="执行SQL文件")
-    execute_parser.add_argument("connection", help="连接名称")
-    execute_parser.add_argument("file", help="SQL文件路径")
-    execute_parser.add_argument(
+    # command 命令（专门用于增删改操作）
+    command_parser = subparsers.add_parser("command", help="执行增删改操作")
+    command_parser.add_argument("connection", help="连接名称")
+    command_parser.add_argument("sql_content", help="SQL命令语句或SQL文件路径")
+    command_parser.add_argument(
+        "-f",
         "--format",
         choices=["table", "json", "csv"],
         default="table",
         help="输出格式 (默认: table)",
     )
-    execute_parser.add_argument("--output", help="输出文件路径")
-    execute_parser.add_argument(
-        "--continue-on-error", action="store_true", help="遇到错误时继续执行"
+    command_parser.add_argument("-o", "--output", help="输出文件路径")
+    command_parser.add_argument(
+        "-c", "--continue-on-error", action="store_true", help="遇到错误时继续执行"
     )
-    execute_parser.set_defaults(func=cli_instance.execute_file)
+    command_parser.set_defaults(func=cli_instance.execute_command)
 
     # shell 命令
     shell_parser = subparsers.add_parser("shell", help="启动交互式SQL Shell")
