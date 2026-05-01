@@ -157,12 +157,9 @@ else:
 connections = db_manager.list_connections()
 print("可用连接:", connections)
 
-# 获取连接统计信息
-stats = db_manager.get_statistics()
-print("连接统计:", stats)
-
-# 关闭指定连接
-db_manager.close_connection('mysql_db')
+# 获取连接信息
+info = db_manager.get_connection_info('mysql_db')
+print("连接信息:", info)
 
 # 关闭所有连接
 db_manager.close_all_connections()
@@ -280,18 +277,18 @@ config = {
     "username": "user",
     "password": "secret"
 }
-config_manager.add_connection("db1", config)
+config_manager.add_config("db1", config)
 
 # 获取连接配置
-saved_config = config_manager.get_connection("db1")
+saved_config = config_manager.get_config("db1")
 print("保存的配置:", saved_config)
 
 # 列出所有连接
-connections = config_manager.list_connections()
+connections = config_manager.list_configs()
 print("所有连接:", connections)
 
 # 删除连接配置
-config_manager.remove_connection("db1")
+config_manager.remove_config("db1")
 
 # 备份配置文件
 config_manager.backup_config()
@@ -301,16 +298,18 @@ config_manager.backup_config()
 
 ```python
 # 验证配置格式
+from db_connector_tool.core.validators import ConfigValidator
+
 try:
-    config_manager._validate_config({
+    ConfigValidator.validate_config({
         "version": "1.0.0",
         "app_name": "test",
         "connections": {},
         "metadata": {}
     })
     print("配置格式正确")
-except Exception as e:
-    print("配置格式错误:", e)
+except Exception as error:
+    print("配置格式错误:", error)
 ```
 
 ### CryptoManager
@@ -372,37 +371,37 @@ DB Connector Tool 提供了完整的异常处理体系。
 ```python
 from db_connector_tool.core.exceptions import (
     DBConnectorError, ConfigError, CryptoError, DatabaseError,
-    ConnectionError, DriverError, QueryError
+    DBConnectionError, DriverError, QueryError, DBTimeoutError
 )
 
 try:
     # 尝试执行可能失败的操作
     db_manager.execute_query("nonexistent_db", "SELECT 1")
     
-except ConnectionError as e:
-    print(f"连接错误: {e}")
-    print(f"错误详情: {e.to_dict()}")
+except DBConnectionError as error:
+    print(f"连接错误: {error}")
+    print(f"错误详情: {error.to_dict()}")
     
-except QueryError as e:
-    print(f"查询错误: {e}")
+except QueryError as error:
+    print(f"查询错误: {error}")
     
-except DBConnectorError as e:
-    print(f"数据库连接器错误: {e}")
+except DBConnectorError as error:
+    print(f"数据库连接器错误: {error}")
     
-except Exception as e:
-    print(f"未知错误: {e}")
+except Exception as error:
+    print(f"未知错误: {error}")
 ```
 
 ### 配置异常处理
 
 ```python
 try:
-    config_manager.add_connection("", {})  # 空名称会触发异常
+    config_manager.add_config("", {})  # 空名称会触发异常
     
-except ConfigError as e:
-    print(f"配置错误: {e}")
-    print(f"错误代码: {e.error_code}")
-    print(f"详细信息: {e.details}")
+except ConfigError as error:
+    print(f"配置错误: {error}")
+    print(f"错误代码: {error.error_code}")
+    print(f"详细信息: {error.details}")
 ```
 
 ### 加密异常处理
@@ -412,8 +411,8 @@ try:
     # 尝试解密无效数据
     crypto.decrypt("invalid_encrypted_data")
     
-except CryptoError as e:
-    print(f"加密错误: {e}")
+except CryptoError as error:
+    print(f"加密错误: {error}")
     
 except InvalidToken:
     print("加密令牌无效，可能被篡改")
@@ -519,17 +518,14 @@ db-connector remove mysql-dev
 ### 高级用法
 
 ```bash
-# 使用JSON格式输出
-db-connector query mysql-dev "SELECT * FROM users" --format json
+# 从文件执行 SQL
+db-connector file mysql-dev init.sql --continue-on-error
 
-# 导出查询结果为CSV
-db-connector query mysql-dev "SELECT * FROM users" --format csv --output users.csv
+# 导出查询结果为文件
+db-connector query mysql-dev "SELECT * FROM users" --output users.csv
 
-# 执行SQL文件
-db-connector exec mysql-dev --file init.sql
-
-# 批量执行SQL文件
-db-connector batch-exec --dir sql_scripts/
+# 更新连接配置
+db-connector update mysql-dev --host new_host --port 3307
 ```
 
 ## 🏆 最佳实践
@@ -560,22 +556,20 @@ def safe_database_operation(db_name, query, params=None):
         db_manager = DatabaseManager()
         
         if not db_manager.test_connection(db_name):
-            raise ConnectionError(f"数据库 {db_name} 连接失败")
+            raise DBConnectionError(f"数据库 {db_name} 连接失败")
         
         return db_manager.execute_query(db_name, query, params)
         
-    except QueryError as e:
-        logger.error(f"查询执行失败: {e}")
-        # 返回空结果或重试
+    except QueryError as error:
+        logger.error(f"查询执行失败: {error}")
         return []
         
-    except ConnectionError as e:
-        logger.error(f"连接错误: {e}")
-        # 尝试重连或通知管理员
+    except DBConnectionError as error:
+        logger.error(f"连接错误: {error}")
         raise
         
-    except Exception as e:
-        logger.error(f"未知错误: {e}")
+    except Exception as error:
+        logger.error(f"未知错误: {error}")
         raise
         
     finally:
@@ -627,8 +621,8 @@ def batch_database_maintenance():
         
         return successful_ips
         
-    except Exception as e:
-        logger.error(f"批量维护操作失败: {e}")
+    except Exception as error:
+        logger.error(f"批量维护操作失败: {error}")
         raise
         
     finally:
@@ -654,8 +648,7 @@ def secure_configuration():
         "database": "sensitive_data"
     }
     
-    # 配置会自动加密
-    config_manager.add_connection("secure_db", sensitive_config)
+    config_manager.add_config("secure_db", sensitive_config)
     
     # 定期备份配置
     config_manager.backup_config()

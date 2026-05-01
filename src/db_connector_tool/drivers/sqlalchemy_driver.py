@@ -617,9 +617,6 @@ class SQLAlchemyDriver:
         except (ValueError, TypeError, AttributeError) as error:
             logger.warning("连接测试失败: 配置错误 - %s", str(error))
             return False
-        except Exception as error:  # pylint: disable=broad-exception-caught
-            logger.error("连接测试失败: 意外错误 - %s", str(error))
-            return False
 
     def _perform_connection_test(self) -> bool:
         """执行连接测试（内部方法）
