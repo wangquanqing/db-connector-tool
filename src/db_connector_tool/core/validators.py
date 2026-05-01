@@ -5,7 +5,6 @@
 
 Example:
 >>> from db_connector_tool import (ConfigValidator, PasswordValidator, GenericValidator)
->>> # 验证配置文件结构
 >>> config = {
 ...     "version": "1.0.0",
 ...     "app_name": "test",
@@ -17,11 +16,8 @@ Example:
 ...     }
 ... }
 >>> ConfigValidator.validate_config(config)
->>> # 验证连接名称
 >>> ConfigValidator.validate_connection_name("test_db")
->>> # 验证密码强度
 >>> is_strong = PasswordValidator.validate_strength("StrongPassword123!")
->>> # 验证必需字段
 >>> GenericValidator.validate_required_fields({"name": "test"}, ["name"], "测试数据")
 """
 
@@ -79,35 +75,28 @@ class ConfigValidator:
             >>> ConfigValidator.validate_config(config)
         """
 
-        # 验证必需字段
         required_fields = ["version", "app_name", "connections", "metadata"]
         GenericValidator.validate_required_fields(config, required_fields, "配置文件")
 
-        # 验证版本号格式
         if not ConfigValidator.is_valid_version_format(config["version"]):
             raise ConfigError(f"无效的版本号格式: {config['version']}")
 
-        # 验证connections字段类型
         GenericValidator.validate_field_type(
             config["connections"], dict, "connections字段"
         )
 
-        # 验证metadata字段结构
         metadata = config.get("metadata", {})
         GenericValidator.validate_field_type(metadata, dict, "metadata字段")
 
-        # 验证metadata必需子字段
         required_metadata_fields = ["created", "last_modified", "key_version"]
         GenericValidator.validate_required_fields(
             metadata, required_metadata_fields, "metadata"
         )
 
-        # 验证密钥版本格式
         key_version = metadata.get("key_version")
         if not isinstance(key_version, (str, int)) or not str(key_version).isdigit():
             raise ConfigError("key_version必须是有效的数字字符串")
 
-        # 验证审计日志格式
         audit_log = metadata.get("audit_log", [])
         GenericValidator.validate_field_type(audit_log, list, "audit_log字段")
 
@@ -115,7 +104,8 @@ class ConfigValidator:
     def is_valid_version_format(version: str) -> bool:
         """验证版本号格式是否符合语义化版本规范
 
-        验证版本号格式是否符合语义化版本规范，格式为 x.y.z，其中 x、y、z 为非负整数且不允许前导零。
+        验证版本号格式是否符合语义化版本规范，格式为 x.y.z，
+        其中 x、y、z 为非负整数且不允许前导零。
 
         Args:
             version: 版本号字符串
@@ -143,11 +133,7 @@ class ConfigValidator:
                 if not part.isdigit():
                     return False
                 if len(part) > 1 and part.startswith("0"):
-                    return False  # 不允许前导零
-                # 负数检查是冗余的，因为 isdigit() 已经确保了非负数字符串
-                # num = int(part)
-                # if num < 0:
-                #     return False
+                    return False
 
             return True
         except (ValueError, AttributeError):
@@ -157,7 +143,8 @@ class ConfigValidator:
     def validate_connection_name(name: str) -> None:
         """验证连接名称是否有效
 
-        验证连接名称是否符合要求，包括非空、字符串类型、长度限制、字符格式和保留字检查。
+        验证连接名称是否符合要求，包括非空、字符串类型、长度限制、
+        字符格式和保留字检查。
 
         Args:
             name: 连接名称
@@ -167,22 +154,25 @@ class ConfigValidator:
 
         Example:
             >>> ConfigValidator.validate_connection_name("test_db")
-            >>> ConfigValidator.validate_connection_name("invalid-name")  # 会抛出 ValueError
-            >>> ConfigValidator.validate_connection_name("default")  # 会抛出 ValueError
+            >>> ConfigValidator.validate_connection_name("invalid-name")
+            Traceback (most recent call last):
+            ...
+            ValueError: 连接名称只能包含字母、数字和下划线
+            >>> ConfigValidator.validate_connection_name("default")
+            Traceback (most recent call last):
+            ...
+            ValueError: 连接名称不能使用保留字
         """
 
         if not name or not isinstance(name, str):
             raise ValueError("连接名称不能为空且必须是字符串")
 
-        # 长度限制
         if len(name) > 50:
             raise ValueError("连接名称长度不能超过50个字符")
 
-        # 字符格式（只允许字母、数字、下划线）
         if not re.match(r"^\w+$", name):
             raise ValueError("连接名称只能包含字母、数字和下划线")
 
-        # 保留字检查
         if name in ["default", "test", "backup"]:
             raise ValueError("连接名称不能使用保留字")
 
@@ -201,13 +191,15 @@ class ConfigValidator:
         Example:
             >>> config = {"host": "localhost", "port": 3306, "username": "root"}
             >>> ConfigValidator.validate_connection_config(config)
-            >>> ConfigValidator.validate_connection_config("invalid")  # 会抛出 ValueError
+            >>> ConfigValidator.validate_connection_config("invalid")
+            Traceback (most recent call last):
+            ...
+            ValueError: 连接配置不能为空且必须是字典
         """
 
         if not connection_config or not isinstance(connection_config, dict):
             raise ValueError("连接配置不能为空且必须是字典")
 
-        # 键名格式检查
         for key in connection_config.keys():
             if not isinstance(key, str):
                 raise ValueError("连接配置的键必须是字符串")
@@ -229,7 +221,8 @@ class PasswordValidator:
     def validate_strength(password: str) -> bool:
         """验证密码强度
 
-        验证密码强度是否足够，要求密码长度至少16位，包含大小写字母、数字和特殊字符。
+        验证密码强度是否足够，要求密码长度至少16位，
+        包含大小写字母、数字和特殊字符。
 
         Args:
             password: 要验证的密码字符串
@@ -251,7 +244,8 @@ class PasswordValidator:
     def get_strength(password: str) -> str:
         """获取密码强度等级
 
-        评估密码强度并返回强度等级，分为 very_strong、strong、medium 和 weak 四个等级。
+        评估密码强度并返回强度等级，分为 very_strong、strong、
+        medium 和 weak 四个等级。
 
         Args:
             password: 要评估的密码字符串
@@ -266,7 +260,6 @@ class PasswordValidator:
             "weak"
         """
 
-        # 复杂度检查
         has_uppercase = bool(re.search(r"[A-Z]", password))
         has_lowercase = bool(re.search(r"[a-z]", password))
         has_digit = bool(re.search(r"\d", password))
@@ -274,13 +267,10 @@ class PasswordValidator:
             re.search(r"[!@#$%^&*()_+\-=\[\]{}|;:,.<>?~`\"\'\\/]", password)
         )
 
-        # 计算复杂度类型数量
         complexity_types = sum([has_uppercase, has_lowercase, has_digit, has_special])
 
-        # 长度检查
         length = len(password)
 
-        # 评估强度等级
         if length >= 24 and complexity_types == 4:
             return "very_strong"
         if length >= 8 and complexity_types == 4:
@@ -360,7 +350,10 @@ class GenericValidator:
             ... )
             >>> GenericValidator.validate_required_fields(
             ...     data, ["name", "email"], "用户数据"
-            ... )  # 会抛出 ConfigError
+            ... )
+            Traceback (most recent call last):
+            ...
+            ConfigError: 用户数据缺少必需字段: email
         """
 
         for field in required_fields:
@@ -388,7 +381,10 @@ class GenericValidator:
 
         Example:
             >>> GenericValidator.validate_field_type(25, int, "年龄字段")
-            >>> GenericValidator.validate_field_type("25", int, "年龄字段")  # 会抛出 ConfigError
+            >>> GenericValidator.validate_field_type("25", int, "年龄字段")
+            Traceback (most recent call last):
+            ...
+            ConfigError: 年龄字段必须是int类型
         """
 
         if not isinstance(value, expected_type):

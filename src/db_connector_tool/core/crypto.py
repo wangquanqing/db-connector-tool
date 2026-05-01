@@ -140,10 +140,8 @@ class CryptoManager:
             self.password = password or self._generate_secure_password()
             self.salt = salt or self._generate_secure_salt()
 
-            # 初始化清理状态属性
             self._cleaned = False
 
-            # 确定迭代次数
             if iterations is not None:
                 if iterations < self.MIN_ITERATIONS:
                     logger.warning(
@@ -222,47 +220,33 @@ class CryptoManager:
     def _clear_sensitive_data(self):
         """清理内存中的敏感数据（私有方法）"""
 
-        # 标记清理状态
         self._cleaned = True
 
-        # 清理密码
         if hasattr(self, "password") and self.password:
-            # 使用固定字符覆盖密码字符串，确保长度一致
             original_length = len(self.password)
             self.password = "0" * original_length
-            # 再次覆盖，使用随机字符
             self.password = secrets.token_hex(original_length)[:original_length]
-            # 第三次覆盖，使用不同的随机字符
             self.password = secrets.token_urlsafe(original_length)[:original_length]
-            # 最终清零
         self.password = ""
 
-        # 清理盐值
         if hasattr(self, "salt") and self.salt:
-            # 使用零字节覆盖盐值，确保长度一致
             salt_length = len(self.salt)
             self.salt = bytes(salt_length)
-            # 再次覆盖，使用随机字节
             self.salt = secrets.token_bytes(salt_length)
-            # 第三次覆盖，使用不同的随机字节
             self.salt = secrets.token_bytes(salt_length)
-            # 最终清零
         self.salt = b""
 
-        # 清理 Fernet 实例
         if hasattr(self, "fernet"):
             self.fernet = None
 
-        # 清理其他可能的敏感属性
         if hasattr(self, "iterations"):
             self.iterations = 0
 
-        # 尝试使用更底层的内存清理方法（如果可用）
         try:
             gc.collect()
             logger.debug("已执行垃圾回收，进一步清理敏感数据")
-        except (MemoryError, RuntimeError) as e:
-            logger.debug("垃圾回收执行失败: %s", str(e))
+        except (MemoryError, RuntimeError) as error:
+            logger.debug("垃圾回收执行失败: %s", str(error))
 
         logger.debug("敏感数据已安全清理")
 
@@ -296,25 +280,20 @@ class CryptoManager:
             - 数字: 0-9 (10个)
             - 特殊字符: !@#$%^&*()_+-=[]{}|;:,.<>?~`\"'\\/ (32个)
         """
-        # 定义丰富的字符集（94个字符）
         character_set = (
-            string.ascii_uppercase  # 大写字母 A-Z (26)
-            + string.ascii_lowercase  # 小写字母 a-z (26)
-            + string.digits  # 数字 0-9 (10)
-            + self.SPECIAL_CHARACTERS  # 特殊字符 (32)
+            string.ascii_uppercase
+            + string.ascii_lowercase
+            + string.digits
+            + self.SPECIAL_CHARACTERS
         )
 
-        # 确保密码长度至少为16位
         length = max(length, 16)
 
-        # 使用迭代生成密码
         for attempt in range(max_attempts):
-            # 方法1: 直接选择字符（更优的熵值）
             generated_password = "".join(
                 secrets.choice(character_set) for _ in range(length)
             )
 
-            # 验证密码强度
             if PasswordValidator.validate_strength(generated_password):
                 logger.debug(
                     "密码生成成功，尝试次数: %s, 长度: %s", attempt + 1, length
@@ -323,7 +302,6 @@ class CryptoManager:
 
             logger.debug("密码强度不足，第%s次重新生成", attempt + 1)
 
-        # 达到最大尝试次数，使用强制生成方法
         logger.warning("达到最大尝试次数(%s)，使用强制生成的密码", max_attempts)
         return self._generate_forced_strong_password(length)
 
@@ -337,37 +315,24 @@ class CryptoManager:
             str: 强制生成的符合强度要求的密码
         """
 
-        # 确保密码长度至少为16位
         length = max(length, 16)
 
-        # 最多尝试5次，避免无限递归
         max_attempts = 5
 
         for attempt in range(max_attempts):
-            # 确保每个类别至少有一个字符
-            uppercase_chars = [
-                secrets.choice(string.ascii_uppercase) for _ in range(2)
-            ]  # 至少2个大写字母
-            lowercase_chars = [
-                secrets.choice(string.ascii_lowercase) for _ in range(2)
-            ]  # 至少2个小写字母
-            digit_chars = [
-                secrets.choice(string.digits) for _ in range(2)
-            ]  # 至少2个数字
-            special_chars = [
-                secrets.choice(self.SPECIAL_CHARACTERS) for _ in range(2)
-            ]  # 至少2个特殊字符
+            uppercase_chars = [secrets.choice(string.ascii_uppercase) for _ in range(2)]
+            lowercase_chars = [secrets.choice(string.ascii_lowercase) for _ in range(2)]
+            digit_chars = [secrets.choice(string.digits) for _ in range(2)]
+            special_chars = [secrets.choice(self.SPECIAL_CHARACTERS) for _ in range(2)]
 
-            # 生成剩余字符
             character_set = (
                 string.ascii_letters + string.digits + self.SPECIAL_CHARACTERS
             )
-            remaining_length = length - 8  # 总长度减去8个强制字符
+            remaining_length = length - 8
             remaining_characters = "".join(
                 secrets.choice(character_set) for _ in range(remaining_length)
             )
 
-            # 组合所有字符并随机打乱
             all_characters = list(
                 "".join(uppercase_chars)
                 + "".join(lowercase_chars)
@@ -378,7 +343,6 @@ class CryptoManager:
             secrets.SystemRandom().shuffle(all_characters)
 
             generated_password = "".join(all_characters)
-            # 验证生成的密码是否符合强度要求
             if PasswordValidator.validate_strength(generated_password):
                 logger.debug(
                     "使用强制方法生成密码成功，长度: %s, 尝试次数: %s",
@@ -389,9 +353,7 @@ class CryptoManager:
 
             logger.debug("强制生成的密码强度不足，第%s次重新生成", attempt + 1)
 
-        # 达到最大尝试次数后，确保密码符合要求并返回。确保返回的密码一定符合强度要求
         logger.warning("达到最大尝试次数(%s)，确保返回符合强度要求的密码", max_attempts)
-        # 直接返回一个符合强度要求的密码，确保包含所有必要的字符类型
         final_password = "".join(
             [
                 secrets.choice(string.ascii_uppercase),
@@ -410,7 +372,6 @@ class CryptoManager:
                 ],
             ]
         )
-        # 再次打乱
         final_password_list = list(final_password)
         secrets.SystemRandom().shuffle(final_password_list)
         final_password = "".join(final_password_list)
@@ -443,7 +404,6 @@ class CryptoManager:
             int: 适合当前系统性能的迭代次数
         """
 
-        # 测试基础迭代次数的执行时间
         test_iterations = self.MIN_ITERATIONS
         test_password = "test_password"
         test_salt = secrets.token_bytes(self.MIN_SALT_LENGTH)
@@ -459,18 +419,15 @@ class CryptoManager:
         kdf.derive(test_password.encode("utf-8"))
         elapsed_time = time.time() - start_time
 
-        # 计算目标迭代次数（目标执行时间 150ms）
-        target_time = 0.15  # 150ms
+        target_time = 0.15
         estimated_iterations = int((target_time / elapsed_time) * test_iterations)
 
-        # 确保迭代次数在合理范围内
         min_iterations = 100000
         max_iterations = 1000000
         adjusted_iterations = max(
             min_iterations, min(estimated_iterations, max_iterations)
         )
 
-        # 调整为 10000 的倍数，使数值更整洁
         adjusted_iterations = (adjusted_iterations // 10000) * 10000
 
         logger.debug(
@@ -493,7 +450,6 @@ class CryptoManager:
         """
 
         try:
-            # 使用 PBKDF2 进行密钥派生
             key_derivation_function = PBKDF2HMAC(
                 algorithm=hashes.SHA256(),
                 length=32,
@@ -502,7 +458,6 @@ class CryptoManager:
                 backend=default_backend(),
             )
 
-            # 派生密钥
             key_material = key_derivation_function.derive(self.password.encode("utf-8"))
             encoded_key = base64.urlsafe_b64encode(key_material)
 
@@ -544,9 +499,7 @@ class CryptoManager:
         if not data or not isinstance(data, str):
             raise ValueError("加密数据不能为空且必须是字符串")
 
-        # 转换为字节并加密
         encrypted_bytes = self._encrypt(data.encode("utf-8"))
-        # 返回 base64 编码的字符串
         return base64.urlsafe_b64encode(encrypted_bytes).decode("utf-8")
 
     def decrypt(self, encrypted_data: str) -> str:
@@ -574,8 +527,8 @@ class CryptoManager:
             >>> # 错误处理示例
             >>> try:
             ...     result = crypto.decrypt("无效的加密数据")
-            ... except CryptoError as e:
-            ...     print(f"解密失败: {e}")
+            ... except CryptoError as error:
+            ...     print(f"解密失败: {error}")
             ... except InvalidToken:
             ...     print("令牌无效，数据可能被篡改")
         """
@@ -583,7 +536,6 @@ class CryptoManager:
         if not encrypted_data or not isinstance(encrypted_data, str):
             raise ValueError("加密数据不能为空且必须是字符串")
 
-        # 解码 base64 并解密
         encrypted_bytes = base64.urlsafe_b64decode(encrypted_data.encode("utf-8"))
         decrypted_bytes = self._decrypt(encrypted_bytes)
         return decrypted_bytes.decode("utf-8")
@@ -746,7 +698,6 @@ class CryptoManager:
             decrypted = self.decrypt(encrypted)
             return decrypted == test_data
         except (CryptoError, ValueError, InvalidToken):
-            # 捕获加密解密过程中可能发生的具体异常
             return False
 
     def change_password(

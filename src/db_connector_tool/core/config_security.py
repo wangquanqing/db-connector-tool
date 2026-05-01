@@ -26,7 +26,6 @@ from .crypto import CryptoManager
 from .exceptions import ConfigError
 from .key_manager import KeyManager
 
-# 获取模块级别的日志记录器
 logger = get_logger(__name__)
 
 
@@ -82,20 +81,16 @@ class ConfigSecurityManager:
             64
         """
 
-        # 生成数字签名（排除signature、audit_log和signature_timestamp字段）
         config_to_sign = config.copy()
         config_to_sign["metadata"] = config_to_sign["metadata"].copy()
         config_to_sign["metadata"].pop("signature", None)
         config_to_sign["metadata"].pop("audit_log", None)
         config_to_sign["metadata"].pop("signature_timestamp", None)
 
-        # 获取HMAC密钥
         hmac_key = self.key_manager.get_secure_hmac_key()
 
-        # 序列化配置
         serialized_config = tomli_w.dumps(config_to_sign)
 
-        # 生成HMAC签名
         hmac_signature = hmac.new(
             hmac_key, serialized_config.encode(), hashlib.sha256
         ).hexdigest()
@@ -122,7 +117,6 @@ class ConfigSecurityManager:
             1
         """
 
-        # 添加审计日志
         audit_entry = {
             "timestamp": current_time,
             "operation": operation,
@@ -133,7 +127,6 @@ class ConfigSecurityManager:
             config["metadata"]["audit_log"] = []
         config["metadata"]["audit_log"].append(audit_entry)
 
-        # 限制审计日志长度，保留最近100条记录
         if len(config["metadata"]["audit_log"]) > 100:
             config["metadata"]["audit_log"] = config["metadata"]["audit_log"][-100:]
 
@@ -157,32 +150,26 @@ class ConfigSecurityManager:
         try:
             signature = config.get("metadata", {}).get("signature", "")
 
-            # 如果签名为空，跳过验证（可能是新创建的配置）
             if not signature:
                 logger.debug("配置文件无数字签名，跳过验证")
                 return
 
-            # 确保加密管理器已初始化
             try:
                 self.key_manager.get_crypto_manager()
             except ConfigError as exc:
                 logger.error("加密管理器未初始化，无法验证签名")
                 raise ConfigError("加密管理器未初始化，无法验证配置文件签名") from exc
 
-            # 生成待验证的配置数据（排除signature和audit_log字段）
             config_to_verify = config.copy()
             config_to_verify["metadata"] = config_to_verify["metadata"].copy()
             config_to_verify["metadata"].pop("signature", None)
             config_to_verify["metadata"].pop("audit_log", None)
-            config_to_verify["metadata"].pop("signature_timestamp", None)  # 排除时间戳
+            config_to_verify["metadata"].pop("signature_timestamp", None)
 
-            # 获取HMAC密钥
             hmac_key = self.key_manager.get_secure_hmac_key()
 
-            # 序列化配置
             serialized_config = tomli_w.dumps(config_to_verify)
 
-            # 生成预期签名
             expected_signature = hmac.new(
                 hmac_key, serialized_config.encode(), hashlib.sha256
             ).hexdigest()
@@ -191,22 +178,20 @@ class ConfigSecurityManager:
                 logger.error("配置文件数字签名验证失败，可能被篡改")
                 raise ConfigError("配置文件数字签名验证失败，可能被篡改")
 
-            # 配置文件应该长期有效，移除时间戳验证。签名时间戳仅用于审计目的，不用于有效性验证
+            # 配置文件应该长期有效，签名时间戳仅用于审计目的
             signature_timestamp = config.get("metadata", {}).get("signature_timestamp")
             if signature_timestamp:
                 try:
-                    # 验证时间戳格式（仅用于日志记录）
                     datetime.fromisoformat(signature_timestamp)
                     logger.debug("配置文件签名时间戳格式正确: %s", signature_timestamp)
                 except (ValueError, TypeError):
-                    # 时间戳格式错误不影响配置文件有效性
                     logger.warning("配置文件签名时间戳格式错误，但配置文件仍然有效")
 
             logger.debug("配置文件数字签名验证成功")
 
-        except (ValueError, AttributeError, RuntimeError) as e:
-            logger.error("配置文件签名验证失败: %s", str(e))
-            raise ConfigError(f"配置文件签名验证失败: {str(e)}") from e
+        except (ValueError, AttributeError, RuntimeError) as error:
+            logger.error("配置文件签名验证失败: %s", str(error))
+            raise ConfigError(f"配置文件签名验证失败: {error}") from error
 
     def encrypt_dict_values(self, data_dict: Dict[str, Any]) -> Dict[str, str]:
         """加密字典中的所有值
@@ -318,7 +303,7 @@ class ConfigSecurityManager:
                 return float(raw_value)
             if value_type == "str":
                 return str(raw_value)
-            return raw_value  # 其他类型直接返回
+            return raw_value
 
         except (KeyError, TypeError, ValueError) as error:
             logger.error("反序列化失败: %s", str(error))
@@ -344,7 +329,6 @@ class ConfigSecurityManager:
             "2"
         """
 
-        # 保存原始配置的完整副本，用于回滚
         original_config = {}
         for key, value in config.items():
             if isinstance(value, dict):
@@ -354,38 +338,28 @@ class ConfigSecurityManager:
         original_connections = config["connections"].copy()
         original_key_version = config["metadata"].get("key_version", "1")
 
-        # 保存原始密钥信息，用于回滚
         original_key_info = (
             self.key_manager.crypto.get_key_info() if self.key_manager.crypto else None
         )
 
         try:
-            # 解密所有连接配置
             decrypted_connections = self._decrypt_all_connections(config)
 
-            # 生成新的加密密钥
             self.key_manager.rotate_key()
 
-            # 更新密钥版本
             new_key_version = self._update_key_version(config)
 
-            # 重新加密所有连接配置
             self._re_encrypt_all_connections(config, decrypted_connections)
 
             return new_key_version
         except Exception as error:
-            # 发生异常时回滚
             logger.error("密钥轮换失败，执行回滚: %s", str(error))
-            # 恢复原始配置的所有字段
             for key, value in original_config.items():
                 config[key] = value
-            # 恢复原始连接配置
             config["connections"] = original_connections
             config["metadata"]["key_version"] = original_key_version
-            # 如果可能，恢复原始密钥
             if original_key_info:
                 try:
-                    # 尝试恢复原始密钥
                     self.key_manager.crypto = CryptoManager.from_saved_key(
                         original_key_info["password"],
                         original_key_info["salt"],
@@ -417,7 +391,6 @@ class ConfigSecurityManager:
 
         decrypted_connections = {}
         for name, encrypted_config in config["connections"].items():
-            # 使用统一的解密方法
             decrypted_config = self.decrypt_dict_values(encrypted_config)
             decrypted_connections[name] = decrypted_config
 
@@ -464,7 +437,6 @@ class ConfigSecurityManager:
 
         re_encrypted_connections = {}
         for name, decrypted_config in decrypted_connections.items():
-            # 使用统一的加密方法
             encrypted_config = self.encrypt_dict_values(decrypted_config)
             re_encrypted_connections[name] = encrypted_config
 

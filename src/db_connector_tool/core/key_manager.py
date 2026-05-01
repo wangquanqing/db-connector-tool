@@ -7,16 +7,12 @@
 Example:
 >>> from db_connector_tool import KeyManager
 >>>
->>> # 创建密钥管理器
 >>> key_manager = KeyManager("my_app")
 >>>
->>> # 加载或创建加密密钥
 >>> key_manager.load_or_create_key()
 >>>
->>> # 获取加密管理器实例
 >>> crypto_manager = key_manager.get_crypto_manager()
 >>>
->>> # 轮换密钥
 >>> key_manager.rotate_key()
 """
 
@@ -37,9 +33,8 @@ from ..utils.path_utils import PathHelper
 from .crypto import CryptoManager
 from .exceptions import ConfigError, CryptoError
 
-# 条件导入keyring库
 keyring_available = False  # pylint: disable=invalid-name
-keyring_module = None  # 内部使用的模块引用  # pylint: disable=invalid-name
+keyring_module = None  # pylint: disable=invalid-name
 try:
     import keyring
 
@@ -48,10 +43,8 @@ try:
 except ImportError:
     pass
 
-# 获取模块级别的日志记录器
 logger = get_logger(__name__)
 
-# 模块级别的锁，用于保护类级别锁的初始化
 _module_lock = threading.Lock()
 
 
@@ -62,30 +55,22 @@ class KeyManager:
     提供统一的密钥管理接口，与 CryptoManager 无缝集成。
 
     Example:
-    >>> # 创建密钥管理器
     >>> key_manager = KeyManager("my_app")
     >>>
-    >>> # 加载或创建密钥
     >>> key_manager.load_or_create_key()
     >>>
-    >>> # 获取加密管理器
     >>> crypto = key_manager.get_crypto_manager()
     >>>
-    >>> # 轮换密钥
     >>> key_manager.rotate_key()
     >>>
-    >>> # 获取 HMAC 密钥
     >>> hmac_key = key_manager.get_secure_hmac_key()
     >>>
-    >>> # 关闭密钥管理器（清理敏感数据）
     >>> key_manager.close()
     """
 
     _env_key = None
-    # 类级别的依赖检查结果（全局依赖，与应用名无关）
     _env_key_available = None
     _dependencies_checked = False
-    # 线程安全锁，确保依赖检查只执行一次
     _dependency_check_lock = None
 
     def __init__(self, app_name: str = "db_connector_tool") -> None:
@@ -100,10 +85,8 @@ class KeyManager:
             ConfigError: 初始化失败
 
         Example:
-            >>> # 使用默认应用名称
             >>> key_manager = KeyManager()
 
-            >>> # 使用自定义应用名称
             >>> key_manager = KeyManager("my_application")
         """
 
@@ -111,7 +94,6 @@ class KeyManager:
         self.config_dir = PathHelper.get_user_config_dir(app_name)
         self.crypto: Optional[CryptoManager] = None
 
-        # 检查依赖可用性（类级别，只执行一次，线程安全）
         self._ensure_dependencies_checked()
 
     def _ensure_dependencies_checked(self) -> None:
@@ -120,17 +102,13 @@ class KeyManager:
         确保类级别的依赖检查只执行一次，使用双重检查锁定模式确保线程安全。
         """
         if not KeyManager._dependencies_checked:
-            # 使用双重检查锁定模式确保线程安全
             if KeyManager._dependency_check_lock is None:
-                # 使用模块级别的锁来保护类级别锁的初始化
                 with _module_lock:
                     if KeyManager._dependency_check_lock is None:
                         KeyManager._dependency_check_lock = threading.RLock()
 
-            # 确保锁已经正确初始化
             if KeyManager._dependency_check_lock is not None:
                 with KeyManager._dependency_check_lock:
-                    # 再次检查，防止竞态条件
                     if not KeyManager._dependencies_checked:
                         KeyManager._check_dependencies()
 
@@ -141,8 +119,7 @@ class KeyManager:
 
         Example:
             >>> key_manager = KeyManager()
-            >>> # 使用密钥管理器...
-            >>> key_manager.close()  # 手动清理敏感数据
+            >>> key_manager.close()
         """
 
         if self.crypto is not None:
@@ -165,7 +142,6 @@ class KeyManager:
         Example:
             >>> @handle_config_operation("配置文件保存")
             ... def _save_config(self, config):
-            ...     # 保存配置逻辑
             ...     pass
         """
 
@@ -204,27 +180,23 @@ class KeyManager:
         Example:
             >>> key_manager = KeyManager()
             >>> key_manager.load_or_create_key()
-            >>> # 密钥已加载或创建成功
         """
 
-        # 尝试使用keyring库（如果可用）
         if keyring_available and keyring_module is not None:
             self._load_or_create_key_from_keyring()
         elif KeyManager._env_key_available and KeyManager._env_key:
-            # 环境变量密钥可用，使用环境变量
             try:
                 key_data = json.loads(KeyManager._env_key)
                 self._load_crypto_from_key_data(key_data)
                 logger.debug("使用环境变量中的加密密钥")
-            except (json.JSONDecodeError, TypeError, ConfigError) as e:
+            except (json.JSONDecodeError, TypeError, ConfigError) as error:
                 logger.error(
                     "环境变量密钥格式错误: %s，请检查 DB_CONNECTOR_TOOL_ENCRYPTION_KEY 环境变量的格式",
-                    str(e),
+                    str(error),
                 )
                 logger.warning("环境变量密钥加载失败，使用文件存储方案")
                 self._load_or_create_key_from_file()
         else:
-            # 回退到文件权限方案
             logger.warning("keyring库和环境变量都不可用，使用文件权限保护方案")
             self._load_or_create_key_from_file()
 
@@ -247,15 +219,12 @@ class KeyManager:
         service_name = self.app_name
         username = "master_key"
 
-        # 尝试从密钥环获取密钥
         stored_key = keyring_module.get_password(service_name, username)
 
         if stored_key:
-            # 使用统一的密钥加载方法
             self._load_crypto_from_key_data(json.loads(stored_key))
             logger.debug("从操作系统密钥存储加载密钥成功")
         else:
-            # 创建新密钥并存储
             key_data = self._create_new_crypto_key()
             keyring_module.set_password(service_name, username, json.dumps(key_data))
             logger.info("新加密密钥已安全存储到操作系统密钥环")
@@ -280,15 +249,13 @@ class KeyManager:
             >>> key_manager._load_crypto_from_key_data(key_data)
         """
 
-        # 验证密钥数据格式
         if "password" not in key_data or "salt" not in key_data:
             raise ConfigError("密钥数据格式无效")
 
-        # 加载加密管理器（必须使用相同的迭代次数）
         self.crypto = CryptoManager.from_saved_key(
             key_data["password"],
             key_data["salt"],
-            key_data["iterations"],  # 传递迭代次数参数
+            key_data["iterations"],
         )
         logger.debug("加密密钥加载成功")
 
@@ -338,8 +305,8 @@ class KeyManager:
                     "      2. 或设置环境变量 DB_CONNECTOR_TOOL_ENCRYPTION_KEY，使用环境变量存储\n"
                     "      3. 确保密钥文件权限设置正确，仅允许所有者访问"
                 )
-            except (OSError, tomllib.TOMLDecodeError, ConfigError) as e:
-                logger.error("加载密钥文件失败: %s，创建新的密钥文件", str(e))
+            except (OSError, tomllib.TOMLDecodeError, ConfigError) as error:
+                logger.error("加载密钥文件失败: %s，创建新的密钥文件", str(error))
                 self._create_new_key(key_file_path)
         else:
             self._create_new_key(key_file_path)
@@ -368,16 +335,13 @@ class KeyManager:
         """
 
         try:
-            # 设置文件权限为仅所有者可读写
             self._set_secure_file_permissions(key_file_path)
 
-            with open(key_file_path, "rb") as f:
-                key_data = tomllib.load(f)
+            with open(key_file_path, "rb") as file:
+                key_data = tomllib.load(file)
 
-            # 使用统一的密钥加载方法
             self._load_crypto_from_key_data(key_data)
         except CryptoError as error:
-            # 解密失败，可能是因为密钥生成逻辑改变，删除旧密钥文件并创建新的
             self._handle_crypto_error(key_file_path, error)
 
     def _create_new_key(self, key_file_path: Path) -> None:
@@ -395,11 +359,9 @@ class KeyManager:
 
         key_data = self._create_new_crypto_key()
 
-        # 先写入文件，然后设置安全权限
-        with open(key_file_path, "wb") as f:
-            f.write(tomli_w.dumps(key_data).encode("utf-8"))
+        with open(key_file_path, "wb") as file:
+            file.write(tomli_w.dumps(key_data).encode("utf-8"))
 
-        # 设置文件权限为仅所有者可读写
         self._set_secure_file_permissions(key_file_path)
 
         logger.info("新加密密钥文件创建成功")
@@ -447,10 +409,9 @@ class KeyManager:
         try:
             key_file_path.unlink()
             logger.info("已删除旧的密钥文件")
-            # 直接创建新的密钥，避免递归调用
             self._create_new_key(key_file_path)
-        except Exception as delete_error:
-            logger.error("删除旧密钥文件失败: %s", str(delete_error))
+        except Exception as error:
+            logger.error("删除旧密钥文件失败: %s", str(error))
             raise ConfigError(
                 f"加密密钥加载失败: {str(crypto_error)}"
             ) from crypto_error
@@ -471,22 +432,18 @@ class KeyManager:
             32
         """
 
-        # 优先从主加密密钥派生HMAC密钥
         if self.crypto is not None:
             key_info = self.crypto.get_key_info()
-            # 使用主密钥的password和salt组合派生HMAC密钥
             hmac_key_input = f"{key_info['password']}:{key_info['salt']}:hmac".encode(
                 "utf-8"
             )
             return hashlib.sha256(hmac_key_input).digest()
 
-        # 其次使用环境变量
         hmac_env_key = os.environ.get("DB_CONNECTOR_TOOL_HMAC_KEY")
         if hmac_env_key:
             logger.debug("使用环境变量中的HMAC密钥")
             return bytes.fromhex(hmac_env_key)
 
-        # 最后生成临时HMAC密钥（仅用于当前会话）
         logger.warning("主加密密钥未初始化，使用临时生成的HMAC密钥")
         return secrets.token_bytes(32)
 
@@ -509,10 +466,8 @@ class KeyManager:
             True
         """
 
-        # 生成新的加密密钥
         key_data = self._create_new_crypto_key()
 
-        # 按照安全层次结构保存新密钥
         self._save_new_key_secure(key_data)
 
         return key_data
@@ -530,7 +485,6 @@ class KeyManager:
             >>> key_manager._save_new_key_secure(key_data)
         """
 
-        # 1. 优先尝试保存到操作系统密钥环
         if keyring_available and keyring_module is not None:
             service_name = self.app_name
             username = "master_key"
@@ -539,23 +493,17 @@ class KeyManager:
             logger.info("轮换加密密钥已安全存储到操作系统密钥环")
             return
 
-        # 2. 如果keyring不可用，检查是否应该使用环境变量
         if KeyManager._env_key_available:
-            # 环境变量方案需要用户手动设置，这里只记录建议
             logger.warning(
                 "建议将新密钥设置为环境变量: %s",
                 f"DB_CONNECTOR_TOOL_ENCRYPTION_KEY={json.dumps(key_data)}",
             )
-            # 继续使用文件存储作为后备
 
-        # 3. 最后回退到文件存储
         key_file = self.config_dir / "encryption.key"
 
-        # 先写入文件，然后设置安全权限
-        with open(key_file, "wb") as f:
-            f.write(tomli_w.dumps(key_data).encode("utf-8"))
+        with open(key_file, "wb") as file:
+            file.write(tomli_w.dumps(key_data).encode("utf-8"))
 
-        # 设置文件权限为仅所有者可读写
         self._set_secure_file_permissions(key_file)
 
         logger.warning(
@@ -595,25 +543,22 @@ class KeyManager:
             >>> KeyManager._check_dependencies()
         """
 
-        # 检查环境变量密钥
         cls._env_key = os.environ.get("DB_CONNECTOR_TOOL_ENCRYPTION_KEY")
         cls._env_key_available = False
 
         if cls._env_key:
             try:
-                # 验证环境变量格式
                 key_data = json.loads(cls._env_key)
                 if "password" in key_data and "salt" in key_data:
                     cls._env_key_available = True
                     logger.debug("环境变量中的加密密钥可用")
                 else:
                     logger.warning("环境变量中的加密密钥格式无效，缺少必要字段")
-            except (json.JSONDecodeError, TypeError) as e:
-                logger.warning("环境变量中的加密密钥格式无效: %s", str(e))
+            except (json.JSONDecodeError, TypeError) as error:
+                logger.warning("环境变量中的加密密钥格式无效: %s", str(error))
         else:
             logger.debug("环境变量中无加密密钥")
 
-        # 检查是否有可用的密钥存储
         if not keyring_available and not cls._env_key_available:
             logger.warning(
                 "警告: 未找到安全的密钥存储方案。\n"
@@ -621,5 +566,4 @@ class KeyManager:
                 "      2. 或设置环境变量 DB_CONNECTOR_TOOL_ENCRYPTION_KEY"
             )
 
-        # 标记依赖检查已完成
         cls._dependencies_checked = True

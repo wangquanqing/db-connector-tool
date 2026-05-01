@@ -20,7 +20,6 @@ from ..drivers.sqlalchemy_driver import SQLAlchemyDriver
 from ..utils.logging_utils import get_logger
 from .exceptions import DatabaseError
 
-# 获取模块级别的日志记录器
 logger = get_logger(__name__)
 
 
@@ -62,7 +61,6 @@ class ConnectionPoolManager:
             "start_time": time.time(),
             "last_cleanup_time": time.time(),
         }
-        # 用于跟踪连接的使用情况
         self._connection_metadata: Dict[str, Dict[str, Any]] = {}
         logger.info("连接池管理器初始化成功")
 
@@ -105,7 +103,6 @@ class ConnectionPoolManager:
             >>> success_count, error_count = pool_manager.close_all_connections()
         """
         with self._lock:
-            # 创建连接名称副本，避免迭代过程中字典修改
             connection_names = list(self.connection_pool.keys())
             total_connections = len(connection_names)
 
@@ -117,17 +114,14 @@ class ConnectionPoolManager:
 
             success_count, error_count = self._close_all_connections(connection_names)
 
-            # 最终检查连接池是否完全清空
             remaining_connections = len(self.connection_pool)
             if remaining_connections > 0:
                 logger.warning(
                     "连接池清理不完整，仍有 %s 个连接未清理", remaining_connections
                 )
-                # 强制清空连接池
                 self.connection_pool.clear()
                 logger.debug("已强制清空连接池")
 
-            # 记录详细汇总信息
             if error_count > 0:
                 logger.warning(
                     "关闭所有连接完成，成功: %s, 失败: %s, 总数: %s",
@@ -159,7 +153,6 @@ class ConnectionPoolManager:
 
         for name in connection_names:
             try:
-                # 使用内部清理方法
                 self.remove_connection(name)
                 success_count += 1
                 logger.debug("连接 %s 关闭成功", name)
@@ -187,7 +180,6 @@ class ConnectionPoolManager:
             driver = self.connection_pool[name]
 
             try:
-                # 安全关闭连接
                 if self._check_driver_basic_status(driver):
                     driver.disconnect()
                     logger.debug("连接 %s 已安全关闭", name)
@@ -196,7 +188,6 @@ class ConnectionPoolManager:
             except (OSError, DatabaseError, RuntimeError) as error:
                 logger.error("清理连接 %s 时发生严重异常: %s", name, str(error))
             finally:
-                # 确保从连接池中移除，避免内存泄漏
                 self._remove_connection_from_pool(name)
 
     def _is_connection_in_pool(self, name: str) -> bool:
@@ -232,12 +223,10 @@ class ConnectionPoolManager:
         Example:
             >>> is_valid = pool_manager._check_driver_basic_status(driver)
         """
-        # 检查驱动实例是否有效
         if driver is None:
             logger.debug("驱动实例为None")
             return False
 
-        # 对于SQLAlchemyDriver，检查engine属性
         if hasattr(driver, "engine") and not driver.engine:
             logger.debug("驱动实例标记为未连接状态")
             return False
@@ -257,7 +246,6 @@ class ConnectionPoolManager:
         """
         try:
             del self.connection_pool[name]
-            # 清理元数据
             if name in self._connection_metadata:
                 del self._connection_metadata[name]
             self._statistics["connections_closed"] += 1
@@ -286,16 +274,13 @@ class ConnectionPoolManager:
 
             driver = self.connection_pool[name]
 
-            # 检查连接是否有效
             if self._is_connection_valid(driver):
-                # 更新使用时间
                 if name in self._connection_metadata:
                     self._connection_metadata[name]["last_used"] = time.time()
                     self._connection_metadata[name]["use_count"] += 1
                 logger.debug("使用缓存的数据库连接: %s", name)
                 return driver
 
-            # 连接无效，清理并返回None
             self._remove_connection_from_pool(name)
             return None
 
@@ -314,12 +299,10 @@ class ConnectionPoolManager:
             >>> is_valid = pool_manager._is_connection_valid(driver)
         """
         try:
-            # 检查驱动实例的基本状态
             if not self._check_driver_basic_status(driver):
                 logger.debug("驱动实例基本状态检查失败")
                 return False
 
-            # 执行实际查询测试
             return driver.test_connection()
 
         except (OSError, DatabaseError) as error:
@@ -519,7 +502,6 @@ class ConnectionPoolManager:
             ):
                 idle_time = current_time - self._connection_metadata[name]["last_used"]
             else:
-                # 如果没有元数据或last_used字段，使用创建时间或当前时间作为默认值
                 if (
                     name in self._connection_metadata
                     and "created_at" in self._connection_metadata[name]
@@ -556,11 +538,9 @@ class ConnectionPoolManager:
         with self._lock:
             current_time = time.time()
 
-            # 计算连接池统计信息
             stats = self._calculate_pool_stats()
             connection_details = self._get_connection_details(current_time)
 
-            # 计算平均值
             pool_size = len(self.connection_pool)
             average_response_time = self._calculate_average_response_time(
                 stats["total_response_time"], pool_size

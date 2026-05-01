@@ -4,7 +4,6 @@ Example:
 >>> from db_connector_tool import GBase8sJDBCDialect
 >>> from sqlalchemy import create_engine
 >>>
->>> # 创建 GBase 8s 连接引擎
 >>> engine = create_engine(
 ...     "gbase8s+jdbc://username:password@host:port/database"
 ... )
@@ -37,9 +36,11 @@ from ..utils.path_utils import PathHelper
 class GBase8sCursor(jaydebeapi.Cursor):
     """GBase 8s JDBC 游标类 (GBase8s Cursor)
 
+    扩展 jaydebeapi 游标，支持 GBaseClob2 类型的自动转换。
+
     Example:
-        >>> # 内部使用，由 SQLAlchemy 自动创建
-        >>> # 无需手动实例化
+        >>> import jaydebeapi
+        >>> cursor = GBase8sCursor(connection, converters)
     """
 
     def __init__(self, connection: Any, converters: Any) -> None:
@@ -48,10 +49,6 @@ class GBase8sCursor(jaydebeapi.Cursor):
         Args:
             connection: JDBC 连接对象
             converters: 类型转换器字典
-
-        Example:
-            >>> # 内部使用，由 SQLAlchemy 自动创建
-            >>> # 无需手动实例化
         """
         super().__init__(connection, converters)
         jaydebeapi._unknownSqlTypeConverter = self._unknown_sql_type_converter
@@ -65,20 +62,15 @@ class GBase8sCursor(jaydebeapi.Cursor):
 
         Returns:
             转换后的值，如果是 GBaseClob2 类型则转换为字符串
-
-        Example:
-            >>> # 内部使用，由 SQLAlchemy 自动调用
-            >>> # 无需手动调用
         """
         value = result_set.getObject(column_index)
 
-        # 检查是否为 GBaseClob2 类型
         if str(type(value)) == "<java class 'com.gbasedbt.jdbc.GBaseClob2'>":
             string = ""
             reader = value.getCharacterStream()
             while True:
                 char = reader.read()
-                if char == -1:  # 到达流末尾
+                if char == -1:
                     break
                 string += chr(char)
             value = string
@@ -90,9 +82,11 @@ class GBase8sCursor(jaydebeapi.Cursor):
 class ObTimestamp(TypeDecorator):
     """GBase 8s 时间戳类型装饰器 (GBase8s Timestamp Decorator)
 
+    处理 GBase 8s 时间戳类型与 Python datetime 之间的双向转换。
+
     Example:
-        >>> # 内部使用，由 SQLAlchemy 自动应用
-        >>> # 无需手动使用
+        >>> from sqlalchemy import Column
+        >>> col = Column("created_at", ObTimestamp())
     """
 
     impl = TIMESTAMP
@@ -102,11 +96,7 @@ class ObTimestamp(TypeDecorator):
         """返回此类型对应的 Python 类型
 
         Returns:
-            type: Python 类型，即 datetime 类型
-
-        Example:
-            >>> # 内部使用，由 SQLAlchemy 自动调用
-            >>> # 无需手动调用
+            type: datetime 类型
         """
         return datetime
 
@@ -118,11 +108,7 @@ class ObTimestamp(TypeDecorator):
             dialect: SQLAlchemy 方言对象
 
         Returns:
-            转换后的时间戳值
-
-        Example:
-            >>> # 内部使用，由 SQLAlchemy 自动调用
-            >>> # 无需手动调用
+            转换后的 java.sql.Timestamp 对象
         """
         if isinstance(value, datetime):
             timestamp_class = jpype.JClass("java.sql.Timestamp")
@@ -138,17 +124,11 @@ class ObTimestamp(TypeDecorator):
 
         Returns:
             转换后的 SQL 字面量字符串
-
-        Example:
-            >>> # 内部使用，由 SQLAlchemy 自动调用
-            >>> # 无需手动调用
         """
         if value is None:
             return "NULL"
         if isinstance(value, datetime):
-            # 将 datetime 转换为 SQL 标准的时间戳格式
             return f"TIMESTAMP '{value.strftime('%Y-%m-%d %H:%M:%S.%f')}'"
-        # 对于其他类型，使用默认的字符串表示
         return str(value)
 
     def process_result_value(self, value: Any, dialect: Any) -> datetime | None:
@@ -160,23 +140,18 @@ class ObTimestamp(TypeDecorator):
 
         Returns:
             解析后的 datetime 对象，如果值为 None 则返回 None
-
-        Example:
-            >>> # 内部使用，由 SQLAlchemy 自动调用
-            >>> # 无需手动调用
         """
         if value is not None:
             return parser.parse(value)
         return None
 
 
-# 更新列规范，将 TIMESTAMP 类型替换为自定义的 ObTimestamp
 colspecs = util.update_copy(
     dict(OracleDialect.colspecs),
     {
         TIMESTAMP: ObTimestamp,
-        VARCHAR: VARCHAR,  # 确保VARCHAR类型正确映射
-        CHAR: CHAR,  # CHAR类型映射
+        VARCHAR: VARCHAR,
+        CHAR: CHAR,
     },
 )
 
@@ -184,11 +159,13 @@ colspecs = util.update_copy(
 class GBase8sJDBCDialect(OracleDialect, ABC):
     """GBase 8s JDBC 方言实现 (GBase8s JDBC Dialect)
 
+    基于 OracleDialect 扩展的 GBase 8s JDBC 方言，
+    通过 jaydebeapi 和 GBase JDBC 驱动连接数据库。
+
     Example:
         >>> from db_connector_tool import GBase8sJDBCDialect
         >>> from sqlalchemy import create_engine
         >>>
-        >>> # 创建 GBase 8s 连接引擎
         >>> engine = create_engine(
         ...     "gbase8s+jdbc://username:password@host:port/database"
         ... )
@@ -202,7 +179,6 @@ class GBase8sJDBCDialect(OracleDialect, ABC):
     driver = "com.gbasedbt.jdbc.Driver"
     colspecs = colspecs
 
-    # 数据库特性支持配置
     supports_native_decimal = True
     supports_sane_rowcount = False
     supports_sane_multi_rowcount = False
@@ -216,10 +192,6 @@ class GBase8sJDBCDialect(OracleDialect, ABC):
 
         Returns:
             导入的 jaydebeapi 模块
-
-        Example:
-            >>> # 内部使用，由 SQLAlchemy 自动调用
-            >>> # 无需手动调用
         """
         return __import__("jaydebeapi")
 
@@ -232,7 +204,6 @@ class GBase8sJDBCDialect(OracleDialect, ABC):
         Args:
             dbapi_connection: 数据库 API 连接对象
         """
-        # GBase 8s 不支持事务回滚，留空实现
 
     def create_connect_args(self, url: Any) -> Tuple[Tuple, dict]:
         """创建连接参数
@@ -242,17 +213,11 @@ class GBase8sJDBCDialect(OracleDialect, ABC):
 
         Returns:
             包含连接参数的元组和字典
-
-        Example:
-            >>> # 内部使用，由 SQLAlchemy 自动调用
-            >>> # 无需手动调用
         """
         url_obj = make_url(url)
 
-        # 构建 JDBC URL
         jdbc_url = self._build_jdbc_url(url_obj)
 
-        # 构建连接参数
         connect_args = self._build_connect_args(url_obj)
 
         kwargs = {
@@ -261,7 +226,6 @@ class GBase8sJDBCDialect(OracleDialect, ABC):
             "driver_args": connect_args,
         }
 
-        # 处理 JAR 路径
         self._handle_jar_path(kwargs)
 
         return (), kwargs
@@ -273,11 +237,7 @@ class GBase8sJDBCDialect(OracleDialect, ABC):
             url_obj: SQLAlchemy URL 对象
 
         Returns:
-            str: GBase 8s JDBC 连接 URL
-
-        Example:
-            >>> # 内部使用，由 create_connect_args 方法调用
-            >>> # 无需手动调用
+            GBase 8s JDBC 连接 URL
         """
         jdbc_url_parts = [f"jdbc:{self.name}://{url_obj.host}"]
         if url_obj.port:
@@ -293,11 +253,7 @@ class GBase8sJDBCDialect(OracleDialect, ABC):
             url_obj: SQLAlchemy URL 对象
 
         Returns:
-            dict: 连接参数字典
-
-        Example:
-            >>> # 内部使用，由 create_connect_args 方法调用
-            >>> # 无需手动调用
+            连接参数字典
         """
         connect_args = {}
         if url_obj.username:
@@ -317,31 +273,23 @@ class GBase8sJDBCDialect(OracleDialect, ABC):
     def _handle_jar_path(self, kwargs: dict) -> None:
         """处理 JDBC 驱动 JAR 文件路径
 
+        按优先级查找 GBase JDBC 驱动 JAR 文件：
+        1. 环境变量 GBASE8S_JDBC_JARPATH
+        2. 默认配置目录中的 *.gbase*.jar 文件
+
         Args:
             kwargs: 连接参数字典
-
-        Example:
-            >>> # 内部使用，由 create_connect_args 方法调用
-            >>> # 无需手动调用
         """
 
         jar_path = None
 
-        # 1. 优先使用环境变量
         if "GBASE8S_JDBC_JARPATH" in os.environ:
             jar_path = os.environ["GBASE8S_JDBC_JARPATH"]
-
-        # # 2. 其次使用URL参数（需修改sqlalchemy_driver.py的URL）
-        # elif url_obj.query and "jarpath" in url_obj.query:
-        #     jar_path = url_obj.query["jarpath"]
-
-        # 3. 尝试常见默认路径
         else:
             app_name = "db_connector_tool"
             config_dir = PathHelper.get_user_config_dir(app_name)
             config_path = os.path.join(config_dir, "jars")
             path = Path(config_path)
-            # 使用 glob 递归获取所有文件
             files = [p for p in path.rglob("*gbase*.jar") if p.is_file()]
             for file in files:
                 jar_path = str(file)
@@ -350,9 +298,7 @@ class GBase8sJDBCDialect(OracleDialect, ABC):
         if isinstance(jar_path, str) and os.path.exists(jar_path):
             kwargs["jars"] = jar_path
         else:
-            # 处理jar_path为None的情况，提供更友好的显示
             path_display = jar_path if jar_path is not None else "未找到"
-            # 获取正确的默认目录路径，使用os.path.join确保路径分隔符正确
             default_jar_dir = PathHelper.get_user_config_dir("db_connector_tool")
             default_jar_path = os.path.join(default_jar_dir, "jars")
             warnings.warn(
@@ -371,10 +317,6 @@ class GBase8sJDBCDialect(OracleDialect, ABC):
 
         Returns:
             bool: False，因为这是 GBase 8s 方言
-
-        Example:
-            >>> # 内部使用，由 SQLAlchemy 自动调用
-            >>> # 无需手动调用
         """
         return False
 
@@ -386,10 +328,6 @@ class GBase8sJDBCDialect(OracleDialect, ABC):
 
         Returns:
             最大标识符长度，如果无法确定则返回 None
-
-        Example:
-            >>> # 内部使用，由 SQLAlchemy 自动调用
-            >>> # 无需手动调用
         """
         return None
 
@@ -401,10 +339,6 @@ class GBase8sJDBCDialect(OracleDialect, ABC):
 
         Returns:
             大写的用户名作为默认 schema，如果用户名不存在则返回 None
-
-        Example:
-            >>> # 内部使用，由 SQLAlchemy 自动调用
-            >>> # 无需手动调用
         """
         username = connection.engine.url.username
         return username.upper() if username else None
@@ -417,28 +351,22 @@ class GBase8sJDBCDialect(OracleDialect, ABC):
 
         Returns:
             默认 schema 名称
-
-        Example:
-            >>> # 内部使用，由 SQLAlchemy 自动调用
-            >>> # 无需手动调用
         """
         return self.get_default_schema_name(connection)
 
     def _get_server_version_info(self, connection: Any) -> Tuple[int, ...] | None:
         """获取服务器版本信息
 
+        通过执行 dbinfo 查询获取 GBase 8s 服务器版本，
+        使用正则表达式解析版本字符串。
+
         Args:
             connection: 数据库连接对象
 
         Returns:
             版本号元组，如果获取失败则返回 None
-
-        Example:
-            >>> # 内部使用，由 SQLAlchemy 自动调用
-            >>> # 无需手动调用
         """
         try:
-            # 尝试多种版本查询方式
             version_queries = [
                 "select dbinfo('version_gbase','full') from dual",
                 "select dbinfo('version','full') from dual",
@@ -455,20 +383,18 @@ class GBase8sJDBCDialect(OracleDialect, ABC):
                     continue
 
             if isinstance(banner, str):
-                # 正则表达式匹配 GBase 8s 版本格式
                 version_pattern = (
-                    r"GBase8sV?([\d.]+)"  # 主版本号
-                    r"(?:_TL_([\d.]+))?"  # TL 版本（可选）
-                    r"(?:_(\d+X\d+))?"  # 特殊版本格式（可选）
-                    r"(?:_(\d+))?"  # 构建号（可选）
-                    r"(?:_([a-f0-9]+))?"  # 提交哈希（可选）
+                    r"GBase8sV?([\d.]+)"
+                    r"(?:_TL_([\d.]+))?"
+                    r"(?:_(\d+X\d+))?"
+                    r"(?:_(\d+))?"
+                    r"(?:_([a-f0-9]+))?"
                 )
                 match = re.search(version_pattern, banner)
 
                 if match:
                     version_str = match.group(1)
                     return tuple(int(part) for part in version_str.split("."))
-                # 尝试简单版本号提取
                 simple_match = re.search(r"(\d+)\.(\d+)", banner)
                 if simple_match:
                     return (int(simple_match.group(1)), int(simple_match.group(2)))
@@ -476,26 +402,20 @@ class GBase8sJDBCDialect(OracleDialect, ABC):
             return None
 
         except exc.DBAPIError:
-            # 版本查询失败，返回 None
             return None
         except (ValueError, re.error, AttributeError):
-            # 正则表达式解析错误或属性访问错误，返回 None
             return None
 
     def is_disconnect(self, e: Exception, connection: Any, cursor: Any) -> bool:
         """检查异常是否为连接断开错误
 
         Args:
-            e: 异常对象
+            error: 异常对象
             connection: 连接对象
             cursor: 游标对象
 
         Returns:
             bool: 如果是连接断开错误返回 True，否则返回 False
-
-        Example:
-            >>> # 内部使用，由 SQLAlchemy 自动调用
-            >>> # 无需手动调用
         """
         error_str = str(e).lower()
         disconnect_indicators = [
@@ -510,7 +430,6 @@ class GBase8sJDBCDialect(OracleDialect, ABC):
         return any(indicator in error_str for indicator in disconnect_indicators)
 
 
-# 注册方言到 SQLAlchemy
 registry.register(
     "jdbcgbase8s", "db_connector_tool.drivers.gbase8s_jdbc", "GBase8sJDBCDialect"
 )

@@ -7,7 +7,6 @@
 Example:
 >>> from db_connector_tool import SQLAlchemyDriver
 >>>
->>> # 创建数据库驱动实例
 >>> config = {
 ...     "type": "mysql",
 ...     "host": "localhost",
@@ -18,12 +17,10 @@ Example:
 ... }
 >>> driver = SQLAlchemyDriver(config)
 >>>
->>> # 使用上下文管理器执行查询
 >>> with driver:
 ...     results = driver.execute_query("SELECT * FROM users")
 ...     print(results)
 >>>
->>> # 手动管理连接
 >>> driver.connect()
 >>> try:
 ...     affected = driver.execute_command("UPDATE users SET status = 'active'")
@@ -106,7 +103,6 @@ def parse_kingbase_version(self, connection: Any) -> Tuple[int, ...]:
     return tuple(int(x) for x in version_match.group(1, 2, 3) if x is not None)
 
 
-# 为 PostgreSQL 方言设置自定义版本解析方法，用于支持 Kingbase 数据库
 # pylint: disable=protected-access
 PGDialect._get_server_version_info = parse_kingbase_version
 
@@ -119,7 +115,6 @@ class SQLAlchemyDriver:
     支持上下文管理器协议，可使用 `with` 语句自动管理连接。
 
     Example:
-        >>> # 创建默认配置的数据库驱动
         >>> config = {
         ...     "type": "mysql",
         ...     "host": "localhost",
@@ -130,12 +125,10 @@ class SQLAlchemyDriver:
         ... }
         >>> driver = SQLAlchemyDriver(config)
         >>>
-        >>> # 使用上下文管理器（推荐方式）
         >>> with driver:
         ...     results = driver.execute_query("SELECT * FROM users")
         ...     print(results)
         >>>
-        >>> # 手动管理连接（备选方式）
         >>> driver.connect()
         >>> try:
         ...     affected = driver.execute_command("UPDATE users SET status = 'active'")
@@ -143,14 +136,12 @@ class SQLAlchemyDriver:
         ... finally:
         ...     driver.disconnect()
         >>>
-        >>> # 测试连接
         >>> if driver.test_connection():
         ...     print("数据库连接正常")
         ... else:
         ...     print("数据库连接异常")
     """
 
-    # 数据库连接配置
     DB_CONFIGS = {
         "oracle": {
             "url_template": (
@@ -187,7 +178,7 @@ class SQLAlchemyDriver:
         },
         "gbase": {
             "url_template": (
-                "jdbcgbase8s://{host}:{port}/{database}:GBASEDBTSERVER={server}"  # server暂时未使用
+                "jdbcgbase8s://{host}:{port}/{database}:GBASEDBTSERVER={server}"
                 "?user={username}&password={password}"
             ),
             "required_params": [
@@ -202,7 +193,6 @@ class SQLAlchemyDriver:
         },
     }
 
-    # 测试查询语句
     TEST_QUERY_DEFAULT = "SELECT 1"
     ORACLE_TEST_QUERY = "SELECT 1 FROM DUAL"
 
@@ -224,7 +214,6 @@ class SQLAlchemyDriver:
             DriverError: 当配置无效或数据库类型不支持时
 
         Example:
-            >>> # 基本配置
             >>> config = {
             ...     "type": "mysql",
             ...     "host": "localhost",
@@ -235,7 +224,6 @@ class SQLAlchemyDriver:
             ... }
             >>> driver = SQLAlchemyDriver(config)
 
-            >>> # Oracle 数据库配置
             >>> oracle_config = {
             ...     "type": "oracle",
             ...     "host": "localhost",
@@ -258,9 +246,9 @@ class SQLAlchemyDriver:
         Returns:
             str: 格式为 "SQLAlchemyDriver('database_type', connected: True/False)" 的字符串
         """
-        db_type = self.config.get("type", "unknown")
+        database_type = self.config.get("type", "unknown")
         is_connected = self.engine is not None
-        return f"SQLAlchemyDriver('{db_type}', connected: {is_connected})"
+        return f"SQLAlchemyDriver('{database_type}', connected: {is_connected})"
 
     def __repr__(self) -> str:
         """返回 SQLAlchemyDriver 的详细表示，用于调试
@@ -268,13 +256,13 @@ class SQLAlchemyDriver:
         Returns:
             str: 包含完整配置信息的字符串，用于调试
         """
-        db_type = self.config.get("type", "unknown")
+        database_type = self.config.get("type", "unknown")
         host = self.config.get("host", "N/A")
         port = self.config.get("port", "N/A")
         database = self.config.get("database", "N/A")
         is_connected = self.engine is not None
         return (
-            f"SQLAlchemyDriver(type='{db_type}', "
+            f"SQLAlchemyDriver(type='{database_type}', "
             f"host='{host}', "
             f"port='{port}', "
             f"database='{database}', "
@@ -349,19 +337,14 @@ class SQLAlchemyDriver:
         database_type = self.config["type"].lower()
         database_config = self.DB_CONFIGS[database_type]
 
-        # 准备基础配置
         config_copy = self._prepare_base_config(database_config)
 
-        # 编码敏感参数
         self._encode_sensitive_params(config_copy)
 
-        # 构建基础URL
         url = database_config["url_template"].format(**config_copy)
 
-        # 构建查询参数
         query_params = self._build_query_params(config_copy, database_config)
 
-        # 添加查询参数到URL
         url = self._append_query_params(url, query_params)
 
         logger.debug("构建的数据库连接URL: %s", self._mask_sensitive_info(url))
@@ -402,10 +385,8 @@ class SQLAlchemyDriver:
         Returns:
             list: 查询参数列表
         """
-        # 收集自定义参数
         custom_params = self._collect_custom_params(config_copy)
 
-        # 添加默认参数（如果自定义参数中没有覆盖）
         if "defaults" in database_config:
             self._merge_default_params(custom_params, database_config["defaults"])
 
@@ -423,11 +404,9 @@ class SQLAlchemyDriver:
         query_params = {}
 
         for key, value in config_copy.items():
-            # 跳过不需要处理的参数
             if self._should_skip_param(key, value):
                 continue
 
-            # 对参数值进行URL编码
             encoded_value = quote_plus(str(value))
             query_params[key] = f"{key}={encoded_value}"
 
@@ -443,21 +422,17 @@ class SQLAlchemyDriver:
         Returns:
             bool: 是否跳过
         """
-        # 跳过基础参数
         if key in BASIC_PARAMS:
             return True
 
-        # 跳过连接池参数
         if key in POOL_PARAMS:
             logger.debug("跳过连接池参数 '%s'，将通过SQLAlchemy配置处理", key)
             return True
 
-        # 跳过pool_config参数
         if key == "pool_config":
             logger.debug("跳过pool_config参数，将通过SQLAlchemy配置处理")
             return True
 
-        # 跳过空值
         if value is None:
             return True
 
@@ -471,12 +446,10 @@ class SQLAlchemyDriver:
             defaults: 默认参数字典
         """
         for key, value in defaults.items():
-            # 如果自定义参数中已经存在相同key，则跳过默认参数（自定义参数优先级更高）
             if key in query_params:
                 logger.debug("自定义参数 '%s' 覆盖了默认参数", key)
                 continue
 
-            # 对参数值进行URL编码
             encoded_value = quote_plus(str(value))
             query_params[key] = f"{key}={encoded_value}"
 
@@ -493,7 +466,6 @@ class SQLAlchemyDriver:
         if not query_params:
             return url
 
-        # 根据URL是否已有查询参数选择连接符
         separator = "?" if "?" not in url else "&"
         url += separator + "&".join(query_params)
 
@@ -509,13 +481,9 @@ class SQLAlchemyDriver:
         Returns:
             str: 掩码后的连接URL，密码部分用***替换
         """
-        # 判断是否为标准Python URL格式（包含@符号）
         if "@" in url:
-            # 标准URL格式：protocol://user:password@host/db
             url = re.sub(r":([^:@]+)@", ":***@", url)
         else:
-            # JDBC URL格式：可能包含查询参数
-            # 匹配password参数值：?password=xxx 或 &password=xxx
             pwd_key = "pass" + "word"
             url = re.sub(r"(?<=[&?]" + pwd_key + r"=)[^&]*", "***", url)
 
@@ -531,9 +499,8 @@ class SQLAlchemyDriver:
             DBConnectionError: 当连接失败时抛出
 
         Example:
-            >>> driver.connect()  # 建立连接
-            >>> # 执行数据库操作
-            >>> driver.disconnect()  # 关闭连接
+            >>> driver.connect()
+            >>> driver.disconnect()
         """
         try:
             if self.engine:
@@ -541,52 +508,43 @@ class SQLAlchemyDriver:
 
             connection_url = self._build_connection_url()
 
-            # 基础连接池配置（基于生产环境最佳实践）
             database_type = self.config.get("type", "").lower()
 
-            # 为不同数据库类型设置不同的连接池配置
             if database_type == "sqlite":
-                # SQLite 特定配置（不支持max_overflow和pool_timeout）
                 pool_config = {
-                    "pool_size": 5,  # 连接池常驻连接数
-                    "pool_pre_ping": True,  # 连接前ping测试，自动检测失效连接
-                    "echo": False,  # 关闭SQL日志，生产环境建议关闭
+                    "pool_size": 5,
+                    "pool_pre_ping": True,
+                    "echo": False,
                 }
             else:
-                # 其他数据库类型的基础连接池配置
                 pool_config = {
-                    "pool_size": 5,  # 连接池常驻连接数，保持适度的并发能力
-                    "max_overflow": 10,  # 最大溢出连接数，应对突发流量
-                    "pool_timeout": 30,  # 获取连接超时时间（秒），避免长时间阻塞
-                    "pool_pre_ping": True,  # 连接前ping测试，自动检测失效连接
-                    "pool_recycle": 3600,  # 连接回收时间（秒），防止长时间闲置连接失效
-                    "echo": False,  # 关闭SQL日志，生产环境建议关闭
+                    "pool_size": 5,
+                    "max_overflow": 10,
+                    "pool_timeout": 30,
+                    "pool_pre_ping": True,
+                    "pool_recycle": 3600,
+                    "echo": False,
                 }
 
-                # 根据数据库类型调整连接池配置
                 if database_type == "mysql":
-                    # MySQL 特定配置
                     pool_config.update(
                         {
-                            "pool_recycle": 280,  # MySQL默认wait_timeout为28800秒，设置较小值避免连接失效
+                            "pool_recycle": 280,
                         }
                     )
                 elif database_type in ("postgresql", "sqlserver"):
-                    # PostgreSQL 和 SQL Server 特定配置
                     pool_config.update(
                         {
-                            "pool_recycle": 3600,  # 连接回收时间
+                            "pool_recycle": 3600,
                         }
                     )
                 elif database_type == "oracle":
-                    # Oracle 特定配置
                     pool_config.update(
                         {
-                            "pool_recycle": 1800,  # Oracle建议的连接回收时间
+                            "pool_recycle": 1800,
                         }
                     )
 
-            # 允许用户通过配置覆盖连接池参数
             if "pool_config" in self.config:
                 user_pool_config = self.config["pool_config"]
                 pool_config.update(user_pool_config)
@@ -598,12 +556,10 @@ class SQLAlchemyDriver:
 
             logger.info("数据库连接已建立: %s", self.config.get("type", "unknown"))
 
-        except SQLAlchemyError as e:
-            # SQLAlchemy 相关的数据库错误
-            raise DBConnectionError(f"数据库连接失败: {str(e)}") from e
-        except Exception as e:
-            # 其他未知错误
-            raise DBConnectionError(f"数据库连接失败: {str(e)}") from e
+        except SQLAlchemyError as error:
+            raise DBConnectionError(f"数据库连接失败: {str(error)}") from error
+        except Exception as error:
+            raise DBConnectionError(f"数据库连接失败: {str(error)}") from error
 
     def disconnect(self) -> None:
         """断开数据库连接
@@ -613,8 +569,7 @@ class SQLAlchemyDriver:
 
         Example:
             >>> driver.connect()
-            >>> # 执行数据库操作
-            >>> driver.disconnect()  # 安全关闭连接
+            >>> driver.disconnect()
         """
         try:
             if self.session:
@@ -628,13 +583,10 @@ class SQLAlchemyDriver:
             self.session_factory = None
             logger.info("数据库连接已关闭")
 
-        except SQLAlchemyError as e:
-            # SQLAlchemy 相关的数据库错误，可以安全地记录并忽略
-            logger.warning("关闭数据库连接时发生数据库错误: %s", str(e))
-        except Exception as e:
-            # 捕获其他非数据库相关的异常，记录错误日志
-            logger.error("关闭数据库连接时发生意外错误: %s", str(e))
-            # 重新抛出非数据库相关的严重异常
+        except SQLAlchemyError as error:
+            logger.warning("关闭数据库连接时发生数据库错误: %s", str(error))
+        except Exception as error:
+            logger.error("关闭数据库连接时发生意外错误: %s", str(error))
             raise
 
     def test_connection(self) -> bool:
@@ -657,19 +609,15 @@ class SQLAlchemyDriver:
                 self.connect()
             return self._perform_connection_test()
         except (SQLAlchemyError, DBConnectionError) as error:
-            # 数据库连接相关的错误
             logger.warning("连接测试失败: 数据库错误 - %s", str(error))
             return False
         except OSError as error:
-            # 网络、I/O或超时相关的错误
             logger.warning("连接测试失败: 网络/I/O错误 - %s", str(error))
             return False
         except (ValueError, TypeError, AttributeError) as error:
-            # 配置或参数相关的错误
             logger.warning("连接测试失败: 配置错误 - %s", str(error))
             return False
         except Exception as error:  # pylint: disable=broad-exception-caught
-            # 其他未知错误，记录详细日志
             logger.error("连接测试失败: 意外错误 - %s", str(error))
             return False
 
@@ -717,12 +665,10 @@ class SQLAlchemyDriver:
             QueryError: 当查询执行失败时
 
         Example:
-            >>> # 基本查询
             >>> results = driver.execute_query("SELECT * FROM users")
             >>> for row in results:
             ...     print(row["name"], row["age"])
 
-            >>> # 参数化查询（推荐）
             >>> results = driver.execute_query(
             ...     "SELECT * FROM users WHERE age > :age",
             ...     {"age": 18}
@@ -751,14 +697,12 @@ class SQLAlchemyDriver:
             QueryError: 当命令执行失败时
 
         Example:
-            >>> # 更新操作（使用参数化查询）
             >>> affected = driver.execute_command(
             ...     "UPDATE users SET status = 'active' WHERE id = :id",
             ...     {"id": 1}
             ... )
             >>> print(f"更新了 {affected} 行")
 
-            >>> # 插入操作（使用参数化查询）
             >>> affected = driver.execute_command(
             ...     "INSERT INTO users (name, email) VALUES (:name, :email)",
             ...     {"name": "John", "email": "john@example.com"}
@@ -804,7 +748,6 @@ class SQLAlchemyDriver:
                 if commit:
                     connection.commit()
                     return sql_result.rowcount
-                # 查询操作：在连接关闭前获取所有结果
                 results = sql_result.mappings().all()
                 return results
 
@@ -827,12 +770,10 @@ class SQLAlchemyDriver:
         Raises:
             ValueError: 当查询语句包含潜在的注入攻击代码时
         """
-        # 检查查询长度
         if len(query) > 10000:
             logger.warning("查询语句长度超过限制: %d > 10000", len(query))
             raise ValueError("查询语句长度超过限制")
 
-        # 检查危险的SQL关键字组合，白名单：常见的合法DDL操作
         safe_ddl_patterns = [
             r"(?i)\bCREATE\b\s+\bTABLE\b",
             r"(?i)\bALTER\b\s+\bTABLE\b",
@@ -841,13 +782,10 @@ class SQLAlchemyDriver:
             r"(?i)\bCREATE\b\s+\bPROCEDURE\b",
             r"(?i)\bCREATE\b\s+\bFUNCTION\b",
             r"(?i)\bCREATE\b\s+\bTRIGGER\b",
-            # DROP操作已从白名单移除，由黑名单统一管理
         ]
 
-        # 检查是否为合法的DDL操作
         is_safe_ddl = any(re.search(pattern, query) for pattern in safe_ddl_patterns)
 
-        # 这些操作在正常的业务逻辑中是合法的
         safe_dml_patterns = [
             r"(?i)^\s*SELECT\s+.*\s+FROM\s+",
             r"(?i)^\s*INSERT\s+INTO\s+",
@@ -856,30 +794,24 @@ class SQLAlchemyDriver:
         ]
         is_safe_dml = any(re.search(pattern, query) for pattern in safe_dml_patterns)
 
-        # 危险模式检测
         dangerous_patterns = [
-            # 批量操作和权限变更（始终危险）
             (
                 r"(?i)\b(DROP|TRUNCATE)\s+(TABLE|DATABASE|SCHEMA)\b",
                 "危险的DROP/TRUNCATE操作",
             ),
             (r"(?i)\b(GRANT|REVOKE)\s+.*\s+(ON|TO|FROM)\b", "权限变更操作"),
-            # 存储过程和系统命令执行
             (r'(?i)\bEXEC\s*\(\s*[\'"\@]', "动态SQL执行"),
             (r'(?i)\bEXECUTE\s+\w+\s+.*[\'"].*[\'"].*[\'"]', "存储过程执行"),
             (r"(?i)\bxp_cmdshell\b", "系统命令执行"),
             (r"(?i)\bsp_oamethod\b|\bsp_oacreate\b", "OLE自动化存储过程"),
-            # 文件操作
             (r"(?i)\bBULK\s+INSERT\b", "批量文件导入"),
             (r"(?i)\bINTO\s+(OUTFILE|DUMPFILE)\b", "文件写入操作"),
             (r"(?i)\bLOAD_FILE\s*\(", "文件读取操作"),
-            # 经典的SQL注入模式
             (r'(?i)[\'"]\s*OR\s*[\'"]?\d+[\'"]?\s*=\s*[\'"]?\d+', "布尔盲注尝试"),
             (r"(?i)UNION\s+ALL\s+SELECT", "UNION注入"),
             (r'(?i)WAITFOR\s+DELAY\s+[\'"]\d+', "时间盲注"),
             (r"(?i);\s*SHUTDOWN\s*;?", "数据库关闭命令"),
             (r"(?i);\s*--", "语句截断尝试"),
-            # 增强的注入检测
             (r"(?i)\bOR\s+1\s*=\s*1", "OR 1=1 注入"),
             (r"(?i)\bAND\s+1\s*=\s*1", "AND 1=1 注入"),
             (r"(?i)\bUNION\s+SELECT\s+", "UNION SELECT 注入"),
@@ -894,11 +826,10 @@ class SQLAlchemyDriver:
                 )
                 raise ValueError(f"查询语句包含潜在的安全风险: {description}")
 
-        # 注释检测 - 仅在非DDL/DML操作或可疑上下文中触发
         suspicious_comment_patterns = [
-            r'(?i)[\'"]\s*--\s*$',  # 字符串结尾的注释（可能截断）
-            r"(?i)/\*!\d+\s+",  # MySQL条件注释（常用于绕过）
-            r"(?i);\s*/\*.*?\*/\s*\w+",  # 分号后注释再跟命令
+            r'(?i)[\'"]\s*--\s*$',
+            r"(?i)/\*!\d+\s+",
+            r"(?i);\s*/\*.*?\*/\s*\w+",
         ]
 
         for pattern in suspicious_comment_patterns:
@@ -906,7 +837,6 @@ class SQLAlchemyDriver:
                 logger.warning("检测到可疑的SQL注释模式 - %s...", query[:100])
                 raise ValueError("查询语句包含可疑的注释模式")
 
-        # 记录合法的DDL/DML操作
         if is_safe_ddl:
             logger.debug("允许合法的DDL操作: %s...", query[:100])
         elif is_safe_dml:
@@ -938,10 +868,10 @@ class SQLAlchemyDriver:
             inspector = inspect(self.engine)
             return inspector.get_table_names()
 
-        except SQLAlchemyError as e:
-            raise QueryError(f"获取表列表失败: 数据库错误 - {str(e)}") from e
-        except Exception as e:
-            raise QueryError(f"获取表列表失败: {str(e)}") from e
+        except SQLAlchemyError as error:
+            raise QueryError(f"获取表列表失败: 数据库错误 - {str(error)}") from error
+        except Exception as error:
+            raise QueryError(f"获取表列表失败: {str(error)}") from error
 
     def get_table_schema(self, table_name: str) -> List[Dict[str, Any]]:
         """获取指定表的列信息
@@ -983,7 +913,7 @@ class SQLAlchemyDriver:
                 for col in columns
             ]
 
-        except SQLAlchemyError as e:
-            raise QueryError(f"获取表结构失败: 数据库错误 - {str(e)}") from e
-        except Exception as e:
-            raise QueryError(f"获取表结构失败: {str(e)}") from e
+        except SQLAlchemyError as error:
+            raise QueryError(f"获取表结构失败: 数据库错误 - {str(error)}") from error
+        except Exception as error:
+            raise QueryError(f"获取表结构失败: {str(error)}") from error

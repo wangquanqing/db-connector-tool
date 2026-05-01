@@ -2,7 +2,7 @@ import argparse
 import unittest
 from unittest import mock
 
-from src.db_connector_tool.utils.argparse_utils import (
+from db_connector_tool.argparse_utils import (
     ChineseHelpFormatter,
     create_argument_parser,
     _setup_connection_arguments,

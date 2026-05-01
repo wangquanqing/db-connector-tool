@@ -32,7 +32,6 @@ from .config import ConfigManager
 from .connection_pool import ConnectionPoolManager
 from .exceptions import ConfigError, DatabaseError, DBConnectionError
 
-# 获取模块级别的日志记录器
 logger = get_logger(__name__)
 
 
@@ -116,7 +115,6 @@ class DatabaseManager:
             connection_count = len(self.list_connections())
             return f"DatabaseManager('{self.app_name}', {connection_count} connections)"
         except (DatabaseError, ConfigError):
-            # 如果获取连接数量失败，返回基本表示
             return f"DatabaseManager('{self.app_name}', '{self.config_file}')"
 
     def __repr__(self) -> str:
@@ -217,12 +215,10 @@ class DatabaseManager:
         """
 
         def _add_connection():
-            # 检查连接是否已存在
             existing_connections = self.list_connections()
             if name in existing_connections:
                 raise ConfigError(f"连接配置已存在: {name}")
 
-            # 保存到配置管理器
             self.config_manager.add_config(name, connection_config)
             logger.info("数据库连接配置已创建: %s", name)
 
@@ -288,13 +284,10 @@ class DatabaseManager:
         """
 
         def _remove_connection():
-            # 检查连接是否存在
             self._validate_connection_exists(name)
 
-            # 先关闭连接
             self.pool_manager.remove_connection(name)
 
-            # 删除配置
             self.config_manager.remove_config(name)
             logger.info("连接配置已删除: %s", name)
 
@@ -341,13 +334,10 @@ class DatabaseManager:
         """
 
         def _update_connection():
-            # 检查连接是否存在
             self._validate_connection_exists(name)
 
-            # 关闭现有连接
             self.pool_manager.remove_connection(name)
 
-            # 更新配置
             self.config_manager.update_config(name, connection_config)
             logger.info("连接配置已更新: %s", name)
 
@@ -404,18 +394,14 @@ class DatabaseManager:
 
         with self._lock:
             try:
-                # 检查连接配置是否存在
                 self._validate_connection_exists(name)
 
-                # 处理配置覆盖情况
                 if config_overrides:
                     return self._get_connection_with_overrides(name, config_overrides)
 
-                # 处理连接池管理逻辑
                 return self._get_connection_from_pool(name)
 
             except (OSError, DBConnectionError) as error:
-                # 使用pool_manager记录错误
                 self.pool_manager.record_connection_error(name, error)
                 logger.error("获取数据库连接失败 %s: %s", name, str(error))
                 raise DBConnectionError(f"数据库连接获取失败: {str(error)}") from error
@@ -436,14 +422,11 @@ class DatabaseManager:
             DBConnectionError: 当连接建立失败时
         """
 
-        # 清理可能存在的缓存连接
         self.pool_manager.remove_connection(name)
 
-        # 获取基础配置并应用覆盖
         base_config = self.show_connection(name)
         connection_config = {**base_config, **config_overrides}
 
-        # 根据数据库类型选择合适的驱动
         driver = SQLAlchemyDriver(connection_config)
 
         try:
@@ -454,20 +437,18 @@ class DatabaseManager:
                 f"连接建立失败: {str(connect_error)}"
             ) from connect_error
 
-        # 临时配置的连接也加入连接池，但使用特殊标记
         temp_connection_name = f"{name}_temp_{hash(str(config_overrides))}"
         self.pool_manager.add_connection(temp_connection_name, driver)
         logger.info(
             "使用临时配置建立数据库连接: %s (临时连接: %s)", name, temp_connection_name
         )
 
-        # 注册临时连接清理函数，在连接不再使用时清理
         def cleanup_temp_connection():
             try:
                 self.pool_manager.remove_connection(temp_connection_name)
                 logger.debug("临时连接已清理: %s", temp_connection_name)
-            except (DatabaseError, OSError) as e:
-                logger.debug("清理临时连接失败: %s", str(e))
+            except (DatabaseError, OSError) as error:
+                logger.debug("清理临时连接失败: %s", str(error))
 
         atexit.register(cleanup_temp_connection)
         return driver
@@ -485,13 +466,11 @@ class DatabaseManager:
             DBConnectionError: 当连接建立失败时
         """
 
-        # 尝试从连接池获取连接
         driver = self.pool_manager.get_connection(name)
         if driver:
             logger.debug("使用缓存的数据库连接: %s", name)
             return driver
 
-        # 创建新连接
         return self._create_new_connection(name)
 
     def _create_new_connection(self, name: str) -> SQLAlchemyDriver:
@@ -507,10 +486,8 @@ class DatabaseManager:
             DBConnectionError: 当连接建立失败时
         """
 
-        # 创建新连接，处理网络超时和服务不可用
         connection_config = self.show_connection(name)
 
-        # 根据数据库类型选择合适的驱动
         driver = SQLAlchemyDriver(connection_config)
 
         try:
@@ -518,10 +495,8 @@ class DatabaseManager:
         except (OSError, DBConnectionError) as connect_error:
             self.pool_manager.record_connection_error(name, connect_error)
             logger.error("建立数据库连接失败 %s: %s", name, str(connect_error))
-            # 分析错误类型，提供更详细的错误信息
             self._handle_connection_error(connect_error)
 
-        # 加入连接池
         self.pool_manager.add_connection(name, driver)
 
         logger.info("数据库连接已建立: %s", name)
@@ -592,7 +567,6 @@ class DatabaseManager:
         except (OSError, DBConnectionError) as connect_error:
             self.pool_manager.record_connection_error(name, connect_error)
             logger.error("连接测试失败 %s: %s", name, str(connect_error))
-            # 测试失败时清理连接，避免连接池中有无效连接
             self.pool_manager.remove_connection(name)
             return False
 
@@ -625,14 +599,10 @@ class DatabaseManager:
 
         def _execute_query():
             driver = self.get_connection(connection_name)
-            # 记录查询开始时间
             start_time = time.time()
-            # 执行查询
             result = driver.execute_query(query, params)
-            # 计算响应时间
             response_time = time.time() - start_time
 
-            # 更新连接元数据
             self.pool_manager.update_query_metadata(connection_name, response_time)
 
             return result, response_time
@@ -640,7 +610,6 @@ class DatabaseManager:
         try:
             return _execute_query()
         except (OSError, DatabaseError) as error:
-            # 记录错误信息
             self.pool_manager.record_connection_error(connection_name, error)
             error_message = f"查询执行失败 {connection_name}: {str(error)}"
             logger.error(error_message)
@@ -681,14 +650,10 @@ class DatabaseManager:
 
         def _execute_command():
             driver = self.get_connection(connection_name)
-            # 记录命令开始时间
             start_time = time.time()
-            # 执行命令
             result = driver.execute_command(command, params)
-            # 计算响应时间
             response_time = time.time() - start_time
 
-            # 更新连接元数据
             self.pool_manager.update_command_metadata(connection_name, response_time)
 
             return result, response_time
@@ -696,7 +661,6 @@ class DatabaseManager:
         try:
             return _execute_command()
         except (OSError, DatabaseError) as error:
-            # 记录错误信息
             self.pool_manager.record_connection_error(connection_name, error)
             error_message = f"命令执行失败 {connection_name}: {str(error)}"
             logger.error(error_message)
@@ -725,10 +689,8 @@ class DatabaseManager:
         """
 
         def _get_connection_info():
-            # 检查连接是否存在
             self._validate_connection_exists(name)
 
-            # 获取基本配置信息
             config = self.show_connection(name)
             info: Dict[str, Any] = {
                 "type": config.get("type"),
@@ -737,7 +699,6 @@ class DatabaseManager:
                 "database": config.get("database"),
             }
 
-            # 添加连接池统计信息
             pool_info = self.pool_manager.get_connection_info(name)
             info.update(pool_info)
 
@@ -800,10 +761,7 @@ class DatabaseManager:
         }
 
         try:
-            # 1. 检查连接配置
             self._diagnose_config(name, diagnosis)
-
-            # 2. 尝试获取连接
             self._diagnose_connection(name, diagnosis)
 
         except ConfigError as error:
@@ -811,7 +769,6 @@ class DatabaseManager:
         except (OSError, DBConnectionError) as error:
             self._diagnose_general_error(name, diagnosis, error)
 
-        # 5. 添加连接池信息
         self._add_pool_info(name, diagnosis)
 
         return diagnosis
@@ -848,10 +805,8 @@ class DatabaseManager:
                 "driver_type": type(driver).__name__,
             }
 
-            # 3. 测试连接
             self._diagnose_connection_test(driver, diagnosis)
 
-            # 4. 清理连接
             self.pool_manager.remove_connection(name)
         except (OSError, DBConnectionError) as connect_error:
             diagnosis["status"] = "unhealthy"

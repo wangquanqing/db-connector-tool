@@ -28,7 +28,6 @@ from .exceptions import ConfigError
 from .key_manager import KeyManager
 from .validators import ConfigValidator
 
-# 获取模块级别的日志记录器
 logger = get_logger(__name__)
 
 
@@ -109,7 +108,6 @@ class ConfigManager:
             connection_count = config_info["connection_count"]
             return f"ConfigManager('{self.app_name}', {connection_count} connections)"
         except (ConfigError, KeyError, TypeError, OSError):
-            # 如果获取配置信息失败，返回基本表示
             return f"ConfigManager('{self.app_name}', '{self.config_file}')"
 
     def __repr__(self) -> str:
@@ -131,7 +129,6 @@ class ConfigManager:
                 f"connections={connection_count})"
             )
         except (ConfigError, KeyError, TypeError, OSError):
-            # 如果获取配置信息失败，返回基本表示
             return (
                 f"ConfigManager(app_name='{self.app_name}', "
                 f"config_file='{self.config_file}', "
@@ -217,9 +214,7 @@ class ConfigManager:
     def _clear_sensitive_data(self) -> None:
         """清理内存中的敏感数据（内部方法）"""
 
-        # 清理密钥管理器中的敏感数据
         self.key_manager.close()
-        # 清理配置缓存
         self._config_cache = None
         self._config_mtime = None
         logger.debug("配置管理器敏感数据和缓存已清理")
@@ -256,7 +251,6 @@ class ConfigManager:
             },
         }
         self._save_config(default_config)
-        # 设置安全的文件权限
         self._set_secure_file_permissions(self.config_path)
         logger.info("默认配置文件已创建: %s", self.config_path)
 
@@ -276,7 +270,7 @@ class ConfigManager:
             OSError: 文件系统操作失败
         """
 
-        # 验证操作类型
+        # 更新最后修改时间
         valid_operations = [
             self.OPERATION_ADD,
             self.OPERATION_REMOVE,
@@ -287,7 +281,6 @@ class ConfigManager:
         if operation not in valid_operations:
             raise ValueError(f"无效操作类型: {operation}")
 
-        # 更新最后修改时间
         current_time = datetime.now().astimezone().isoformat()
         config["metadata"]["last_modified"] = current_time
 
@@ -301,13 +294,11 @@ class ConfigManager:
         # 添加审计日志
         self.security_manager.add_audit_log_entry(config, operation, current_time)
 
-        # 验证配置结构
         ConfigValidator.validate_config(config)
 
-        with open(self.config_path, "wb") as f:
-            f.write(tomli_w.dumps(config).encode("utf-8"))
+        with open(self.config_path, "wb") as file:
+            file.write(tomli_w.dumps(config).encode("utf-8"))
 
-        # 清除缓存，确保下次加载时重新读取文件
         self._config_cache = None
         self._config_mtime = None
         logger.debug("配置文件已保存: %s", self.config_path)
@@ -351,18 +342,14 @@ class ConfigManager:
 
         config = self._load_config()
 
-        # 检查连接是否已存在
         if name in config["connections"]:
             raise ConfigError(f"连接配置已存在: {name}")
 
-        # 确保加密管理器已初始化
         if self.key_manager.crypto is None:
             self.key_manager.load_or_create_key()
-        # 使用统一的加密方法
         encrypted_config = self.security_manager.encrypt_dict_values(connection_config)
         config["connections"][name] = encrypted_config
 
-        # 更新配置文件版本号（每次调用增加修订号）
         self._increment_config_version(config)
 
         self._save_config(config, self.OPERATION_ADD)
@@ -381,25 +368,19 @@ class ConfigManager:
             ValueError: 配置数据无效
         """
 
-        # 检查配置文件最后修改时间
         current_mtime = self.config_path.stat().st_mtime
 
-        # 如果文件未修改且缓存存在，直接返回缓存
         if self._config_cache is not None and self._config_mtime == current_mtime:
             logger.debug("使用缓存的配置")
             return self._config_cache
 
-        # 读取TOML文件
-        with open(self.config_path, "rb") as f:
-            config = tomllib.load(f)
+        with open(self.config_path, "rb") as file:
+            config = tomllib.load(file)
 
-        # 验证配置文件结构
         ConfigValidator.validate_config(config)
 
-        # 验证数字签名
         self.security_manager.verify_config_signature(config)
 
-        # 更新缓存和修改时间
         self._config_cache = config
         self._config_mtime = current_mtime
         logger.debug("配置已加载并缓存")
@@ -420,24 +401,20 @@ class ConfigManager:
         try:
             current_version = config["version"]
 
-            # 确保当前版本号格式有效
             if not ConfigValidator.is_valid_version_format(current_version):
-                # 如果当前版本号格式无效，重置为初始版本
                 logger.warning(
                     "无效的版本号格式，重置为初始版本: %s -> 1.0.0", current_version
                 )
                 config["version"] = "1.0.0"
                 return
 
-            # 解析版本号各部分
             major_num, minor_num, patch_num = self._parse_version_parts(current_version)
 
-            # 递增版本号并处理进位逻辑
             major_num, minor_num, patch_num = self._increment_version_parts(
                 major_num, minor_num, patch_num
             )
 
-            # 移除主版本号限制，允许主版本号自由递增。检查主版本号是否合理（不再限制主版本号）
+            # 移除主版本号限制，允许主版本号自由递增。
             if major_num < 0:
                 raise ConfigError(
                     "版本号递增导致主版本号为负数",
@@ -449,7 +426,6 @@ class ConfigManager:
 
             new_version = f"{major_num}.{minor_num}.{patch_num}"
 
-            # 验证新版本号格式
             if not ConfigValidator.is_valid_version_format(new_version):
                 raise ConfigError(
                     "版本号格式无效",
@@ -462,9 +438,8 @@ class ConfigManager:
             config["version"] = new_version
             logger.debug("配置文件版本号已更新: %s -> %s", current_version, new_version)
 
-        except (ValueError, AttributeError, RuntimeError) as e:
-            logger.warning("版本号递增失败，保持原版本号: %s", str(e))
-            # 如果版本号递增失败，不影响主要功能，继续使用原版本号
+        except (ValueError, AttributeError, RuntimeError) as error:
+            logger.warning("版本号递增失败，保持原版本号: %s", str(error))
 
     def _parse_version_parts(self, version: str) -> Tuple[int, int, int]:
         """解析版本号各部分
@@ -510,7 +485,6 @@ class ConfigManager:
 
         patch += 1
 
-        # 处理进位逻辑
         if patch >= 10:
             patch = 0
             minor += 1
@@ -551,7 +525,6 @@ class ConfigManager:
         self._ensure_connection_exists(config, name)
 
         del config["connections"][name]
-        # 更新配置文件版本号（每次调用增加修订号）
         self._increment_config_version(config)
 
         self._save_config(config, self.OPERATION_REMOVE)
@@ -586,18 +559,14 @@ class ConfigManager:
         ConfigValidator.validate_connection_name(name)
         ConfigValidator.validate_connection_config(connection_config)
 
-        # 加载配置并直接更新
         config = self._load_config()
         self._ensure_connection_exists(config, name)
 
-        # 确保加密管理器已初始化
         if self.key_manager.crypto is None:
             self.key_manager.load_or_create_key()
-        # 使用统一的加密方法
         encrypted_config = self.security_manager.encrypt_dict_values(connection_config)
         config["connections"][name] = encrypted_config
 
-        # 更新配置文件版本号（每次调用增加修订号）
         self._increment_config_version(config)
 
         self._save_config(config, self.OPERATION_UPDATE)
@@ -632,11 +601,9 @@ class ConfigManager:
 
         connection_config = config["connections"][name].copy()
 
-        # 确保加密管理器已初始化
         if self.key_manager.crypto is None:
             self.key_manager.load_or_create_key()
 
-        # 使用统一的解密方法
         decrypted_config = self.security_manager.decrypt_dict_values(connection_config)
         logger.debug("连接配置已获取: %s", name)
         return decrypted_config
@@ -685,7 +652,6 @@ class ConfigManager:
             backup_path = self.config_dir / f"{self.config_file}.backup.{timestamp}"
 
         shutil.copy2(self.config_path, backup_path)
-        # 设置备份文件的安全权限
         self._set_secure_file_permissions(backup_path)
         logger.debug("配置文件已备份: %s", backup_path)
         return backup_path
@@ -711,7 +677,6 @@ class ConfigManager:
             ...     print(f"新密钥版本: {new_version}")
         """
 
-        # 执行密钥轮换的主要步骤
         new_key_version = self._perform_key_rotation()
         return new_key_version
 
@@ -725,20 +690,15 @@ class ConfigManager:
             ConfigError: 密钥轮换失败
         """
 
-        # 备份当前配置
         backup_path = self.backup_config()
         logger.debug("密钥轮换前已备份配置: %s", backup_path)
 
-        # 加载当前配置
         config = self._load_config()
 
-        # 执行密钥轮换
         new_key_version = self.security_manager.perform_key_rotation(config)
 
-        # 更新配置文件版本号（每次调用增加修订号）
         self._increment_config_version(config)
 
-        # 保存更新后的配置
         self._save_config(config, self.OPERATION_ROTATE_KEY)
 
         return new_key_version
@@ -781,9 +741,7 @@ class ConfigManager:
         Example:
             >>> config_manager.refresh_cache()
         """
-        # 清除缓存
         self._config_cache = None
         self._config_mtime = None
-        # 重新加载配置
         self._load_config()
         logger.debug("配置缓存已手动刷新")
