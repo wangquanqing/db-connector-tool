@@ -23,6 +23,7 @@ import sys
 from typing import Any, Dict, List, Optional, Union
 
 import sqlparse
+from sqlalchemy import RowMapping
 
 from .__about__ import __version__
 from .core.connections import DatabaseManager
@@ -673,7 +674,11 @@ class DBConnectorCLI:
                 )
             else:
                 cell_text = self._truncate_cell(
-                    str(row_data.get(header, "")) if isinstance(row_data, dict) else "",
+                    (
+                        str(row_data.get(header, ""))
+                        if isinstance(row_data, (dict, RowMapping))
+                        else ""
+                    ),
                     col_widths[header],
                 )
             actual = self._get_display_width(cell_text)
