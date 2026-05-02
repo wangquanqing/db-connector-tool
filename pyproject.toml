@@ -29,26 +29,26 @@ classifiers = [
 ]
 dependencies = [
   "sqlalchemy>=2.0.0",
-  "cryptography>=46.0.0",
+  "cryptography>=47.0.0",
   "tomli-w>=1.0.0",
+  "sqlparse>=0.5.0",
 ]
 
 [project.optional-dependencies]
-secure = ["keyring>=23.0.0"]
+secure = ["keyring>=25.0.0"]
 oracle = ["oracledb>=3.0.0"]
 postgresql = ["psycopg>=3.0.0"]
 mysql = ["pymysql>=1.0.0"]
 sqlserver = ["pymssql>=2.0.0"]
-gbase8s = ["jpype1==1.5.2", "jaydebeapi>=1.2.3,<2", "python-dateutil>=2.8.0,<3"]
+gbase8s = ["jaydebeapi>=1.0.0", "python-dateutil>=2.0.0"]
 all = [
-  "keyring>=23.0.0",
+  "keyring>=25.0.0",
   "oracledb>=3.0.0",
   "psycopg>=3.0.0",
   "pymysql>=1.0.0",
   "pymssql>=2.0.0",
-  "jpype1==1.5.2",
-  "jaydebeapi>=1.2.3,<2",
-  "python-dateutil>=2.8.0,<3",
+  "jaydebeapi>=1.0.0",
+  "python-dateutil>=2.0.0",
 ]
 dev = [
   "pylint>=4.0.0",
@@ -57,9 +57,10 @@ dev = [
 
 [project.urls]
 Homepage = "https://github.com/wangquanqing/db-connector-tool"
-Documentation = "https://github.com/wangquanqing/db-connector-tool#readme"
+Documentation = "https://github.com/wangquanqing/db-connector-tool#readme" 
+Source = "https://github.com/wangquanqing/db-connector-tool/tree/main/src"
+Repository = "https://github.com/wangquanqing/db-connector-tool.git"
 Issues = "https://github.com/wangquanqing/db-connector-tool/issues"
-Source = "https://github.com/wangquanqing/db-connector-tool"
 
 [project.scripts]
 db-connector = "db_connector_tool.cli:main"
@@ -72,10 +73,10 @@ path = "src/db_connector_tool/__about__.py"
 
 [tool.hatch.envs.types]
 extra-dependencies = [
-  "pyright>=1.1.0",
+  "pyright>=1.0.0",
 ]
 [tool.hatch.envs.types.scripts]
-check = "pyright {args:src/db_connector_tool tests}"
+check = "pyright {args:src/db_connector_tool}"
 
 [tool.coverage.run]
 source = ["src/db_connector_tool"]
@@ -89,17 +90,14 @@ omit = [
 
 [tool.coverage.report]
 exclude_lines = [
-  "no cover",
-  "if __name__ == .__main__.:",
+  "pragma: no cover", 
+  "if __name__ == \"__main__\":",
   "if TYPE_CHECKING:",
   "def __repr__",
   "def __str__",
   "raise NotImplementedError",
   "pass",
-  "logger.info",
-  "logger.debug",
-  "logger.warning",
-  "logger.error",
+  "^\\s*logger\\.(info|debug|warning|error)\\([^)]*\\)$",
 ]
 
 [tool.coverage.html]
@@ -107,20 +105,21 @@ directory = "htmlcov"
 
 [tool.pixi.workspace]
 channels = ["conda-forge"]
-platforms = ["win-64"]
+platforms = ["win-64", "linux-64", "osx-64"]
 
 [tool.pixi.tasks]
 
 [tool.pixi.dependencies]
 python = ">=3.14.3,<3.15"
 sqlalchemy = ">=2.0.47,<3"
+tomli-w = ">=1.2.0,<2"
+sqlparse = ">=0.5.5,<0.6"
+keyring = ">=25.7.0,<26"
 oracledb = ">=3.4.2,<4"
 psycopg = ">=3.3.3,<4"
 pymysql = ">=1.1.2,<2"
 pymssql = ">=2.3.13,<3"
-tomli-w = ">=1.2.0,<2"
+jaydebeapi = ">=1.2.3,<2"
+python-dateutil = ">=2.9.0.post0,<3"
 pylint = ">=4.0.5,<5"
 coverage = ">=7.13.5,<8"
-jaydebeapi = ">=1.2.3,<2"
-keyring = ">=25.7.0,<26"
-python-dateutil = ">=2.9.0.post0,<3"

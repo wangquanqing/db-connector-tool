@@ -2,7 +2,6 @@
 
 [![Python Version](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 
 一个安全、跨平台的Python数据库连接管理工具，支持多种主流数据库并提供加密存储功能。
 
@@ -13,7 +12,7 @@
 - **全字段加密**: 使用 `cryptography.fernet` 加密所有敏感连接信息
 - **密钥管理**: 支持操作系统密钥环和文件权限保护双重方案
 - **PBKDF2派生**: 使用480,000次迭代的PBKDF2密钥派生算法
-- **安全随机数**: 基于 `secrets`模块的密码学安全随机数生成
+- **安全随机数**: 基于 `secrets` 模块的密码学安全随机数生成
 
 ### 🏗️ 架构设计
 
@@ -64,26 +63,36 @@ pip install db-connector-tool
 from db_connector_tool import DatabaseManager
 
 # 创建数据库管理器
-db_manager = DatabaseManager()
+db = DatabaseManager()
 
 # 添加MySQL连接配置
-mysql_config = {
-    'type': 'mysql',
-    'host': 'localhost',
-    'port': 3306,
-    'username': 'your_username',
-    'password': 'your_password',
-    'database': 'your_database'
-}
+db.add_connection("mysql_db", {
+    "type": "mysql",
+    "host": "localhost",
+    "port": 3306,
+    "username": "your_username",
+    "password": "your_password",
+    "database": "your_database",
+})
 
-db_manager.add_connection('mysql_db', mysql_config)
-
-# 执行查询
-results = db_manager.execute_query('mysql_db', 'SELECT * FROM users LIMIT 10')
+# 执行查询（使用命名参数）
+results = db.execute_query(
+    "mysql_db",
+    "SELECT * FROM users WHERE age > :age",
+    {"age": 18},
+)
 print(results)
 
+# 执行增删改操作
+affected = db.execute_command(
+    "mysql_db",
+    "UPDATE users SET name = :name WHERE id = :id",
+    {"name": "Bob", "id": 1},
+)
+print(f"影响行数: {affected[0]}")
+
 # 关闭所有连接
-db_manager.close_all_connections()
+db.close_all_connections()
 ```
 
 ### 多数据库操作示例
@@ -91,31 +100,30 @@ db_manager.close_all_connections()
 ```python
 from db_connector_tool import DatabaseManager
 
-db_manager = DatabaseManager()
+db = DatabaseManager()
 
-# 配置多个数据库连接
-databases = {
-    'app_db': {
-        'type': 'postgresql',
-        'host': 'db.server.com',
-        'username': 'user',
-        'password': 'pass',
-        'database': 'application'
-    },
-    'log_db': {
-        'type': 'sqlite',
-        'database': '/path/to/logs.db'
-    }
-}
+db.add_connection("app_db", {
+    "type": "postgresql",
+    "host": "db.server.com",
+    "port": 5432,
+    "username": "user",
+    "password": "pass",
+    "database": "application",
+})
+db.add_connection("log_db", {
+    "type": "sqlite",
+    "database": "/path/to/logs.db",
+})
 
-for name, config in databases.items():
-    db_manager.add_connection(name, config)
+# 跨数据库操作（使用命名参数 :name 风格）
+users = db.execute_query("app_db", "SELECT * FROM users")
+db.execute_command(
+    "log_db",
+    "INSERT INTO access_log (user_id, action) VALUES (:user_id, :action)",
+    {"user_id": 123, "action": "login"},
+)
 
-# 跨数据库操作
-users = db_manager.execute_query('app_db', 'SELECT * FROM users')
-db_manager.execute_command('log_db', 'INSERT INTO access_log VALUES (?, ?)', {"user_id": "user_id", "action": "login"})
-
-db_manager.close_all_connections()
+db.close_all_connections()
 ```
 
 ### 批量连接管理示例
@@ -123,28 +131,32 @@ db_manager.close_all_connections()
 ```python
 from db_connector_tool import BatchDatabaseManager, generate_ip_range
 
-# 创建批量管理器
-batch_manager = BatchDatabaseManager("batch_operation")
+batch = BatchDatabaseManager("batch_operation")
 
 # 设置基础配置模板
-base_config = {
+batch.set_base_config({
     "type": "mysql",
     "port": 3306,
     "username": "admin",
     "password": "password",
-    "database": "user_db"
-}
-batch_manager.set_base_config(base_config)
+    "database": "user_db",
+})
 
 # 生成IP范围并批量添加连接
 ip_list = generate_ip_range("192.168.1.100", 50)
-results = batch_manager.add_batch_connections(ip_list)
+results = batch.add_batch_connections(ip_list)
 
 # 批量执行查询
-query_results = batch_manager.execute_batch_query("SELECT COUNT(*) FROM users")
+query_results = batch.execute_batch_query("SELECT COUNT(*) FROM users")
+
+# 批量升级表结构
+upgrade_results = batch.upgrade_table_structure(
+    ["ALTER TABLE users ADD COLUMN age INT"],
+    ["ALTER TABLE users DROP COLUMN age"],
+)
 
 # 清理临时配置
-batch_manager.cleanup()
+batch.cleanup()
 ```
 
 ## 🔧 命令行工具
@@ -167,8 +179,26 @@ db-connector test mysql-dev
 # 执行查询
 db-connector query mysql-dev "SELECT * FROM users"
 
+# 执行增删改
+db-connector command mysql-dev "INSERT INTO users (name) VALUES ('John')"
+
+# 从文件执行 SQL
+db-connector file mysql-dev init.sql --continue-on-error
+
 # 进入交互式SQL Shell
 db-connector shell mysql-dev
+
+# 查看连接详情
+db-connector show mysql-dev
+
+# 更新连接配置
+db-connector update mysql-dev --host new_host --port 3307
+
+# 删除连接
+db-connector remove mysql-dev
+
+# 导出查询结果为文件
+db-connector query mysql-dev "SELECT * FROM users" --output users.json
 ```
 
 ## 📋 API 参考
@@ -181,6 +211,7 @@ db-connector shell mysql-dev
 - **BatchDatabaseManager**: 批量连接配置和并发操作
 - **ConfigManager**: 配置文件加密存储和管理
 - **CryptoManager**: 数据加密解密功能
+- **KeyManager**: 加密密钥生成与管理
 
 ### 功能模块
 
@@ -225,16 +256,17 @@ db-connector shell mysql-dev
 ```python
 # 配置会自动加密存储，支持操作系统密钥环
 config = {
-    'type': 'mysql',
-    'host': 'localhost',
-    'username': 'user',
-    'password': 'secret_password'  # 自动加密存储
+    "type": "mysql",
+    "host": "localhost",
+    "username": "user",
+    "password": "secret_password",  # 自动加密存储
 }
 
 # 使用加密管理器直接操作
-from db_connector_tool.core import CryptoManager
+from db_connector_tool import CryptoManager
 crypto = CryptoManager()
 encrypted = crypto.encrypt("sensitive_data")
+decrypted = crypto.decrypt(encrypted)
 ```
 
 ### 配置文件位置
@@ -265,15 +297,18 @@ pytest -m "not slow"
 ### 代码质量
 
 ```bash
-# 代码格式化
-black db_connector_tool/ tests/
-
 # 代码检查
-pylint db_connector_tool/ tests/
+pylint src/db_connector_tool/
 
 # 类型检查
-pyright db_connector_tool/
+pyright src/db_connector_tool/
 ```
+
+## 📚 相关项目
+
+- [SQLAlchemy](https://www.sqlalchemy.org/) - Python SQL 工具包和 ORM
+- [cryptography](https://cryptography.io/) - Python 加密库
+- [tomli-w](https://github.com/hukkin/tomli-w) - TOML 序列化库
 
 ## 📄 许可证
 
@@ -296,8 +331,3 @@ pyright db_connector_tool/
 1. 查看文档和示例代码
 2. 提交 [GitHub Issue](https://github.com/wangquanqing/db-connector-tool/issues)
 3. 联系维护者: wangquanqing1636@sina.com
-
-## 📚 相关项目
-
-- [SQLAlchemy](https://www.sqlalchemy.org/) - Python SQL 工具包和 ORM
-- [cryptography](https://cryptography.io/) - Python 加密库
