@@ -1016,7 +1016,7 @@ class TestSQLAlchemyDriverAdvanced(unittest.TestCase):
             "mysql",
             "sqlserver",
             "sqlite",
-            "gbase",
+            "gbase8s",
         ]
         for db_type in expected_types:
             self.assertIn(db_type, SQLAlchemyDriver.DB_CONFIGS)

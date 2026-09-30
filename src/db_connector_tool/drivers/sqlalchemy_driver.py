@@ -53,6 +53,7 @@ BASIC_PARAMS = [
     "database",
     "service_name",
     "server",
+    "sqlmode",
 ]
 
 POOL_PARAMS = {
@@ -176,10 +177,10 @@ class SQLAlchemyDriver:
             "default_port": None,
             "defaults": {},
         },
-        "gbase": {
+        "gbase8s": {
             "url_template": (
-                "jdbcgbase8s://{host}:{port}/{database}:GBASEDBTSERVER={server}"
-                "?user={username}&password={password}"
+                "gbase8s://{host}:{port}/{database}:GBASEDBTSERVER={server}"
+                "?user={username}&password={password}&sqlmode={sqlmode}"
             ),
             "required_params": [
                 "host",
@@ -189,7 +190,7 @@ class SQLAlchemyDriver:
                 "password",
             ],
             "default_port": 9088,
-            "defaults": {},
+            "defaults": {"sqlmode": "oracle"},
         },
     }
 
@@ -203,7 +204,7 @@ class SQLAlchemyDriver:
 
         Args:
             config: 数据库连接配置字典，包含以下必需字段：
-                - type: 数据库类型（oracle/postgresql/mysql/sqlserver/sqlite/gbase）
+                - type: 数据库类型（oracle/postgresql/mysql/sqlserver/sqlite/gbase8s）
                 - host: 数据库主机地址
                 - port: 数据库端口
                 - database: 数据库名称
@@ -362,6 +363,8 @@ class SQLAlchemyDriver:
         """
         config_copy = self.config.copy()
         config_copy.setdefault("port", database_config["default_port"])
+        for key, value in database_config.get("defaults", {}).items():
+            config_copy.setdefault(key, value)
         return config_copy
 
     def _encode_sensitive_params(self, config_copy: dict) -> None:
@@ -446,6 +449,8 @@ class SQLAlchemyDriver:
             defaults: 默认参数字典
         """
         for key, value in defaults.items():
+            if key in BASIC_PARAMS:
+                continue
             if key in query_params:
                 logger.debug("自定义参数 '%s' 覆盖了默认参数", key)
                 continue
