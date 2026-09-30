@@ -414,6 +414,32 @@ class _GBase8sSchemaReflection:
         ).fetchall()
         return [str(row[0]).strip() for row in rows]
 
+    def get_temp_table_names(
+        self, connection: Any, schema: Optional[str] = None, **kw: Any
+    ) -> List[str]:
+        """返回临时表名
+
+        GBase 8s 中 ``CREATE TEMP TABLE`` 创建的临时表在 ``systables`` 中
+        同样以 ``tabtype = 'T'`` 出现且仅当前会话可见，无法通过静态系统目录
+        查询与持久表可靠区分，因此始终返回空列表。
+
+        需要临时表反射的场景建议在应用层通过命名约定（如 ``tmp_`` 前缀）自行管理。
+        """
+        return []
+
+    def get_table_comment(
+        self,
+        connection: Any,
+        table_name: str,
+        schema: Optional[str] = None,
+        **kw: Any,
+    ) -> Dict[str, Optional[str]]:
+        """返回表注释
+
+        GBase 8s 系统目录中不存在可查询的表注释存储，因此始终返回空注释。
+        """
+        return {"text": None}
+
     @reflection.cache
     def get_view_definition(
         self,
@@ -729,6 +755,8 @@ class GBase8sDialect(  # type: ignore[override]
     supports_empty_insert = False
     postfetch_lastrowid = False
     insert_returning = update_returning = delete_returning = False
+    use_insertmanyvalues = False
+    use_insertmanyvalues_wo_returning = False
 
     default_paramstyle = "qmark"
     max_identifier_length = 128
@@ -763,11 +791,18 @@ class GBase8sDialect(  # type: ignore[override]
 
     def set_isolation_level(self, dbapi_connection: Any, level: str) -> None:
         """设置会话隔离级别，``AUTOCOMMIT`` 通过 JDBC 自动提交开关实现"""
-        if level.upper() == "AUTOCOMMIT":
+        normalized = level.upper()
+        valid_levels = {"AUTOCOMMIT"} | set(ISOLATION_LEVELS)
+        if normalized not in valid_levels:
+            raise exc.ArgumentError(
+                f"无效的事务隔离级别: '{level}'，可选值为 "
+                + ", ".join(sorted(valid_levels))
+            )
+        if normalized == "AUTOCOMMIT":
             dbapi_connection.jconn.setAutoCommit(True)
             return
         dbapi_connection.jconn.setAutoCommit(False)
-        statement = f"SET ISOLATION TO {ISOLATION_LEVELS[level.upper()]}"
+        statement = f"SET ISOLATION TO {ISOLATION_LEVELS[normalized]}"
         cursor = dbapi_connection.cursor()
         try:
             cursor.execute(statement)

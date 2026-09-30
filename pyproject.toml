@@ -29,7 +29,7 @@ classifiers = [
 ]
 dependencies = [
   "sqlalchemy>=2.0.0",
-  "cryptography>=47.0.0",
+  "cryptography>=46.0.0",
   "tomli-w>=1.0.0",
   "sqlparse>=0.5.0",
 ]

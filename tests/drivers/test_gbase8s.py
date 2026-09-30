@@ -586,6 +586,20 @@ class TestReflection(unittest.TestCase):
         columns = self.dialect.get_columns(connection, "orders", schema="cvicse")
         self.assertIsNone(columns[1]["default"])
 
+    def test_get_temp_table_names_always_empty(self) -> None:
+        """临时表在 GBase 8s 中无法通过系统目录与持久表区分，始终返回空列表"""
+        self.assertEqual(
+            self.dialect.get_temp_table_names(self.connection, schema="cvicse"),
+            [],
+        )
+
+    def test_get_table_comment_always_none(self) -> None:
+        """GBase 8s 无系统目录存储表注释，始终返回空注释"""
+        self.assertEqual(
+            self.dialect.get_table_comment(self.connection, "orders", schema="cvicse"),
+            {"text": None},
+        )
+
 
 class TestDialectBehaviour(unittest.TestCase):
     """方言能力矩阵与 DBAPI 交互"""
@@ -623,6 +637,16 @@ class TestDialectBehaviour(unittest.TestCase):
         connection.jconn.setAutoCommit.assert_called_once_with(False)
         statement = connection.cursor.return_value.execute.call_args[0][0]
         self.assertEqual(statement, "SET ISOLATION TO REPEATABLE READ")
+
+    def test_set_isolation_level_invalid_raises_argument_error(self) -> None:
+        """非白名单隔离级别抛出 ArgumentError 并提示可选值"""
+        connection = MagicMock()
+        with self.assertRaises(exc.ArgumentError) as ctx:
+            self.dialect.set_isolation_level(connection, "READ UNSTABLE")
+        self.assertIn("无效的事务隔离级别", str(ctx.exception))
+        self.assertIn("READ UNSTABLE", str(ctx.exception))
+        for level in ("AUTOCOMMIT", "READ COMMITTED", "SERIALIZABLE"):
+            self.assertIn(level, str(ctx.exception))
 
     def test_get_isolation_level(self) -> None:
         """会话隔离级别由 DBINFO 结果映射"""

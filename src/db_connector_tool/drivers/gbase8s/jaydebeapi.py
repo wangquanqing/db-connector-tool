@@ -96,7 +96,7 @@ def find_jdbc_jar(explicit: Optional[str] = None) -> Optional[str]:
 
     Example:
         >>> find_jdbc_jar()
-        'C:\\\\Users\\\\me\\\\.sqlalchemy-jdbcapi\\\\drivers\\\\gbasedbt-jdbc-3.5.1.jar'
+        'C:\\Users\\me\\.sqlalchemy-jdbcapi\\drivers\\gbasedbt-jdbc-3.5.1.jar'
     """
     candidates = [explicit]
     candidates.extend(os.environ.get(name) for name in _JAR_ENV_VARS)
