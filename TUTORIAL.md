@@ -20,14 +20,20 @@
 ### 安装
 
 ```bash
-# 从源码安装
+# 从源码安装（推荐装全部驱动）
 git clone https://github.com/wangquanqing/db-connector-tool.git
 cd db-connector-tool
-pip install -e .
+pip install -e ".[all]"
 
 # 或从 PyPI 安装
-pip install db-connector-tool
+pip install db-connector-tool            # 仅核心 + SQLite
+pip install "db-connector-tool[all]"     # 全部数据库驱动
+pip install "db-connector-tool[mysql]"   # 按需：secure/oracle/postgresql/mysql/sqlserver/gbase8s
 ```
+
+> ⚠️ 除 SQLite 外，各数据库驱动都是可选依赖（extras），只装主包无法连接
+> Oracle/PostgreSQL/MySQL/SQL Server/GBase 8s；`secure` extra 安装 keyring，
+> 可把主密钥存入操作系统密钥环（推荐）。
 
 ### 基础示例
 
@@ -120,7 +126,33 @@ db.add_connection("sqlite_db", {
     "type": "sqlite",
     "database": "/path/to/database.db",
 })
+
+# SQL Server连接
+db.add_connection("mssql_db", {
+    "type": "sqlserver",
+    "host": "localhost",
+    "port": 1433,
+    "username": "sa",
+    "password": "password",
+    "database": "test_db",
+})
+
+# GBase 8s连接（JDBC，需自备驱动 jar，详见 docs/gbase8s-dialect-design.md）
+db.add_connection("gb8s_db", {
+    "type": "gbase8s",
+    "host": "127.0.0.1",
+    "port": 9088,
+    "server": "gbase01",      # GBASEDBTSERVER 实例名
+    "database": "db_station",
+    "username": "cvicse",
+    "password": "password",
+    "sqlmode": "oracle",      # oracle / gbase / mysql，默认 oracle
+    # "jars": r"C:\path\to\gbasedbt-jdbc.jar",
+})
 ```
+
+GBase 8s 的一库三模会影响分页与伪表写法：`oracle` 模式用 `ROWNUM`/`DUAL`，
+`gbase` 模式用 `FIRST n SKIP m`/`sysmaster:sysdual`，`mysql` 模式用 `LIMIT ... OFFSET ...`。
 
 #### 执行查询与命令
 
@@ -142,10 +174,15 @@ affected, elapsed = db.execute_command(
 )
 print(f"影响 {affected} 行，耗时 {elapsed:.3f}s")
 
-# 执行事务操作
-with db.get_connection("mysql_db") as conn:
-    conn.execute("UPDATE accounts SET balance = balance - 100 WHERE id = 1")
-    conn.execute("UPDATE accounts SET balance = balance + 100 WHERE id = 2")
+# 事务操作
+# execute_query / execute_command 各自独立提交事务；
+# 需要「多条语句同一事务」时，可直接使用驱动暴露的 SQLAlchemy 引擎：
+from sqlalchemy import text
+
+driver = db.get_connection("mysql_db")
+with driver.engine.begin() as conn:  # 退出时提交，异常自动回滚
+    conn.execute(text("UPDATE accounts SET balance = balance - 100 WHERE id = 1"))
+    conn.execute(text("UPDATE accounts SET balance = balance + 100 WHERE id = 2"))
 ```
 
 #### 连接管理
@@ -200,27 +237,27 @@ batch.set_base_config({
 ip_list = generate_ip_range("192.168.1.100", 10)
 print("IP范围:", ip_list)
 
-# 批量添加连接
+# 批量添加连接（返回 {IP: 是否成功}）
 results = batch.add_batch_connections(ip_list)
 print("批量添加结果:", results)
 
 # 检查成功和失败的连接
-successful = [ip for ip, result in results.items() if result["success"]]
-failed = [ip for ip, result in results.items() if not result["success"]]
+successful = [ip for ip, ok in results.items() if ok]
+failed = [ip for ip, ok in results.items() if not ok]
 print(f"成功: {len(successful)}, 失败: {len(failed)}")
 ```
 
 #### 批量查询操作
 
 ```python
-# 批量执行查询
+# 批量执行查询（返回 {连接名: {"success", "data", "count", "elapsed"}}）
 query_results = batch.execute_batch_query("SELECT COUNT(*) FROM users")
 
-for host, result in query_results.items():
+for conn_name, result in query_results.items():
     if result["success"]:
-        print(f"{host}: {result['data']}")
+        print(f"{conn_name}: {result['count']} 行, {result['elapsed']:.3f}s")
     else:
-        print(f"{host}: 查询失败 - {result['error']}")
+        print(f"{conn_name}: 查询失败 - {result['error']}")
 
 # 带参数的批量查询
 param_results = batch.execute_batch_query(
@@ -238,11 +275,11 @@ results = batch.upgrade_table_structure(
     ["ALTER TABLE users DROP COLUMN last_login"],  # 回滚SQL（可选）
 )
 
-for host, result in results.items():
+for conn_name, result in results.items():
     if result["success"]:
-        print(f"{host}: 表结构升级成功")
+        print(f"{conn_name}: 表结构升级成功")
     else:
-        print(f"{host}: 升级失败 - {result['error']}")
+        print(f"{conn_name}: 升级失败 - {result['error']}")
 ```
 
 #### 清理资源
@@ -449,8 +486,8 @@ logger = setup_logging(
 module_logger = get_logger(__name__)
 module_logger.info("模块初始化完成")
 
-# 动态调整日志级别
-set_log_level("INFO")
+# 动态调整日志级别（logger 名称 + 级别）
+set_log_level("my_app", "INFO")
 
 # 记录不同级别的日志（使用惰性格式化）
 module_logger.debug("调试信息: %s", "详情")
@@ -588,14 +625,14 @@ def batch_maintenance():
         maintenance_ips = generate_ip_range("192.168.1.100", 50)
         add_results = batch.add_batch_connections(maintenance_ips)
 
-        successful = [ip for ip, r in add_results.items() if r["success"]]
+        successful = [ip for ip, ok in add_results.items() if ok]
         if successful:
             results = batch.execute_batch_query("OPTIMIZE TABLE important_table")
-            for ip, result in results.items():
+            for conn_name, result in results.items():
                 if result["success"]:
-                    logger.info("%s: 维护成功", ip)
+                    logger.info("%s: 维护成功", conn_name)
                 else:
-                    logger.warning("%s: 维护失败: %s", ip, result["error"])
+                    logger.warning("%s: 维护失败: %s", conn_name, result["error"])
         return successful
     except Exception as error:
         logger.error("批量维护失败: %s", error)

@@ -11,7 +11,7 @@
 
 - **全字段加密**: 使用 `cryptography.fernet` 加密所有敏感连接信息
 - **密钥管理**: 支持操作系统密钥环和文件权限保护双重方案
-- **PBKDF2派生**: 使用480,000次迭代的PBKDF2密钥派生算法
+- **PBKDF2派生**: PBKDF2-HMAC-SHA256 密钥派生（默认按硬件自适应 10 万~100 万次，`create_secure_instance()` 固定 48 万次）
 - **安全随机数**: 基于 `secrets` 模块的密码学安全随机数生成
 
 ### 🏗️ 架构设计
@@ -24,11 +24,11 @@
 ### 🗄️ 多数据库支持
 
 - **Oracle**: 通过 oracledb 驱动（原生支持）
-- **PostgreSQL**: 通过 psycopg3 驱动（异步支持）
+- **PostgreSQL**: 通过 psycopg3 驱动（同步使用）
 - **MySQL**: 通过 pymysql 驱动（纯Python实现）
 - **SQL Server**: 通过 pymssql 驱动（FreeTDS后端）
 - **SQLite**: 内置支持，无需额外依赖
-- **GBase 8s**: 通过 JDBC 驱动（完整SQLAlchemy方言支持）
+- **GBase 8s**: 通过 JayDeBeApi+JDBC 驱动（自研 SQLAlchemy 方言，支持一库三模，见 [设计说明](docs/gbase8s-dialect-design.md)）
 
 ### 📊 运维特性
 
@@ -39,19 +39,31 @@
 
 ## 📦 安装
 
+> ⚠️ **数据库驱动是可选依赖**：除 SQLite 外，各数据库驱动通过 extras 安装，
+> 只装主包无法连接 Oracle/PostgreSQL/MySQL/SQL Server/GBase 8s。
+
 ### 从源码安装
 
 ```bash
 git clone https://github.com/wangquanqing/db-connector-tool.git
 cd db-connector-tool
-pip install -e .
+pip install -e ".[all]"     # 安装全部驱动；也可按需选择 extras
 ```
 
 ### 从 PyPI 安装
 
 ```bash
-pip install db-connector-tool
+pip install db-connector-tool            # 仅核心 + SQLite
+pip install "db-connector-tool[all]"     # 全部驱动
+pip install "db-connector-tool[mysql]"   # 按需：secure/oracle/postgresql/mysql/sqlserver/gbase8s
 ```
+
+| extra | 用途 |
+| --- | --- |
+| `secure` | keyring，把主密钥存进操作系统密钥环（推荐） |
+| `oracle` / `postgresql` / `mysql` / `sqlserver` | 对应数据库驱动 |
+| `gbase8s` | jaydebeapi + python-dateutil（另需自备 GBase JDBC jar） |
+| `all` | 以上全部 |
 
 ## 🚀 快速开始
 
@@ -126,6 +138,40 @@ db.execute_command(
 db.close_all_connections()
 ```
 
+### GBase 8s 连接示例
+
+GBase 8s 走 JDBC，需要额外的实例名与兼容模式参数（`sqlmode` 支持 `oracle`/`gbase`/`mysql`，
+默认 `oracle`，默认端口 `9088`）：
+
+```python
+db.add_connection("gb8s", {
+    "type": "gbase8s",
+    "host": "127.0.0.1",
+    "port": 9088,
+    "server": "gbase01",          # GBASEDBTSERVER 实例名
+    "database": "db_station",
+    "username": "cvicse",
+    "password": "secret",
+    "sqlmode": "oracle",          # oracle / gbase / mysql
+    # "jars": r"C:\path\to\gbasedbt-jdbc.jar",  # 未指定时按环境变量与约定目录查找
+    # "CLIENT_LOCALE": "zh_CN.GB18030",          # 其他键会作为 JDBC 连接属性透传
+})
+
+rows, elapsed = db.execute_query("gb8s", "SELECT FIRST 10 * FROM systables")
+```
+
+CLI 等价写法：
+
+```bash
+db-connector add gb8s -T gbase8s -H 127.0.0.1 -P 9088 -S gbase01 \
+    -d db_station -u cvicse -p -c sqlmode=oracle
+```
+
+JDBC jar 查找顺序：连接配置的 `jars` → 环境变量 `GBASEDBT_JDBC_JAR` /
+`GBASE8S_JDBC_JAR` → `~/.sqlalchemy-jdbcapi/drivers`、`~/db_connector_tool/jars`、
+`./jars`（可用 `GBASEDBT_JDBC_SEARCH_DIRS` 追加）→ 由 `CLASSPATH` 决定。
+方言的设计与真机验证结论见 [docs/gbase8s-dialect-design.md](docs/gbase8s-dialect-design.md)。
+
 ### 批量连接管理示例
 
 ```python
@@ -142,14 +188,18 @@ batch.set_base_config({
     "database": "user_db",
 })
 
-# 生成IP范围并批量添加连接
+# 生成IP范围并批量添加连接（返回 {IP: 是否成功}）
 ip_list = generate_ip_range("192.168.1.100", 50)
 results = batch.add_batch_connections(ip_list)
+failed_ips = [ip for ip, ok in results.items() if not ok]
 
-# 批量执行查询
+# 批量执行查询（返回 {连接名: {"success", "data", "count", "elapsed"}}）
 query_results = batch.execute_batch_query("SELECT COUNT(*) FROM users")
+for conn_name, result in query_results.items():
+    if result["success"]:
+        print(conn_name, result["count"], "行", result["elapsed"], "秒")
 
-# 批量升级表结构
+# 批量升级表结构（DDL 走命令接口并提交事务，失败时按 rollback_sqls 回滚）
 upgrade_results = batch.upgrade_table_structure(
     ["ALTER TABLE users ADD COLUMN age INT"],
     ["ALTER TABLE users DROP COLUMN age"],
@@ -237,11 +287,13 @@ db-connector query mysql-dev "SELECT * FROM users" --output users.json
 
 - **连接配置加密**: 所有连接配置字段自动加密存储
 - **强加密算法**: 使用 Fernet（AES-128-CBC + HMAC-SHA256）加密和 PBKDF2 密钥派生
-- **自适应迭代**: PBKDF2 迭代次数根据硬件性能自动调整（100k~1M），兼顾安全与性能
+- **自适应迭代**: `CryptoManager()` 以 0.15 秒为目标自动调整 PBKDF2 迭代次数（10 万~100 万，按万取整）；`create_secure_instance()` 使用 OWASP 建议的 48 万次
 
 #### 2. 密钥管理
 
 - **操作系统密钥环**: 优先使用系统密钥存储服务（keyring）
+- **自动降级**: 密钥环存在但不可用（服务未启动、凭据库拒绝写入等）时，自动回退到
+  环境变量、再到文件存储，并在日志中给出告警，不会直接失败
 - **文件权限保护**: 回退方案使用严格的文件权限控制
 - **密钥派生**: 基于用户密码和随机盐值动态派生加密密钥
 
@@ -271,27 +323,36 @@ decrypted = crypto.decrypt(encrypted)
 
 ### 配置文件位置
 
-- **主配置文件**: `~/.config/db_connector_tool/connections.toml`
-- **临时配置文件**: `~/.config/db_connector_tool/connections_*.toml`（批量管理）
-- **日志文件**: `~/.config/db_connector_tool/logs/db_connector_tool.log`
-- **加密密钥**: 操作系统密钥环或 `~/.config/db_connector_tool/encryption.key`
+配置目录由 `PathHelper.get_user_config_dir()` 按平台自动选择：
+
+| 平台 | 目录 |
+| --- | --- |
+| Windows | `%APPDATA%\db_connector_tool\` |
+| macOS | `~/Library/Application Support/db_connector_tool/` |
+| Linux | `~/.config/db_connector_tool/` |
+
+其中的文件：
+
+- **主配置文件**: `connections.toml`
+- **临时配置文件**: `connections_*.toml`（批量管理自动生成与清理）
+- **日志文件**: `logs/db_connector_tool.log`（错误另存 `logs/db_connector_tool_error.log`）
+- **加密密钥**: 操作系统密钥环（推荐）、环境变量，或回退文件 `encryption.key`
 
 ## 🧪 开发
 
 ### 运行测试
 
+本项目使用标准库 `unittest`（不是 pytest），需在仓库根目录执行，以便 `src.` 包可导入：
+
 ```bash
 # 运行所有测试
-pytest
+python -m unittest discover -s tests -t .
 
 # 运行特定测试模块
-pytest tests/test_database.py
+python -m unittest tests.core.test_config
 
 # 带覆盖率的测试
-pytest --cov=db_connector_tool tests/
-
-# 运行快速测试（跳过慢速测试）
-pytest -m "not slow"
+coverage run -m unittest discover -s tests -t . && coverage report
 ```
 
 ### 代码质量
@@ -312,7 +373,7 @@ pyright src/db_connector_tool/
 
 ## 📄 许可证
 
-本项目采用 MIT 许可证 - 详见 [LICENSE](LICENSE) 文件。
+本项目采用 MIT 许可证 - 详见 [LICENSE.txt](LICENSE.txt) 文件。
 
 ## 🤝 贡献
 

@@ -7,11 +7,11 @@ name = "db-connector-tool"
 dynamic = ["version"]
 description = "跨平台数据库连接管理工具，支持多种数据库类型（Oracle, PostgreSQL, SQL Server, MySQL, SQLite, GBase 8s）"
 readme = "README.md"
-requires-python = ">=3.8"
+requires-python = ">=3.11"
 license = "MIT"
 keywords = ["database", "connector", "sqlalchemy", "oracle", "postgresql", "mysql", "sqlserver", "sqlite", "gbase8s"]
 authors = [
-  { name = "wangquanqing"}, {email = "wangquanqing1636@sina.com" },
+  { name = "wangquanqing", email = "wangquanqing1636@sina.com" },
 ]
 classifiers = [
   "Development Status :: 4 - Beta",
@@ -19,11 +19,10 @@ classifiers = [
   "Topic :: Database",
   "License :: OSI Approved :: MIT License",
   "Programming Language :: Python",
-  "Programming Language :: Python :: 3.8",
-  "Programming Language :: Python :: 3.9",
-  "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
   "Programming Language :: Python :: Implementation :: CPython",
   "Programming Language :: Python :: Implementation :: PyPy",
 ]
@@ -57,7 +56,7 @@ dev = [
 
 [project.urls]
 Homepage = "https://github.com/wangquanqing/db-connector-tool"
-Documentation = "https://github.com/wangquanqing/db-connector-tool#readme" 
+Documentation = "https://github.com/wangquanqing/db-connector-tool#readme"
 Source = "https://github.com/wangquanqing/db-connector-tool/tree/main/src"
 Repository = "https://github.com/wangquanqing/db-connector-tool.git"
 Issues = "https://github.com/wangquanqing/db-connector-tool/issues"

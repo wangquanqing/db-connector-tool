@@ -36,7 +36,7 @@ gbase8s://host:9088/dbname:GBASEDBTSERVER=server?user=u&password=p&sqlmode=mysql
 | 能力 | oracle 模式 | gbase 模式 | mysql 模式 |
 | --- | --- | --- | --- |
 | 无 FROM 时的伪表 | `FROM DUAL` | `FROM sysmaster:sysdual` | `FROM sysmaster:sysdual` |
-| 分页 | `ROWNUM` 双层子查询 | `SKIP n FIRST m` | `LIMIT m OFFSET n` |
+| 分页 | `ROWNUM` 双层子查询 | `FIRST n SKIP m` | `LIMIT m OFFSET n` |
 | 布尔字面量 | `'t'` / `'f'` | `'t'` / `'f'` | `'t'` / `'f'` |
 
 实现要点：
@@ -44,7 +44,7 @@ gbase8s://host:9088/dbname:GBASEDBTSERVER=server?user=u&password=p&sqlmode=mysql
 - `GBase8sCompiler.default_from` / `visit_empty_set_expr` 按模式补伪表；
 - oracle 模式在 `translate_select_structure` 中把 LIMIT/OFFSET 改写为 ROWNUM 上限 +
   外层 `gbase8s_rn` 过滤，简单整型立即数以 `render_literal_execute()` 内联；
-- gbase 模式在 `get_select_precolumns` 中输出 `SKIP n FIRST m`；
+- gbase 模式在 `get_select_precolumns` 中输出 `FIRST n SKIP m`；
 - mysql 模式在 `limit_clause` 中输出 `LIMIT ... OFFSET ...`；仅 OFFSET 时取 BIGINT
   最大值并以字面量内联 OFFSET（详见第 5 节实测结论）；
 - `_dialect_specific_select_one` 沿默认实现自动套用 `default_from`，因此 pre-ping 语句
@@ -93,8 +93,8 @@ gbase8s://host:9088/dbname:GBASEDBTSERVER=server?user=u&password=p&sqlmode=mysql
 
 ## 7. 测试与验收
 
-- 单元测试：`tests/drivers/test_gbase8s.py`（52 项），覆盖三模式 SQL 生成、类型与 DDL
+- 单元测试：`tests/drivers/test_gbase8s.py`（56 项），覆盖三模式 SQL 生成、类型与 DDL
   编译、URL 翻译与 jar 定位、数据字典解析、模拟连接下的反射；
 - 代码质量：`pylint src/db_connector_tool/drivers/gbase8s tests/drivers/test_gbase8s.py`
   评分 10.00/10；
-- 回归：`python -m unittest discover -s tests -t .` 与改造前基线失败数一致，无新增失败。
+- 回归：`python -m unittest discover -s tests -t .` 全绿（507 项）。
