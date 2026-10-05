@@ -10,10 +10,15 @@
    - [BatchDatabaseManager](#batchdatabasemanager)
    - [ConfigManager](#configmanager)
    - [CryptoManager](#cryptomanager)
+   - [KeyManager](#keymanager)
+   - [SQLAlchemyDriver](#sqlalchemydriver)
+   - [LogManager](#logmanager)
 3. [异常处理](#异常处理)
 4. [工具函数](#工具函数)
 5. [命令行工具](#命令行工具)
 6. [最佳实践](#最佳实践)
+7. [故障排除](#故障排除)
+8. [获取帮助](#获取帮助)
 
 ## 🚀 快速开始
 
@@ -398,6 +403,165 @@ encrypted_test = from_saved.encrypt(test_data)
 decrypted_test = from_saved.decrypt(encrypted_test)
 assert test_data == decrypted_test
 print("密钥恢复验证成功")
+```
+
+### KeyManager
+
+KeyManager 负责主加密密钥的**存储与轮换**，按「操作系统密钥环 → 环境变量 →
+文件」的优先级选择方案；某一层不可用（例如密钥环服务未启动、凭据库拒绝写入）
+时会自动降级到下一层，并在日志中给出告警，不会直接失败。
+
+#### 加载与使用密钥
+
+```python
+from db_connector_tool import KeyManager
+
+key_manager = KeyManager("my_app")
+
+# 加载已有密钥，不存在则创建
+key_manager.load_or_create_key()
+
+# 取得加密器（ConfigManager 内部同样通过它加解密配置）
+crypto = key_manager.get_crypto_manager()
+encrypted = crypto.encrypt("敏感数据")
+
+# 关闭并清理内存中的密钥材料
+key_manager.close()
+```
+
+#### 轮换密钥
+
+```python
+key_manager = KeyManager("my_app")
+key_manager.load_or_create_key()
+
+# 生成新密钥并按同样的优先级保存；已有配置需要随后重新加密
+new_key_info = key_manager.rotate_key()
+print("新密钥字段:", sorted(new_key_info))
+key_manager.close()
+```
+
+> 配置文件的密钥轮换请优先使用 `ConfigManager.rotate_encryption_key()`：
+> 它会先备份配置、解密全部连接、换钥后重新加密，失败时自动回滚。
+
+#### 派生 HMAC 密钥
+
+```python
+from db_connector_tool import KeyManager
+
+key_manager = KeyManager("my_app")
+key_manager.load_or_create_key()
+
+# 32 字节，用于配置签名等场景（由主密钥派生，不落盘）
+hmac_key = key_manager.get_secure_hmac_key()
+print(len(hmac_key))  # 32
+key_manager.close()
+```
+
+环境变量方案：`DB_CONNECTOR_TOOL_ENCRYPTION_KEY`（JSON，含 password/salt/iterations）
+与 `DB_CONNECTOR_TOOL_HMAC_KEY`（32 字节十六进制）。
+
+### SQLAlchemyDriver
+
+需要绕开配置管理层、直接操作单个数据库连接时，可单独使用驱动。
+
+#### 直接连接与执行
+
+```python
+from db_connector_tool import SQLAlchemyDriver
+
+config = {
+    "type": "mysql",          # oracle/postgresql/mysql/sqlserver/sqlite/gbase8s
+    "host": "localhost",
+    "port": 3306,
+    "username": "user",
+    "password": "password",
+    "database": "test_db",
+}
+
+driver = SQLAlchemyDriver(config)
+
+# 上下文管理器：进入时连接，退出时自动断开
+with driver:
+    rows = driver.execute_query(
+        "SELECT * FROM users WHERE age > :age", {"age": 18}
+    )                       # -> List[Dict[str, Any]]
+    affected = driver.execute_command(
+        "UPDATE users SET status = :s WHERE id = :id", {"s": "active", "id": 1}
+    )                       # -> int，受影响行数（自动提交）
+    print(len(rows), affected)
+```
+
+#### 连接池与探测
+
+```python
+driver = SQLAlchemyDriver(config)
+
+# 建立连接（内部使用 SQLAlchemy 连接池，pool_pre_ping=True）
+driver.connect()
+
+# 连通性探测：任何异常都返回 False，不抛出
+print(driver.test_connection())
+
+# 自定义连接池参数（可选）
+driver = SQLAlchemyDriver({**config, "pool_config": {"pool_size": 10, "max_overflow": 20}})
+
+driver.disconnect()
+```
+
+#### 元数据反射
+
+```python
+driver.connect()
+
+# 表名列表
+tables = driver.get_tables()
+
+# 列定义：name/type/nullable/default
+schema = driver.get_table_schema("users")
+for column in schema:
+    print(column["name"], column["type"], column["nullable"])
+
+driver.disconnect()
+```
+
+> 传入的 SQL 会经过安全校验：参数化查询、注入特征检测、拒绝多条语句；
+> 显式的 `DROP`/`TRUNCATE`/`CREATE`/`ALTER` 等语句正常执行。
+> 详见 README「SQL 执行安全」。
+
+### LogManager
+
+LogManager 是日志系统的面向对象封装，适合在应用里集中管理 handler。
+
+```python
+from db_connector_tool import LogManager
+
+# 一步完成初始化
+log_manager = LogManager.quick_setup("my_app", "DEBUG")
+
+# 追加自定义文件 handler（支持按大小或按时间轮转）
+log_manager.add_file_handler("debug.log", level="DEBUG", max_size=5 * 1024 * 1024)
+log_manager.add_file_handler("hourly.log", when="H", backup_count=24)
+
+# 查看当前所有 logger 的级别、handler 数量与传播设置
+for name, info in log_manager.get_loggers_info().items():
+    if name.startswith("my_app"):
+        print(name, info)
+
+# 移除单个 handler / 清理全部 handler（会关闭文件句柄）
+log_manager.cleanup()
+```
+
+底层函数式接口同样可用：
+
+```python
+from db_connector_tool import get_logger, set_log_level, setup_logging
+
+logger = setup_logging(
+    app_name="my_app", level="INFO", log_to_console=True, log_to_file=True
+)
+set_log_level("my_app", "DEBUG")   # 需要指定 logger 名称
+get_logger(__name__).info("模块初始化完成")
 ```
 
 ## ⚠️ 异常处理
