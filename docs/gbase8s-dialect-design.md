@@ -98,4 +98,4 @@ gbase8s://host:9088/dbname:GBASEDBTSERVER=server?user=u&password=p&sqlmode=mysql
 - 代码质量：`pylint src/db_connector_tool/drivers/gbase8s tests/drivers/test_gbase8s.py`
   评分 10.00/10（另有 1 条历史遗留的 `too-many-locals` 提示，位于
   `get_foreign_keys`，尚未拆分）；
-- 回归：`python -m unittest discover -s tests -t .` 全绿（现行 575 项）。
+- 回归：`python -m unittest discover -s tests -t .` 全量用例全绿（用例数随迭代增长，此处不写死）。

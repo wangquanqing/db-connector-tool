@@ -13,6 +13,9 @@ from .batch_manager import BatchDatabaseManager, cleanup_temp_configs, generate_
 from .core.config import ConfigManager
 from .core.connections import DatabaseManager
 from .core.crypto import CryptoManager
+# pylint: disable=duplicate-code
+# 包根的再导出必然与 core/__init__ 的导出清单重合，这是有意的 API 汇总，
+# 并非可以抽公共函数消除的重复代码。
 from .core.exceptions import (
     ConfigError,
     CryptoError,

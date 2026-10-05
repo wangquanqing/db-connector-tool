@@ -6,7 +6,7 @@ from src.db_connector_tool.batch_manager import (
     cleanup_temp_configs,
     generate_ip_range,
 )
-from src.db_connector_tool.core.exceptions import QueryError
+from src.db_connector_tool.core.exceptions import ConfigError, DBConnectorError, QueryError
 
 from ._isolation import IsolatedTestCase
 
@@ -298,46 +298,46 @@ class TestBatchDatabaseManager(IsolatedTestCase):
             self.batch_manager._remove_existing_connection("db_000")
             self.assertNotIn("db_000", self.batch_manager._connection_names)
 
-    def test_remove_existing_connection_with_critical_error(self):
-        """测试删除已存在连接时发生严重错误"""
-        self.batch_manager.set_base_config(self.base_config)
-
-        # 模拟删除连接时发生严重错误
-        with mock.patch.object(
-            self.batch_manager.database_manager,
-            "remove_connection",
-            side_effect=Exception("Remove connection failed"),
-        ):
-            # 模拟整个方法抛出异常
-            with mock.patch.object(
-                self.batch_manager,
-                "_remove_existing_connection",
-                side_effect=Exception("Critical error"),
-            ):
-                # 验证方法会抛出异常
-                with self.assertRaises(Exception):
-                    self.batch_manager._remove_existing_connection("db_000")
-
-    def test_cleanup_with_critical_error(self):
-        """测试清理过程中发生严重错误"""
+    def test_remove_existing_connection_swallows_config_error(self):
+        """删除已存在连接时，配置级错误只记告警、不向上抛"""
         self.batch_manager.set_base_config(self.base_config)
         self.batch_manager._connection_names = ["db_000"]
 
-        # 模拟清理连接名称列表时发生严重错误
         with mock.patch.object(
-            self.batch_manager.database_manager.pool_manager,
+            self.batch_manager.database_manager,
             "remove_connection",
-            side_effect=Exception("Remove connection failed"),
+            side_effect=ConfigError("database manager refuses"),
         ):
-            # 模拟获取连接名称时抛出异常
-            with mock.patch.object(
-                self.batch_manager,
-                "_get_all_connection_names",
-                side_effect=Exception("Get connection names failed"),
-            ):
-                # 验证方法会抛出异常
-                with self.assertRaises(Exception):
-                    self.batch_manager.cleanup()
+            # 不应抛出
+            self.batch_manager._remove_existing_connection("db_000")
+
+        # 管理器删除失败时保留在本地列表中，便于后续重试
+        self.assertIn("db_000", self.batch_manager._connection_names)
+
+    def test_remove_existing_connection_reraises_connector_error(self):
+        """删除已存在连接时，DBConnectorError 属于严重错误，需向上抛出"""
+        self.batch_manager.set_base_config(self.base_config)
+
+        with mock.patch.object(
+            self.batch_manager.database_manager,
+            "remove_connection",
+            side_effect=DBConnectorError("critical failure"),
+        ):
+            with self.assertRaises(DBConnectorError):
+                self.batch_manager._remove_existing_connection("db_000")
+
+    def test_cleanup_propagates_unexpected_error(self):
+        """清理过程中出现非 DBConnectorError 的意外异常时向上抛出"""
+        self.batch_manager.set_base_config(self.base_config)
+        self.batch_manager._connection_names = ["db_000"]
+
+        with mock.patch.object(
+            self.batch_manager,
+            "_get_all_connection_names",
+            side_effect=RuntimeError("Get connection names failed"),
+        ):
+            with self.assertRaises(RuntimeError):
+                self.batch_manager.cleanup()
 
     def test_del_method(self):
         """测试析构函数"""
