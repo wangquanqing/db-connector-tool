@@ -299,9 +299,24 @@ db-connector query mysql-dev "SELECT * FROM users" --output users.json
 
 #### 3. 配置安全
 
-- **配置文件完整性**: TOML格式验证和版本兼容性检查
+- **配置文件完整性**: 每次保存都以 HMAC-SHA256 对配置内容签名；加载时校验，
+  签名缺失或不匹配都会被拒绝（配置文件被外部编辑即视为不可信）
+- **迁移逃生口**: 历史遗留的无签名配置可用
+  `ConfigManager(app, file, require_signature=False)` 加载后重新保存以补上签名
 - **自动备份**: 配置文件变更时自动创建备份
 - **敏感信息处理**: 日志中自动屏蔽密码等敏感信息
+
+#### 4. SQL 执行安全
+
+- **参数化查询**: `execute_query` / `execute_command` 通过 `text(sql) + 参数`
+  执行，参数不参与 SQL 拼接
+- **注入特征检测**: 在剥离字符串字面量与注释后的语句结构上匹配
+  `OR 1=1`、`xp_cmdshell`、`INTO OUTFILE`、动态 SQL 等特征；
+  字面量里恰好含有这类文本的正常数据不会误报
+- **拒绝多条语句**: `SELECT 1; DROP TABLE t` 这类语句走私会被拒绝，
+  存储过程/触发器定义除外
+- **显式管理语句放行**: 用户直接书写的 `DROP` / `TRUNCATE` / `CREATE` / `ALTER`
+  等语句正常执行（仅 `GRANT` / `REVOKE` 权限变更仍被拦截）
 
 ### 安全配置示例
 
