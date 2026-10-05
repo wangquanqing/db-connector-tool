@@ -37,7 +37,6 @@ from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.dialects.postgresql.base import PGDialect
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.orm import scoped_session, sessionmaker
 
 from ..core.exceptions import DBConnectionError, DriverError, QueryError
 from ..utils.logging_utils import get_logger
@@ -238,8 +237,6 @@ class SQLAlchemyDriver:
         """
         self.config = config
         self.engine: Optional[Engine] = None
-        self.session_factory = None
-        self.session = None
         self._validate_config()
 
     def __str__(self) -> str:
@@ -557,8 +554,6 @@ class SQLAlchemyDriver:
                 logger.debug("使用用户自定义连接池配置: %s", user_pool_config)
 
             self.engine = create_engine(connection_url, **pool_config)
-            self.session_factory = sessionmaker(bind=self.engine)
-            self.session = scoped_session(self.session_factory)
 
             logger.info("数据库连接已建立: %s", self.config.get("type", "unknown"))
 
@@ -570,23 +565,17 @@ class SQLAlchemyDriver:
     def disconnect(self) -> None:
         """断开数据库连接
 
-        关闭数据库会话，释放连接池资源，
-        确保数据库连接被正确关闭，避免资源泄漏。
+        释放连接池资源，确保数据库连接被正确关闭，避免资源泄漏。
 
         Example:
             >>> driver.connect()
             >>> driver.disconnect()
         """
         try:
-            if self.session:
-                self.session.remove()
-                self.session = None
-
             if self.engine:
                 self.engine.dispose()
                 self.engine = None
 
-            self.session_factory = None
             logger.info("数据库连接已关闭")
 
         except SQLAlchemyError as error:

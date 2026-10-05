@@ -749,7 +749,6 @@ class TestSQLAlchemyDriver(unittest.TestCase):
         """测试断开连接时的SQLAlchemy错误"""
         driver = SQLAlchemyDriver(self.base_config)
         driver.engine = MagicMock()
-        driver.session = MagicMock()
         from sqlalchemy.exc import SQLAlchemyError
 
         driver.engine.dispose.side_effect = SQLAlchemyError("断开错误")
@@ -760,7 +759,6 @@ class TestSQLAlchemyDriver(unittest.TestCase):
         """测试断开连接时的通用错误"""
         driver = SQLAlchemyDriver(self.base_config)
         driver.engine = MagicMock()
-        driver.session = MagicMock()
         driver.engine.dispose.side_effect = Exception("未知错误")
         # 应该会抛出异常
         with self.assertRaises(Exception):
@@ -905,7 +903,6 @@ class TestSQLAlchemyDriver(unittest.TestCase):
         driver = SQLAlchemyDriver(self.base_config)
         mock_engine = MagicMock()
         driver.engine = mock_engine
-        driver.session = MagicMock()
         driver.disconnect()
         mock_engine.dispose.assert_called_once()
         self.assertIsNone(driver.engine)
