@@ -709,7 +709,10 @@ class TestDatabaseManager(unittest.TestCase):
     @patch("src.db_connector_tool.core.connections.ConfigManager")
     @patch("src.db_connector_tool.core.connections.ConnectionPoolManager")
     def test_test_connection_exception(self, mock_pool_manager, mock_config_manager):
-        """测试 test_connection 方法的异常处理"""
+        """测试 test_connection 方法的异常处理
+
+        连接失败的错误计数统一由 get_connection 负责，test_connection 不再重复计数。
+        """
         mock_config_instance = Mock()
         mock_config_manager.return_value = mock_config_instance
         mock_config_instance.list_configs.return_value = ["test_db"]
@@ -723,7 +726,7 @@ class TestDatabaseManager(unittest.TestCase):
         result = db_manager.test_connection("test_db")
 
         self.assertFalse(result)
-        mock_pool_instance.record_connection_error.assert_called_once()
+        mock_pool_instance.record_connection_error.assert_not_called()
         mock_pool_instance.remove_connection.assert_called_once_with("test_db")
 
     @patch("src.db_connector_tool.core.connections.ConfigManager")

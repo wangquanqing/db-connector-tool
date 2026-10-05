@@ -300,6 +300,9 @@ class ConnectionPoolManager:
         默认只做基本状态检查（驱动存在且已连接），不做任何数据库往返；
         ``ping=True`` 时额外执行一次真实查询，用于诊断场景。
 
+        驱动是鸭子类型，可能没有 ``test_connection``（见 add_connection 的约定）：
+        此时探测会被跳过并视为「状态有效」，而不是让诊断接口抛 AttributeError。
+
         Args:
             driver: 数据库驱动实例
             ping: 是否执行真实连通性查询，默认 False
@@ -318,9 +321,14 @@ class ConnectionPoolManager:
             if not ping:
                 return True
 
-            return driver.test_connection()
+            test_connection = getattr(driver, "test_connection", None)
+            if not callable(test_connection):
+                logger.debug("驱动未提供 test_connection，跳过连通性探测")
+                return True
 
-        except (OSError, DatabaseError) as error:
+            return bool(test_connection())
+
+        except (OSError, DatabaseError, AttributeError, TypeError) as error:
             logger.debug("连接有效性检查失败: %s", str(error))
             return False
 

@@ -496,7 +496,7 @@ class DatabaseManager:
         try:
             driver.connect()
         except (OSError, DBConnectionError) as connect_error:
-            self.pool_manager.record_connection_error(name, connect_error)
+            # 错误计数由 get_connection 统一记录，避免同一次失败被计两次
             logger.error("建立数据库连接失败 %s: %s", name, str(connect_error))
             self._handle_connection_error(connect_error)
 
@@ -568,7 +568,7 @@ class DatabaseManager:
 
             return success
         except (OSError, DBConnectionError) as connect_error:
-            self.pool_manager.record_connection_error(name, connect_error)
+            # 连接失败的错误计数已由 get_connection 记录，这里不重复计数
             logger.error("连接测试失败 %s: %s", name, str(connect_error))
             self.pool_manager.remove_connection(name)
             return False
