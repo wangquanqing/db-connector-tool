@@ -130,28 +130,40 @@ class ConfigSecurityManager:
         if len(config["metadata"]["audit_log"]) > 100:
             config["metadata"]["audit_log"] = config["metadata"]["audit_log"][-100:]
 
-    def verify_config_signature(self, config: Dict[str, Any]) -> None:
+    def verify_config_signature(
+        self, config: Dict[str, Any], require_signature: bool = True
+    ) -> None:
         """验证配置文件数字签名
 
-        验证配置文件的数字签名，确保配置文件未被篡改，并检查签名时间戳。
+        验证配置文件的数字签名，确保配置文件未被篡改。
+
+        由于本库写出的配置文件**始终**带签名，缺失签名意味着文件被外部
+        编辑过，因此默认（``require_signature=True``）视为完整性校验失败；
+        仅当显式传入 ``require_signature=False`` 时才跳过校验（用于迁移
+        历史遗留的无签名配置）。
 
         Args:
             config: 配置字典，包含metadata字段和signature字段
+            require_signature: 是否要求签名必须存在，默认 True
 
         Raises:
-            ConfigError: 签名验证失败
+            ConfigError: 缺少签名或签名验证失败
 
         Example:
-            >>> is_valid = security_manager.verify_config_signature(config)
-            >>> print(is_valid)
-            True
+            >>> security_manager.verify_config_signature(config)
         """
 
         try:
             signature = config.get("metadata", {}).get("signature", "")
 
             if not signature:
-                logger.debug("配置文件无数字签名，跳过验证")
+                if require_signature:
+                    logger.error("配置文件缺少数字签名，无法验证完整性")
+                    raise ConfigError(
+                        "配置文件缺少数字签名，可能已被外部修改；"
+                        "若为历史遗留的无签名配置，请以 require_signature=False 加载后重新保存"
+                    )
+                logger.warning("配置文件无数字签名，已按 require_signature=False 跳过验证")
                 return
 
             try:

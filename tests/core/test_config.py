@@ -1,6 +1,7 @@
+import re
 import unittest
-from pathlib import Path
 import unittest.mock
+from pathlib import Path
 
 
 from src.db_connector_tool.core.config import ConfigManager
@@ -508,6 +509,36 @@ class TestConfigManagerAdvanced(IsolatedTestCase):
             config_manager.add_config("test_db", {"host": "localhost"})
             with self.assertRaises(ConfigError):
                 config_manager.add_config("test_db", {"host": "localhost"})
+
+    def test_load_rejects_unsigned_config(self) -> None:
+        """配置文件被外部清空签名后应拒绝加载（完整性校验）"""
+        with ConfigManager(self.app_name, self.config_file) as config_manager:
+            config_manager.add_config("test_db", {"host": "localhost"})
+
+        config_path = self.temp_path / self.config_file
+        original = config_path.read_text(encoding="utf-8")
+        self.assertIn("signature = ", original)
+        tampered = re.sub(r'signature = "[^"]*"', 'signature = ""', original)
+        config_path.write_text(tampered, encoding="utf-8")
+
+        # 签名校验发生在读取配置时（构造阶段不会主动加载）
+        with self.assertRaises(ConfigError):
+            ConfigManager(self.app_name, self.config_file).list_configs()
+
+    def test_load_unsigned_config_when_not_required(self) -> None:
+        """require_signature=False 时允许加载无签名配置（迁移用）"""
+        with ConfigManager(self.app_name, self.config_file) as config_manager:
+            config_manager.add_config("test_db", {"host": "localhost"})
+
+        config_path = self.temp_path / self.config_file
+        original = config_path.read_text(encoding="utf-8")
+        tampered = re.sub(r'signature = "[^"]*"', 'signature = ""', original)
+        config_path.write_text(tampered, encoding="utf-8")
+
+        with ConfigManager(
+            self.app_name, self.config_file, require_signature=False
+        ) as migrated:
+            self.assertIn("test_db", migrated.list_configs())
 
     def test_invalid_operation_type(self) -> None:
         """测试无效的操作类型"""

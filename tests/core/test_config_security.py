@@ -38,9 +38,8 @@ class TestConfigSecurityManager(IsolatedTestCase):
         self.assertEqual(security_manager.key_manager, self.key_manager)
 
     def test_validate_config_signature(self) -> None:
-        """测试验证配置签名"""
+        """缺少数字签名时默认拒绝加载（本库写出的配置始终带签名）"""
         security_manager = ConfigSecurityManager(self.key_manager)
-        # 生成配置数据
         config = {
             "version": "1.0.0",
             "app_name": self.app_name,
@@ -54,8 +53,30 @@ class TestConfigSecurityManager(IsolatedTestCase):
             },
         }
 
-        # 验证没有签名的配置
-        security_manager.verify_config_signature(config)
+        with self.assertRaises(ConfigError):
+            security_manager.verify_config_signature(config)
+
+        # 完全没有 signature 字段时同样拒绝
+        del config["metadata"]["signature"]
+        with self.assertRaises(ConfigError):
+            security_manager.verify_config_signature(config)
+
+    def test_validate_config_signature_without_requirement(self) -> None:
+        """显式 require_signature=False 时允许加载无签名配置（迁移场景）"""
+        security_manager = ConfigSecurityManager(self.key_manager)
+        config = {
+            "version": "1.0.0",
+            "app_name": self.app_name,
+            "connections": {},
+            "metadata": {
+                "created": "2024-01-01T00:00:00",
+                "last_modified": "2024-01-01T00:00:00",
+                "key_version": "1",
+                "audit_log": [],
+            },
+        }
+
+        security_manager.verify_config_signature(config, require_signature=False)
 
     def test_verify_config_signature_with_valid_signature(self) -> None:
         """测试验证有效的配置签名"""

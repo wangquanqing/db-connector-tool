@@ -57,7 +57,10 @@ class ConfigManager:
     OPERATION_ROTATE_KEY = "rotate_key"
 
     def __init__(
-        self, app_name: str = "db_connector_tool", config_file: str = "connections.toml"
+        self,
+        app_name: str = "db_connector_tool",
+        config_file: str = "connections.toml",
+        require_signature: bool = True,
     ) -> None:
         """初始化配置管理器
 
@@ -66,6 +69,9 @@ class ConfigManager:
         Args:
             app_name: 应用名称，用于确定配置目录和密钥存储
             config_file: 配置文件名，默认为"connections.toml"
+            require_signature: 加载配置时是否要求数字签名必须存在（默认 True）。
+                配置文件缺失签名说明它被外部编辑过，此时会拒绝加载；
+                仅在迁移历史遗留的无签名配置时置为 False。
 
         Raises:
             ConfigError: 配置文件初始化失败
@@ -82,6 +88,7 @@ class ConfigManager:
         try:
             self.app_name = app_name
             self.config_file = config_file
+            self.require_signature = require_signature
             self.key_manager = KeyManager(app_name)
             self.security_manager = ConfigSecurityManager(self.key_manager)
             self._config_cache: Optional[Dict[str, Any]] = None
@@ -379,7 +386,9 @@ class ConfigManager:
 
         ConfigValidator.validate_config(config)
 
-        self.security_manager.verify_config_signature(config)
+        self.security_manager.verify_config_signature(
+            config, require_signature=self.require_signature
+        )
 
         self._config_cache = config
         self._config_mtime = current_mtime
