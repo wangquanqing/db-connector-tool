@@ -15,12 +15,13 @@ Example:
 """
 
 import argparse
+import codecs
 import csv
 import getpass
 import json
 import shutil
 import sys
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import sqlparse
 from sqlalchemy import RowMapping
@@ -34,10 +35,12 @@ from .core.exceptions import (
     FileSystemError,
 )
 from .drivers.sqlalchemy_driver import BASIC_PARAMS
-from .utils.logging_utils import setup_logging
+from .utils.logging_utils import get_logger, setup_logging
 from .utils.path_utils import PathHelper
 
-logger = setup_logging(app_name="db_connector_tool", level="debug")
+# 注意：日志在 DBConnectorCLI 实例化时才初始化（见 __init__），
+# 避免仅仅 import 本模块就在用户配置目录里创建日志文件。
+logger = get_logger(__name__)
 
 
 class DBConnectorCLI:
@@ -69,11 +72,12 @@ class DBConnectorCLI:
     def __init__(self) -> None:
         """初始化命令行接口实例
 
-        数据库管理器将在首次使用时延迟初始化。
+        初始化日志系统，数据库管理器将在首次使用时延迟初始化。
 
         Example:
         >>> cli = DBConnectorCLI()
         """
+        setup_logging(app_name="db_connector_tool", level="debug")
         self.db_manager: Optional[DatabaseManager] = None
 
     def show_version(self, _args: argparse.Namespace) -> None:
@@ -776,7 +780,10 @@ class DBConnectorCLI:
             sys.exit(1)
 
     def _parse_sql_file(self, file_path: str) -> List[str]:
-        """解析SQL文件（自动尝试多种编码）
+        """解析SQL文件（自动识别编码）
+
+        编码判定顺序见 :meth:`_detect_encodings`：带 BOM 时以 BOM 为准，
+        否则按 UTF-8 → GBK → CP1252 → Latin-1 依次尝试。
 
         Args:
             file_path: SQL文件路径
@@ -787,36 +794,46 @@ class DBConnectorCLI:
         Raises:
             FileNotFoundError: 文件不存在
         """
-        encodings = [
-            "utf-8",
-            "utf-16",
-            "utf-16-le",
-            "utf-16-be",
-            "gbk",
-            "latin-1",
-            "cp1252",
-        ]
-        for encoding in encodings:
+        with open(file_path, "rb") as file_handle:
+            raw_bytes = file_handle.read()
+
+        for encoding in self._detect_encodings(raw_bytes):
             try:
-                if encoding.startswith("utf-16"):
-                    with open(file_path, "rb") as fh:
-                        raw_bytes = fh.read()
-                    sql_content = raw_bytes.decode(encoding, errors="strict")
-                    if sql_content.startswith("\ufeff"):
-                        sql_content = sql_content[1:]
-                else:
-                    with open(file_path, "r", encoding=encoding) as fh:
-                        sql_content = fh.read()
-                parsed = sqlparse.parse(sql_content)
-                statements = [str(stmt).strip() for stmt in parsed if str(stmt).strip()]
-                if statements:
-                    logger.debug("成功使用 %s 编码解析SQL文件", encoding)
-                    return statements
+                sql_content = raw_bytes.decode(encoding)
             except UnicodeDecodeError as error:
                 logger.debug("编码 %s 解析失败: %s", encoding, error)
                 continue
+            parsed = sqlparse.parse(sql_content)
+            statements = [str(stmt).strip() for stmt in parsed if str(stmt).strip()]
+            if statements:
+                logger.debug("成功使用 %s 编码解析SQL文件", encoding)
+                return statements
         logger.warning("所有编码尝试均失败，文件: %s", file_path)
         return []
+
+    @staticmethod
+    def _detect_encodings(raw_bytes: bytes) -> Tuple[str, ...]:
+        """给出 SQL 文件的候选解码顺序
+
+        关键点：**不能盲目尝试 UTF-16**。单字节编码（GBK/Latin-1）的文件
+        按 UTF-16 解码往往“成功但整篇乱码”，会把中文 SQL 悄悄解成乱码。
+        因此只有存在 BOM 时才按 UTF-16 解码。
+
+        Args:
+            raw_bytes: 文件原始字节
+
+        Returns:
+            Tuple[str, ...]: 候选编码序列
+
+        Example:
+            >>> DBConnectorCLI._detect_encodings(b"SELECT 1")
+            ('utf-8', 'gbk', 'cp1252', 'latin-1')
+        """
+        if raw_bytes.startswith(codecs.BOM_UTF8):
+            return ("utf-8-sig",)
+        if raw_bytes.startswith((codecs.BOM_UTF16_LE, codecs.BOM_UTF16_BE)):
+            return ("utf-16",)
+        return ("utf-8", "gbk", "cp1252", "latin-1")
 
     def _run_single_sql(
         self, conn_name: str, sql: str, show_truncated: bool = False
