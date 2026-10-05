@@ -170,27 +170,57 @@ class TestConnectionPoolManager(unittest.TestCase):
         self.assertEqual(non_existent_info, {})
 
     def test_is_connection_valid(self):
-        """测试连接有效性检查"""
-        # 创建模拟的驱动实例
+        """连接有效性检查：默认廉价，ping=True 才做真实探测"""
         mock_driver = Mock()
+        mock_driver.engine = Mock()
         mock_driver.test_connection.return_value = True
 
-        # 测试有效的连接
-        is_valid = self.pool_manager._is_connection_valid(mock_driver)
-        self.assertTrue(is_valid)
+        # 默认只做基本状态检查，不产生数据库往返
+        self.assertTrue(self.pool_manager._is_connection_valid(mock_driver))
+        mock_driver.test_connection.assert_not_called()
 
-        # 测试无效的连接（test_connection 返回 False）
+        # ping=True 时按真实探测结果判定
+        self.assertTrue(self.pool_manager._is_connection_valid(mock_driver, ping=True))
+        mock_driver.test_connection.assert_called_once()
+
         mock_driver.test_connection.return_value = False
-        is_valid = self.pool_manager._is_connection_valid(mock_driver)
-        self.assertFalse(is_valid)
+        self.assertFalse(
+            self.pool_manager._is_connection_valid(mock_driver, ping=True)
+        )
 
-        # 测试没有 test_connection 方法但有 engine 属性的驱动（SQLAlchemy 驱动）
-        mock_sqlalchemy_driver = Mock()
-        mock_sqlalchemy_driver.test_connection = Mock(return_value=True)
-        mock_sqlalchemy_driver.engine = Mock()
-        mock_sqlalchemy_driver.engine.connect = Mock()
-        is_valid = self.pool_manager._is_connection_valid(mock_sqlalchemy_driver)
-        self.assertTrue(is_valid)
+        # 已断开（engine 为空）的驱动一律无效
+        mock_driver.engine = None
+        self.assertFalse(self.pool_manager._is_connection_valid(mock_driver))
+
+    def test_get_statistics_and_get_connection_do_not_ping(self):
+        """统计与取连接默认都不触发查询（repr/日志可安全调用）"""
+        mock_driver = Mock()
+        mock_driver.engine = Mock()
+        self.pool_manager.add_connection("test_db", mock_driver)
+
+        stats = self.pool_manager.get_statistics()
+        self.assertEqual(stats["active_connections"], 1)
+        mock_driver.test_connection.assert_not_called()
+
+        self.assertIs(
+            self.pool_manager.get_connection("test_db"), mock_driver
+        )
+        mock_driver.test_connection.assert_not_called()
+
+        # 显式要求时才会探测
+        self.pool_manager.get_statistics(ping=True)
+        mock_driver.test_connection.assert_called_once()
+
+    def test_get_connection_pool_status_pings(self):
+        """诊断接口按定义执行真实探测"""
+        mock_driver = Mock()
+        mock_driver.engine = Mock()
+        mock_driver.test_connection.return_value = True
+        self.pool_manager.add_connection("test_db", mock_driver)
+
+        status = self.pool_manager.get_connection_pool_status()
+        self.assertEqual(status["active_connections"], 1)
+        mock_driver.test_connection.assert_called_once()
 
     def test_remove_nonexistent_connection(self):
         """测试移除不存在的连接"""
@@ -424,23 +454,28 @@ class TestConnectionPoolManager(unittest.TestCase):
         # 恢复原连接池
         self.pool_manager.connection_pool = original_pool
 
-    def test_get_connection_invalid_connection(self):
-        """测试获取无效连接时的清理"""
-        # 创建模拟的驱动实例，先添加成功，然后让连接变为无效
+    def test_get_connection_evicts_broken_driver(self):
+        """基本状态失效（engine 为空）的驱动会被剔除并清理"""
         mock_driver = Mock()
-        mock_driver.test_connection.return_value = True
-
-        # 添加连接（此时 test_connection 返回 True）
+        mock_driver.engine = Mock()
         connection_name = "test_db"
         self.pool_manager.add_connection(connection_name, mock_driver)
 
-        # 现在让连接变为无效
-        mock_driver.test_connection.return_value = False
-
-        # 重新获取连接，应该返回 None 并清理
+        # 驱动断开后（engine 清空）再取用应被剔除
+        mock_driver.engine = None
         retrieved = self.pool_manager.get_connection(connection_name)
         self.assertIsNone(retrieved)
         self.assertNotIn(connection_name, self.pool_manager.connection_pool)
+
+    def test_get_connection_keeps_driver_for_pool_pre_ping(self):
+        """取连接不做实探，连通性交给引擎的 pool_pre_ping"""
+        mock_driver = Mock()
+        mock_driver.engine = Mock()
+        self.pool_manager.add_connection("test_db", mock_driver)
+
+        mock_driver.test_connection.return_value = False
+        self.assertIs(self.pool_manager.get_connection("test_db"), mock_driver)
+        mock_driver.test_connection.assert_not_called()
 
     def test_record_connection_error_no_metadata(self):
         """测试记录没有元数据的连接的错误"""

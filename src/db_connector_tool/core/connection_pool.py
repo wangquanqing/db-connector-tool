@@ -64,10 +64,15 @@ class ConnectionPoolManager:
         self._connection_metadata: Dict[str, Dict[str, Any]] = {}
         logger.info("连接池管理器初始化成功")
 
-    def get_statistics(self) -> Dict[str, Any]:
+    def get_statistics(self, ping: bool = False) -> Dict[str, Any]:
         """获取连接统计信息
 
         获取数据库连接的统计信息，包含连接创建、关闭、错误等统计数据。
+
+        Args:
+            ping: 是否对池内连接做真实连通性探测。默认 False，只做廉价的状态
+                检查（不产生任何数据库往返），因此 ``repr()``、日志等场景不会
+                意外发起查询；需要精确活跃数时显式传 ``ping=True``。
 
         Returns:
             Dict[str, Any]: 统计信息字典，包含连接创建、关闭、错误等统计
@@ -85,7 +90,7 @@ class ConnectionPoolManager:
                 [
                     conn
                     for conn in self.connection_pool.values()
-                    if self._is_connection_valid(conn)
+                    if self._is_connection_valid(conn, ping=ping)
                 ]
             )
             stats["connection_pool_size"] = len(self.connection_pool)
@@ -258,6 +263,9 @@ class ConnectionPoolManager:
 
         从连接池获取指定名称的连接，如果连接无效则返回None。
 
+        这里只做廉价的状态检查：真实的连通性由引擎的 ``pool_pre_ping`` 在
+        取用连接时保证，因此不会为每次取连接额外增加一次数据库往返。
+
         Args:
             name: 连接名称
 
@@ -284,13 +292,17 @@ class ConnectionPoolManager:
             self._remove_connection_from_pool(name)
             return None
 
-    def _is_connection_valid(self, driver: SQLAlchemyDriver) -> bool:
+    def _is_connection_valid(
+        self, driver: SQLAlchemyDriver, ping: bool = False
+    ) -> bool:
         """检查连接是否有效
 
-        检查数据库连接是否有效，包括基本状态检查和实际查询测试。
+        默认只做基本状态检查（驱动存在且已连接），不做任何数据库往返；
+        ``ping=True`` 时额外执行一次真实查询，用于诊断场景。
 
         Args:
             driver: 数据库驱动实例
+            ping: 是否执行真实连通性查询，默认 False
 
         Returns:
             bool: 连接是否有效
@@ -302,6 +314,9 @@ class ConnectionPoolManager:
             if not self._check_driver_basic_status(driver):
                 logger.debug("驱动实例基本状态检查失败")
                 return False
+
+            if not ping:
+                return True
 
             return driver.test_connection()
 
@@ -678,7 +693,8 @@ class ConnectionPoolManager:
 
         active_count = 0
         for conn in self.connection_pool.values():
-            if self._is_connection_valid(conn):
+            # 诊断接口按定义需要真实活跃数，因此这里执行连通性探测
+            if self._is_connection_valid(conn, ping=True):
                 active_count += 1
 
         return {

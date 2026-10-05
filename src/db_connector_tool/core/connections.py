@@ -120,6 +120,9 @@ class DatabaseManager:
     def __repr__(self) -> str:
         """返回数据库管理器的详细表示，用于调试
 
+        只读取内存中的池统计与配置文件，**不会发起任何数据库查询**
+        （否则调试器、日志里打印对象就可能阻塞在网络上）。
+
         Returns:
             str: 包含完整配置信息的字符串，用于调试
 
@@ -129,7 +132,7 @@ class DatabaseManager:
             connection_count=3, pool_size=5, statistics={...})"
         """
 
-        stats = self.pool_manager.get_statistics()
+        stats = self.pool_manager.get_statistics(ping=False)
         # 从配置管理器获取连接名称列表
         connection_names = self.list_connections()
 
