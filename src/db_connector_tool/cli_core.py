@@ -432,7 +432,9 @@ class DBConnectorCLI:
             else:
                 raise FileSystemError(f"不支持的输出文件格式: {output_path}")
             print(f"✅ 结果已保存到: {output_path}")
-        except (DatabaseError, ConfigError, FileSystemError) as error:
+        except (DatabaseError, ConfigError, FileSystemError, OSError) as error:
+            # OSError 覆盖目录不存在、磁盘已满、权限不足等文件系统错误，
+            # 否则用户会看到裸 traceback 而不是统一的中文提示
             logger.error("保存结果失败: %s", error)
             print(f"❌ 保存结果失败: {error}")
             sys.exit(1)
@@ -774,7 +776,8 @@ class DBConnectorCLI:
             rate = (success / total_count * 100) if total_count > 0 else 0
             print(f"\n执行完成: 成功 {success} 条，失败 {failed} 条")
             print(f"成功率: {rate:.1f}%")
-        except (DatabaseError, ConfigError, FileSystemError) as error:
+        except (DatabaseError, ConfigError, FileSystemError, OSError) as error:
+            # OSError 覆盖文件不存在、无读取权限等常见输入错误
             logger.error("执行SQL文件失败: %s", error)
             print(f"❌ 执行SQL文件失败: {error}")
             sys.exit(1)

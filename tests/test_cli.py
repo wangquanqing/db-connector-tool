@@ -13,7 +13,11 @@ from unittest import mock
 
 from src.db_connector_tool.cli import create_argument_parser, main
 from src.db_connector_tool.cli_core import DBConnectorCLI
-from src.db_connector_tool.core.exceptions import ConfigError, DBConnectorError
+from src.db_connector_tool.core.exceptions import (
+    ConfigError,
+    DatabaseError,
+    DBConnectorError,
+)
 
 from ._isolation import IsolatedTestCase
 
@@ -514,6 +518,73 @@ class TestCommandHandlers(CLITestCase):
                 self.cli.interactive_shell, self.parse(["shell", "db"])
             )
         self.assertIn("再见", output)
+
+
+class TestCommandHandlerFailures(CLITestCase):
+    """各子命令的统一失败行为：友好提示 + 退出码 1（不裸抛异常）"""
+
+    def _assert_exit_1(self, handler, argv):
+        """执行处理函数，断言退出码为 1，并返回这段时间的标准输出"""
+        buffer = io.StringIO()
+        with self.assertRaises(SystemExit) as context:
+            with redirect_stdout(buffer):
+                handler(self.parse(argv))
+        self.assertEqual(context.exception.code, 1)
+        return buffer.getvalue()
+
+    def test_remove_connection_failure(self) -> None:
+        """remove 失败时友好退出"""
+        self.cli.db_manager.remove_connection.side_effect = ConfigError("not found")
+        self._assert_exit_1(self.cli.remove_connection, ["remove", "db"])
+
+    def test_update_connection_failure(self) -> None:
+        """update 读取现有配置失败时友好退出"""
+        self.cli.db_manager.show_connection.side_effect = ConfigError("missing")
+        self._assert_exit_1(self.cli.update_connection, ["update", "db", "-T", "mysql"])
+
+    def test_show_connection_failure(self) -> None:
+        """show 失败时友好退出"""
+        self.cli.db_manager.show_connection.side_effect = DatabaseError("boom")
+        self._assert_exit_1(self.cli.show_connection, ["show", "db"])
+
+    def test_list_connections_failure(self) -> None:
+        """list 失败时友好退出"""
+        self.cli.db_manager.list_connections.side_effect = DatabaseError("boom")
+        self._assert_exit_1(self.cli.list_connections, ["list"])
+
+    def test_test_connection_exception(self) -> None:
+        """test 抛错时友好退出"""
+        self.cli.db_manager.test_connection.side_effect = DatabaseError("boom")
+        self._assert_exit_1(self.cli.test_connection, ["test", "db"])
+
+    def test_execute_query_failure(self) -> None:
+        """query 执行失败时友好退出"""
+        self.cli.db_manager.execute_query.side_effect = DatabaseError("boom")
+        self._assert_exit_1(self.cli.execute_query, ["query", "db", "SELECT 1"])
+
+    def test_execute_command_failure(self) -> None:
+        """command 执行失败时友好退出"""
+        self.cli.db_manager.execute_command.side_effect = DatabaseError("boom")
+        self._assert_exit_1(self.cli.execute_command, ["command", "db", "DELETE FROM t"])
+
+    def test_save_output_oserror_is_friendly(self) -> None:
+        """导出目录不存在时应给出中文提示而非裸 traceback"""
+        self.cli.db_manager.execute_query.return_value = ([{"id": 1}], 0.01)
+        bad_path = str(self.temp_path / "no_such_dir" / "out.csv")
+
+        output = self._assert_exit_1(
+            self.cli.execute_query, ["query", "db", "SELECT 1", "-o", bad_path]
+        )
+        self.assertIn("保存结果失败", output)
+
+    def test_execute_file_missing_file_is_friendly(self) -> None:
+        """SQL 文件不存在时应给出中文提示而非裸 traceback"""
+        missing = str(self.temp_path / "missing.sql")
+
+        output = self._assert_exit_1(
+            self.cli.execute_file, ["file", "db", missing, "-c"]
+        )
+        self.assertIn("执行SQL文件失败", output)
 
 
 class TestMainEntry(CLITestCase):
