@@ -21,10 +21,14 @@ class TestPathHelper(unittest.TestCase):
         shutil.rmtree(self.temp_dir)
 
     def test_get_user_config_dir(self):
-        """测试获取用户配置目录"""
-        config_dir = PathHelper.get_user_config_dir(self.app_name)
-        self.assertIsInstance(config_dir, Path)
-        self.assertTrue(config_dir.exists())
+        """测试获取用户配置目录（隔离到临时目录，避免污染真实用户目录）"""
+        with mock.patch.dict(
+            os.environ, {"APPDATA": self.temp_dir}
+        ), mock.patch.object(Path, "home", return_value=Path(self.temp_dir)):
+            config_dir = PathHelper.get_user_config_dir(self.app_name)
+            self.assertIsInstance(config_dir, Path)
+            self.assertTrue(config_dir.exists())
+            self.assertTrue(str(config_dir).startswith(self.temp_dir))
 
         # 测试应用名称验证
         with self.assertRaises(ValueError):
@@ -176,10 +180,12 @@ class TestPathHelper(unittest.TestCase):
 
     @mock.patch("src.db_connector_tool.utils.path_utils.platform.system")
     def test_get_user_config_dir_macos(self, mock_system):
-        """测试macOS系统下获取配置目录"""
+        """测试macOS系统下获取配置目录（home 指向临时目录）"""
         mock_system.return_value = "Darwin"
-        config_dir = PathHelper.get_user_config_dir(self.app_name)
-        self.assertIsInstance(config_dir, Path)
+        with mock.patch.object(Path, "home", return_value=Path(self.temp_dir)):
+            config_dir = PathHelper.get_user_config_dir(self.app_name)
+            self.assertIsInstance(config_dir, Path)
+            self.assertTrue(str(config_dir).startswith(self.temp_dir))
 
     @mock.patch("src.db_connector_tool.utils.path_utils.platform.system")
     def test_get_user_config_dir_fallback_failure(self, mock_system):

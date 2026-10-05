@@ -151,10 +151,10 @@ class TestBatchDatabaseManager(IsolatedTestCase):
                 "execute_query",
                 return_value=([{"id": 1}], 0.1),
             ) as mock_query:
-                ddl_result = self.batch_manager._execute_statement(
+                ddl_result = self.batch_manager._execute_statement(  # pylint: disable=protected-access
                     "db_000", "ALTER TABLE t ADD COLUMN c INT"
                 )
-                query_result = self.batch_manager._execute_statement(
+                query_result = self.batch_manager._execute_statement(  # pylint: disable=protected-access
                     "db_000", "SELECT id FROM t"
                 )
 
