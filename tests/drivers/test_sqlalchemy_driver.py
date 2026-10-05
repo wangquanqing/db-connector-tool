@@ -175,16 +175,14 @@ class TestSQLAlchemyDriver(unittest.TestCase):
             driver._validate_sql_query(long_query)
 
     def test_validate_sql_query_drop_table(self) -> None:
-        """测试验证危险的 DROP TABLE 查询"""
+        """显式 DROP TABLE 属管理语句，应放行（CLI 已声明支持）"""
         driver = SQLAlchemyDriver(self.base_config)
-        with self.assertRaises(ValueError):
-            driver._validate_sql_query("DROP TABLE users")
+        driver._validate_sql_query("DROP TABLE users")
 
     def test_validate_sql_query_truncate_table(self) -> None:
-        """测试验证危险的 TRUNCATE TABLE 查询"""
+        """显式 TRUNCATE TABLE 属管理语句，应放行"""
         driver = SQLAlchemyDriver(self.base_config)
-        with self.assertRaises(ValueError):
-            driver._validate_sql_query("TRUNCATE TABLE users")
+        driver._validate_sql_query("TRUNCATE TABLE users")
 
     def test_validate_sql_query_sql_injection_1(self) -> None:
         """测试验证 SQL 注入模式 1"""
@@ -193,18 +191,46 @@ class TestSQLAlchemyDriver(unittest.TestCase):
             driver._validate_sql_query("SELECT * FROM users WHERE id = '1' OR '1'='1'")
 
     def test_validate_sql_query_sql_injection_2(self) -> None:
-        """测试验证 SQL 注入模式 2"""
+        """测试验证 SQL 注入模式 2（分号后追加第二条语句）"""
         driver = SQLAlchemyDriver(self.base_config)
         with self.assertRaises(ValueError):
             driver._validate_sql_query("SELECT * FROM users; DROP TABLE users; --")
 
-    def test_validate_sql_query_union_injection(self) -> None:
-        """测试验证 UNION 注入"""
+    def test_validate_sql_query_or_1_equals_1(self) -> None:
+        """结构性 OR 1=1 注入仍被拦截"""
         driver = SQLAlchemyDriver(self.base_config)
         with self.assertRaises(ValueError):
-            driver._validate_sql_query(
-                "SELECT * FROM users UNION ALL SELECT * FROM secrets"
-            )
+            driver._validate_sql_query("SELECT * FROM users WHERE id = 1 OR 1=1")
+
+    def test_validate_sql_query_blocks_multi_statement(self) -> None:
+        """一次执行多条语句（语句走私）必须拒绝"""
+        driver = SQLAlchemyDriver(self.base_config)
+        for sql in (
+            "SELECT * FROM users; DROP TABLE users",
+            "SELECT 1; DELETE FROM users",
+            "SELECT * FROM users; /* comment */ SELECT * FROM orders",
+        ):
+            with self.subTest(sql=sql):
+                with self.assertRaises(ValueError):
+                    driver._validate_sql_query(sql)
+
+    def test_validate_sql_query_allows_metadata_and_union(self) -> None:
+        """information_schema / sys 元数据查询与 UNION 查询都是合法 SQL"""
+        driver = SQLAlchemyDriver(self.base_config)
+        driver._validate_sql_query("SELECT table_name FROM information_schema.tables")
+        driver._validate_sql_query("SELECT name FROM sys.tables")
+        driver._validate_sql_query("SELECT id FROM users UNION SELECT id FROM admins")
+        driver._validate_sql_query(
+            "SELECT id FROM users UNION ALL SELECT id FROM admins"
+        )
+
+    def test_validate_sql_query_ignores_string_literals(self) -> None:
+        """字面量里出现的注入文本属于数据内容，不应误报"""
+        driver = SQLAlchemyDriver(self.base_config)
+        driver._validate_sql_query("SELECT * FROM logs WHERE msg = 'OR 1=1'")
+        driver._validate_sql_query("SELECT * FROM logs WHERE msg = 'xp_cmdshell'")
+        driver._validate_sql_query("SELECT * FROM logs WHERE msg = 'a; DROP TABLE t'")
+        driver._validate_sql_query("SELECT * FROM logs WHERE msg = 'UNION SELECT'")
 
     def test_validate_sql_query_grant(self) -> None:
         """测试验证 GRANT 命令"""

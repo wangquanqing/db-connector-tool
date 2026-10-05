@@ -41,6 +41,7 @@ from sqlalchemy.orm import scoped_session, sessionmaker
 
 from ..core.exceptions import DBConnectionError, DriverError, QueryError
 from ..utils.logging_utils import get_logger
+from .sql_validator import validate_sql
 
 logger = get_logger(__name__)
 
@@ -768,86 +769,25 @@ class SQLAlchemyDriver:
     def _validate_sql_query(self, query: str) -> None:
         """验证SQL查询语句，防止SQL注入攻击（内部方法）
 
-        检查 SQL 查询语句的长度、危险模式和注释，
-        防止 SQL 注入攻击和其他安全风险。
+        校验策略（防注入而非限制语句种类）见
+        :mod:`db_connector_tool.drivers.sql_validator`：
+
+        1. 长度上限；
+        2. 在剥离字符串字面量与注释后的语句结构上匹配注入特征，合法的
+           ``information_schema`` / ``UNION`` 查询与含注入文本的字面量都不误伤；
+        3. 拒绝多条语句（语句走私），存储过程/触发器定义除外；
+        4. 基于原始 SQL 匹配可疑注释特征。
+
+        显式的 ``DROP`` / ``TRUNCATE`` 等管理语句是允许的（CLI 亦声明支持），
+        它们只有以“第二条语句”形式出现时才会被拒绝。
 
         Args:
             query: SQL查询语句字符串
 
         Raises:
-            ValueError: 当查询语句包含潜在的注入攻击代码时
+            ValueError: 当查询语句过长、包含多条语句或命中注入特征时
         """
-        if len(query) > 10000:
-            logger.warning("查询语句长度超过限制: %d > 10000", len(query))
-            raise ValueError("查询语句长度超过限制")
-
-        safe_ddl_patterns = [
-            r"(?i)\bCREATE\b\s+\bTABLE\b",
-            r"(?i)\bALTER\b\s+\bTABLE\b",
-            r"(?i)\bCREATE\b\s+\bINDEX\b",
-            r"(?i)\bCREATE\b\s+\bVIEW\b",
-            r"(?i)\bCREATE\b\s+\bPROCEDURE\b",
-            r"(?i)\bCREATE\b\s+\bFUNCTION\b",
-            r"(?i)\bCREATE\b\s+\bTRIGGER\b",
-        ]
-
-        is_safe_ddl = any(re.search(pattern, query) for pattern in safe_ddl_patterns)
-
-        safe_dml_patterns = [
-            r"(?i)^\s*SELECT\s+.*\s+FROM\s+",
-            r"(?i)^\s*INSERT\s+INTO\s+",
-            r"(?i)^\s*UPDATE\s+\w+\s+SET\s+",
-            r"(?i)^\s*DELETE\s+FROM\s+",
-        ]
-        is_safe_dml = any(re.search(pattern, query) for pattern in safe_dml_patterns)
-
-        dangerous_patterns = [
-            (
-                r"(?i)\b(DROP|TRUNCATE)\s+(TABLE|DATABASE|SCHEMA)\b",
-                "危险的DROP/TRUNCATE操作",
-            ),
-            (r"(?i)\b(GRANT|REVOKE)\s+.*\s+(ON|TO|FROM)\b", "权限变更操作"),
-            (r'(?i)\bEXEC\s*\(\s*[\'"\@]', "动态SQL执行"),
-            (r'(?i)\bEXECUTE\s+\w+\s+.*[\'"].*[\'"].*[\'"]', "存储过程执行"),
-            (r"(?i)\bxp_cmdshell\b", "系统命令执行"),
-            (r"(?i)\bsp_oamethod\b|\bsp_oacreate\b", "OLE自动化存储过程"),
-            (r"(?i)\bBULK\s+INSERT\b", "批量文件导入"),
-            (r"(?i)\bINTO\s+(OUTFILE|DUMPFILE)\b", "文件写入操作"),
-            (r"(?i)\bLOAD_FILE\s*\(", "文件读取操作"),
-            (r'(?i)[\'"]\s*OR\s*[\'"]?\d+[\'"]?\s*=\s*[\'"]?\d+', "布尔盲注尝试"),
-            (r"(?i)UNION\s+ALL\s+SELECT", "UNION注入"),
-            (r'(?i)WAITFOR\s+DELAY\s+[\'"]\d+', "时间盲注"),
-            (r"(?i);\s*SHUTDOWN\s*;?", "数据库关闭命令"),
-            (r"(?i);\s*--", "语句截断尝试"),
-            (r"(?i)\bOR\s+1\s*=\s*1", "OR 1=1 注入"),
-            (r"(?i)\bAND\s+1\s*=\s*1", "AND 1=1 注入"),
-            (r"(?i)\bUNION\s+SELECT\s+", "UNION SELECT 注入"),
-            (r"(?i)\bFROM\s+information_schema", "信息模式查询"),
-            (r"(?i)\bFROM\s+sys\.", "系统表查询"),
-        ]
-
-        for pattern, description in dangerous_patterns:
-            if re.search(pattern, query):
-                logger.warning(
-                    "检测到潜在的SQL注入攻击: %s - %s...", description, query[:100]
-                )
-                raise ValueError(f"查询语句包含潜在的安全风险: {description}")
-
-        suspicious_comment_patterns = [
-            r'(?i)[\'"]\s*--\s*$',
-            r"(?i)/\*!\d+\s+",
-            r"(?i);\s*/\*.*?\*/\s*\w+",
-        ]
-
-        for pattern in suspicious_comment_patterns:
-            if re.search(pattern, query):
-                logger.warning("检测到可疑的SQL注释模式 - %s...", query[:100])
-                raise ValueError("查询语句包含可疑的注释模式")
-
-        if is_safe_ddl:
-            logger.debug("允许合法的DDL操作: %s...", query[:100])
-        elif is_safe_dml:
-            logger.debug("允许合法的DML操作: %s...", query[:100])
+        validate_sql(query)
 
     def get_tables(self) -> List[str]:
         """获取数据库中的所有表名
