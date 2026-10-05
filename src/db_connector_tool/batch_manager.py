@@ -30,7 +30,6 @@ from .core.exceptions import (
     ConfigError,
     DatabaseError,
     DBConnectorError,
-    FileSystemError,
     QueryError,
 )
 from .utils.logging_utils import get_logger
@@ -39,6 +38,9 @@ from .utils.path_utils import PathHelper
 logger = get_logger(__name__)
 
 
+# pylint: disable=too-many-instance-attributes
+# 批量管理器需要同时持有：应用名、临时配置后缀/文件名、数据库管理器、
+# 基础配置模板、连接名列表、线程锁与清理标记，均为必要状态。
 class BatchDatabaseManager:
     """批量数据库连接管理器（临时性配置）(Batch Database Manager)
 
@@ -71,6 +73,7 @@ class BatchDatabaseManager:
             raise ValueError("临时配置后缀不能为'connections'，以避免与主配置文件冲突")
 
         self.app_name = "db_connector_tool"
+        self.temp_config_suffix = temp_config_suffix
         self.temp_config_file = f"connections_{temp_config_suffix}.toml"
 
         self.database_manager = DatabaseManager(self.app_name, self.temp_config_file)
@@ -198,7 +201,7 @@ class BatchDatabaseManager:
                     logger.info("临时配置文件已删除: %s", config_path)
                 else:
                     logger.debug("临时配置文件不存在，无需删除")
-            except FileSystemError as error:
+            except OSError as error:
                 logger.warning("删除临时配置文件失败: %s", error)
 
             self.base_config = None
@@ -305,7 +308,9 @@ class BatchDatabaseManager:
             max_workers: 最大并发线程数
 
         Returns:
-            Dict[str, Any]: 每个连接的执行结果
+            Dict[str, Any]: 连接名到执行结果的映射，每个结果为
+                ``{"success": True, "data": [行字典...], "count": 行数, "elapsed": 秒}``；
+                失败时为 ``{"success": False, "error": 错误信息, "data": [], "count": 0}``
 
         Example:
         >>> results = batch_manager.execute_batch_query("SELECT COUNT(*) FROM users")
@@ -319,16 +324,22 @@ class BatchDatabaseManager:
 
         def execute_single(conn_name):
             try:
-                result = self.database_manager.execute_query(
+                rows, elapsed = self.database_manager.execute_query(
                     conn_name, sql, params or {}
                 )
                 return conn_name, {
                     "success": True,
-                    "data": result,
-                    "count": len(result),
+                    "data": rows,
+                    "count": len(rows) if rows else 0,
+                    "elapsed": elapsed,
                 }
             except DatabaseError as error:
-                return conn_name, {"success": False, "error": str(error), "data": []}
+                return conn_name, {
+                    "success": False,
+                    "error": str(error),
+                    "data": [],
+                    "count": 0,
+                }
 
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             future_to_conn = {
@@ -353,6 +364,9 @@ class BatchDatabaseManager:
         max_workers: int = 3,
     ) -> Dict[str, Dict]:
         """批量升级表结构（支持事务和回滚）
+
+        升级与回滚语句按类型自动路由：查询类语句走查询接口并记录行数，
+        DDL/DML 语句走命令接口并提交事务，确保表结构变更真正落库。
 
         Args:
             upgrade_sqls: 升级 SQL 语句列表
@@ -432,6 +446,50 @@ class BatchDatabaseManager:
         except DatabaseError as error:
             return conn_name, {"success": False, "error": str(error), "executions": []}
 
+    @staticmethod
+    def _is_query_statement(sql: str) -> bool:
+        """判断语句是否需要保留结果集（查询类语句）
+
+        Args:
+            sql: SQL 语句
+
+        Returns:
+            bool: 查询类语句返回 True，DDL/DML 返回 False
+
+        Example:
+        >>> BatchDatabaseManager._is_query_statement("SELECT * FROM t")
+        True
+        >>> BatchDatabaseManager._is_query_statement("ALTER TABLE t ADD c INT")
+        False
+        """
+        return sql.lstrip().lower().startswith(
+            ("select", "with", "show", "describe", "desc", "explain", "values")
+        )
+
+    def _execute_statement(self, conn_name: str, sql: str) -> Dict[str, Any]:
+        """执行单条语句并按语句类型选择接口
+
+        查询类语句走 ``execute_query``（有结果集、不需要提交），
+        其余语句（DDL/DML）走 ``execute_command``（会提交事务），
+        避免用查询接口执行 DDL 时因结果集为空而报错、或因未提交而不落库。
+
+        Args:
+            conn_name: 连接名称
+            sql: SQL 语句
+
+        Returns:
+            Dict[str, Any]: ``{"success": True, "affected_rows": 影响行数}``
+
+        Raises:
+            DatabaseError: 语句执行失败
+        """
+        if self._is_query_statement(sql):
+            rows, _elapsed = self.database_manager.execute_query(conn_name, sql)
+            return {"success": True, "affected_rows": len(rows) if rows else 0}
+
+        affected_rows, _elapsed = self.database_manager.execute_command(conn_name, sql)
+        return {"success": True, "affected_rows": max(affected_rows or 0, 0)}
+
     def _execute_upgrade_sqls(
         self,
         conn_name: str,
@@ -454,14 +512,8 @@ class BatchDatabaseManager:
 
         for sql in upgrade_sqls:
             try:
-                result = self.database_manager.execute_query(conn_name, sql)
-                execution_results.append(
-                    {
-                        "sql": sql,
-                        "success": True,
-                        "affected_rows": len(result) if result else 0,
-                    }
-                )
+                detail = self._execute_statement(conn_name, sql)
+                execution_results.append({"sql": sql, **detail})
             except QueryError as error:
                 execution_results.append(
                     {"sql": sql, "success": False, "error": str(error)}
@@ -505,7 +557,7 @@ class BatchDatabaseManager:
         """
         for sql in rollback_sqls:
             try:
-                self.database_manager.execute_query(conn_name, sql)
+                self._execute_statement(conn_name, sql)
             except DatabaseError as error:
                 logger.warning("回滚执行失败 %s: %s", conn_name, error)
 
@@ -576,7 +628,7 @@ def cleanup_temp_configs(app_name: str = "db_connector_tool") -> None:
             try:
                 temp_file.unlink()
                 logger.info("清理临时配置文件: %s", temp_file)
-            except FileSystemError as error:
+            except OSError as error:
                 logger.warning("清理临时配置文件失败 %s: %s", temp_file, error)
 
         logger.info("共清理 %s 个临时配置文件", len(temp_files))

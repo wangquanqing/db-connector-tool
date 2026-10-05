@@ -8,12 +8,15 @@ from src.db_connector_tool.batch_manager import (
 )
 from src.db_connector_tool.core.exceptions import QueryError
 
+from ._isolation import IsolatedTestCase
 
-class TestBatchDatabaseManager(unittest.TestCase):
+
+class TestBatchDatabaseManager(IsolatedTestCase):
     """测试批量数据库连接管理器"""
 
     def setUp(self):
         """设置测试环境"""
+        super().setUp()
         self.batch_manager = BatchDatabaseManager("test_batch")
         self.base_config = {
             "type": "mysql",
@@ -27,6 +30,7 @@ class TestBatchDatabaseManager(unittest.TestCase):
         """清理测试环境"""
         if hasattr(self, "batch_manager"):
             self.batch_manager.cleanup()
+        super().tearDown()
 
     def test_init(self):
         """测试初始化批量管理器"""
@@ -56,9 +60,9 @@ class TestBatchDatabaseManager(unittest.TestCase):
 
         # 模拟数据库管理器的方法
         with mock.patch.object(
-            self.batch_manager.db_manager, "list_connections", return_value=[]
+            self.batch_manager.database_manager, "list_connections", return_value=[]
         ):
-            with mock.patch.object(self.batch_manager.db_manager, "add_connection"):
+            with mock.patch.object(self.batch_manager.database_manager, "add_connection"):
                 results = self.batch_manager.add_batch_connections(ip_list)
                 self.assertEqual(len(results), 2)
                 self.assertTrue(results["192.168.1.1"])
@@ -71,12 +75,12 @@ class TestBatchDatabaseManager(unittest.TestCase):
 
         # 模拟数据库管理器的方法
         with mock.patch.object(
-            self.batch_manager.db_manager, "list_connections", return_value=["db_000"]
+            self.batch_manager.database_manager, "list_connections", return_value=["db_000"]
         ):
             with mock.patch.object(
-                self.batch_manager.db_manager.pool_manager, "remove_connection"
+                self.batch_manager.database_manager.pool_manager, "remove_connection"
             ):
-                with mock.patch.object(self.batch_manager.db_manager, "add_connection"):
+                with mock.patch.object(self.batch_manager.database_manager, "add_connection"):
                     results = self.batch_manager.add_batch_connections(ip_list)
                     self.assertEqual(len(results), 1)
                     self.assertTrue(results["192.168.1.1"])
@@ -88,7 +92,7 @@ class TestBatchDatabaseManager(unittest.TestCase):
 
         # 模拟数据库管理器的方法
         with mock.patch.object(
-            self.batch_manager.db_manager, "test_connection", return_value=True
+            self.batch_manager.database_manager, "test_connection", return_value=True
         ):
             results = self.batch_manager.test_batch_connections(max_workers=2)
             self.assertEqual(len(results), 2)
@@ -100,30 +104,103 @@ class TestBatchDatabaseManager(unittest.TestCase):
         self.batch_manager.set_base_config(self.base_config)
         self.batch_manager._connection_names = ["db_000"]
 
-        # 模拟数据库管理器的方法
+        # 模拟数据库管理器的方法（execute_query 返回 (行列表, 耗时) 元组）
         with mock.patch.object(
-            self.batch_manager.db_manager,
+            self.batch_manager.database_manager,
             "execute_query",
-            return_value=[{"id": 1, "name": "test"}],
+            return_value=([{"id": 1, "name": "test"}], 0.01),
         ):
             results = self.batch_manager.execute_batch_query("SELECT * FROM users")
             self.assertEqual(len(results), 1)
             self.assertTrue(results["db_000"]["success"])
-            self.assertEqual(len(results["db_000"]["data"]), 1)
+            self.assertEqual(results["db_000"]["data"], [{"id": 1, "name": "test"}])
+            self.assertEqual(results["db_000"]["count"], 1)
+            self.assertEqual(results["db_000"]["elapsed"], 0.01)
 
     def test_upgrade_table_structure(self):
-        """测试批量升级表结构"""
+        """测试批量升级表结构（DDL 走命令接口）"""
         self.batch_manager.set_base_config(self.base_config)
         self.batch_manager._connection_names = ["db_000"]
 
-        # 模拟数据库管理器的方法
+        # 模拟数据库管理器的方法（execute_command 返回 (影响行数, 耗时) 元组）
         with mock.patch.object(
-            self.batch_manager.db_manager, "execute_query", return_value=[]
-        ):
+            self.batch_manager.database_manager,
+            "execute_command",
+            return_value=(0, 0.01),
+        ) as mock_command:
             upgrade_sqls = ["ALTER TABLE users ADD COLUMN age INT"]
             results = self.batch_manager.upgrade_table_structure(upgrade_sqls)
             self.assertEqual(len(results), 1)
             self.assertTrue(results["db_000"]["success"])
+            self.assertEqual(
+                results["db_000"]["executions"][0]["affected_rows"], 0
+            )
+            mock_command.assert_called_once_with(
+                "db_000", "ALTER TABLE users ADD COLUMN age INT"
+            )
+
+    def test_execute_statement_routes_ddl_to_command(self):
+        """测试语句路由：DDL 走 execute_command，查询走 execute_query"""
+        self.batch_manager.set_base_config(self.base_config)
+
+        with mock.patch.object(
+            self.batch_manager.database_manager, "execute_command", return_value=(3, 0.1)
+        ) as mock_command:
+            with mock.patch.object(
+                self.batch_manager.database_manager,
+                "execute_query",
+                return_value=([{"id": 1}], 0.1),
+            ) as mock_query:
+                ddl_result = self.batch_manager._execute_statement(
+                    "db_000", "ALTER TABLE t ADD COLUMN c INT"
+                )
+                query_result = self.batch_manager._execute_statement(
+                    "db_000", "SELECT id FROM t"
+                )
+
+        mock_command.assert_called_once()
+        mock_query.assert_called_once()
+        self.assertEqual(ddl_result, {"success": True, "affected_rows": 3})
+        self.assertEqual(query_result, {"success": True, "affected_rows": 1})
+
+    def test_upgrade_table_structure_persists_ddl(self):
+        """测试批量升级表结构后 DDL 确实落库（回归：曾用查询接口执行 DDL）"""
+        db_file = self.temp_path / "upgrade.db"
+        self.batch_manager.set_base_config(
+            {"type": "sqlite", "database": str(db_file)}
+        )
+        self.batch_manager.add_batch_connections(["10.0.0.1"])
+        conn_name = self.batch_manager._get_all_connection_names()[0]
+
+        results = self.batch_manager.upgrade_table_structure(
+            ["CREATE TABLE upgraded (id INTEGER PRIMARY KEY, name TEXT)"]
+        )
+        self.assertTrue(results[conn_name]["success"], msg=results)
+
+        rows, _elapsed = self.batch_manager.database_manager.execute_query(
+            conn_name, "SELECT name FROM sqlite_master WHERE type = 'table'"
+        )
+        self.assertIn("upgraded", [row["name"] for row in rows])
+
+    def test_upgrade_table_structure_rolls_back_on_failure(self):
+        """测试升级失败时执行回滚语句"""
+        db_file = self.temp_path / "rollback.db"
+        self.batch_manager.set_base_config(
+            {"type": "sqlite", "database": str(db_file)}
+        )
+        self.batch_manager.add_batch_connections(["10.0.0.1"])
+        conn_name = self.batch_manager._get_all_connection_names()[0]
+
+        results = self.batch_manager.upgrade_table_structure(
+            ["ALTER TABLE not_exist ADD COLUMN c INT"],
+            rollback_sqls=["CREATE TABLE rolled_back (id INT)"],
+        )
+        self.assertFalse(results[conn_name]["success"])
+
+        rows, _elapsed = self.batch_manager.database_manager.execute_query(
+            conn_name, "SELECT name FROM sqlite_master WHERE type = 'table'"
+        )
+        self.assertIn("rolled_back", [row["name"] for row in rows])
 
     def test_get_connection_stats(self):
         """测试获取连接统计信息"""
@@ -132,7 +209,7 @@ class TestBatchDatabaseManager(unittest.TestCase):
 
         # 模拟数据库管理器的方法
         with mock.patch.object(
-            self.batch_manager.db_manager,
+            self.batch_manager.database_manager,
             "get_connection_info",
             return_value={"host": "192.168.1.1"},
         ):
@@ -143,7 +220,7 @@ class TestBatchDatabaseManager(unittest.TestCase):
     def test_close_all_connections(self):
         """测试关闭所有连接"""
         # 模拟数据库管理器的方法
-        with mock.patch.object(self.batch_manager.db_manager, "close_all_connections"):
+        with mock.patch.object(self.batch_manager.database_manager, "close_all_connections"):
             self.batch_manager.close_all_connections()
 
     def test_context_manager(self):
@@ -203,9 +280,9 @@ class TestBatchDatabaseManager(unittest.TestCase):
 
         # 模拟数据库管理器的方法
         with mock.patch.object(
-            self.batch_manager.db_manager, "list_connections", return_value=[]
+            self.batch_manager.database_manager, "list_connections", return_value=[]
         ):
-            with mock.patch.object(self.batch_manager.db_manager, "add_connection"):
+            with mock.patch.object(self.batch_manager.database_manager, "add_connection"):
                 results = self.batch_manager.add_batch_connections(ip_list)
                 self.assertEqual(len(results), 1)
                 self.assertTrue(results["192.168.1.1"])
@@ -217,7 +294,7 @@ class TestBatchDatabaseManager(unittest.TestCase):
         self.batch_manager._connection_names = ["db_000"]
 
         # 模拟数据库管理器的方法
-        with mock.patch.object(self.batch_manager.db_manager, "remove_connection"):
+        with mock.patch.object(self.batch_manager.database_manager, "remove_connection"):
             self.batch_manager._remove_existing_connection("db_000")
             self.assertNotIn("db_000", self.batch_manager._connection_names)
 
@@ -227,7 +304,7 @@ class TestBatchDatabaseManager(unittest.TestCase):
 
         # 模拟删除连接时发生严重错误
         with mock.patch.object(
-            self.batch_manager.db_manager,
+            self.batch_manager.database_manager,
             "remove_connection",
             side_effect=Exception("Remove connection failed"),
         ):
@@ -248,7 +325,7 @@ class TestBatchDatabaseManager(unittest.TestCase):
 
         # 模拟清理连接名称列表时发生严重错误
         with mock.patch.object(
-            self.batch_manager.db_manager.pool_manager,
+            self.batch_manager.database_manager.pool_manager,
             "remove_connection",
             side_effect=Exception("Remove connection failed"),
         ):
@@ -281,9 +358,9 @@ class TestBatchDatabaseManager(unittest.TestCase):
 
         # 模拟数据库管理器的方法
         with mock.patch.object(
-            self.batch_manager.db_manager, "list_connections", return_value=[]
+            self.batch_manager.database_manager, "list_connections", return_value=[]
         ):
-            with mock.patch.object(self.batch_manager.db_manager, "add_connection"):
+            with mock.patch.object(self.batch_manager.database_manager, "add_connection"):
                 results = self.batch_manager.add_batch_connections(ip_list)
                 self.assertEqual(len(results), 1)
                 self.assertTrue(results["192.168.1.1"])
@@ -298,7 +375,7 @@ class TestBatchDatabaseManager(unittest.TestCase):
 
         # 模拟数据库管理器的方法抛出QueryError
         with mock.patch.object(
-            self.batch_manager.db_manager,
+            self.batch_manager.database_manager,
             "execute_query",
             side_effect=QueryError("Query failed"),
         ):
@@ -306,16 +383,18 @@ class TestBatchDatabaseManager(unittest.TestCase):
             self.assertEqual(len(results), 1)
             self.assertFalse(results["db_000"]["success"])
             self.assertIn("error", results["db_000"])
+            self.assertEqual(results["db_000"]["data"], [])
+            self.assertEqual(results["db_000"]["count"], 0)
 
     def test_execute_upgrade_sqls_with_query_error_and_rollback(self):
         """测试执行升级SQL时出现QueryError并执行回滚"""
         self.batch_manager.set_base_config(self.base_config)
 
-        # 模拟执行查询抛出QueryError，但回滚成功
+        # 模拟执行 DDL 抛出QueryError，但回滚成功
         with mock.patch.object(
-            self.batch_manager.db_manager,
-            "execute_query",
-            side_effect=[QueryError("Query failed"), None],
+            self.batch_manager.database_manager,
+            "execute_command",
+            side_effect=[QueryError("Query failed"), (0, 0.01)],
         ):
             results = self.batch_manager._execute_upgrade_sqls(
                 "db_000", ["ALTER TABLE users ADD COLUMN age INT"], ["ROLLBACK"]
