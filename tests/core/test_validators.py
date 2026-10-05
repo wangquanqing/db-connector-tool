@@ -370,9 +370,9 @@ class TestPasswordValidator(unittest.TestCase):
             ("NOLOWERCASE123!", "medium", "缺少小写字母"),
             ("NoDigitPassword!", "medium", "缺少数字"),
             ("Ab1!", "medium", "长度不足但复杂度够"),
-            ("Medium1!", "strong", "8字符+4种类型"),
+            ("Medium1!", "medium", "8字符+4种类型但未达16字符门槛"),
             ("StrongP@ssw0rd123!", "strong", "标准强密码"),
-            ("Passw0rd!", "strong", "刚好8字符"),
+            ("Passw0rd!", "medium", "刚好8字符但未达16字符门槛"),
             ("VeryStrongPassword123!@#", "very_strong", "长度超过24字符"),
             ("ThisIsAVeryLongPassword123!@#$", "very_strong", "超长强密码"),
             ("a" * 24 + "A1!", "very_strong", "刚好24字符"),
@@ -488,7 +488,11 @@ class TestPasswordValidator(unittest.TestCase):
                 "8字符但只有数字和特殊字符",
             ),  # 长度=8，复杂度=2 → medium
             ("AaBbCcDd1", "medium", "9字符但缺少特殊字符"),  # 长度>8，复杂度=3 → medium
-            ("Aa1!Bb2@", "strong", "8字符4种类型"),  # 长度=8，复杂度=4 → strong
+            (
+                "Aa1!Bb2@",
+                "medium",
+                "8字符4种类型但未达16字符门槛",
+            ),  # 长度=8，复杂度=4 → medium（不满足校验门槛）
             (
                 "A" * 24 + "a1!",
                 "very_strong",
@@ -508,6 +512,36 @@ class TestPasswordValidator(unittest.TestCase):
                     result,
                     expected_strength,
                     f"{description}: 密码 '{password}' 预期强度 {expected_strength}, 实际 {result}",
+                )
+
+    def test_get_strength_matches_validate_strength(self) -> None:
+        """强度等级与验证结论必须一致（不变量）
+
+        只有 strong / very_strong 会通过 validate_strength，
+        避免出现“强度不足 (strong)”这类自相矛盾的提示。
+        """
+        samples = [
+            "",
+            "weak",
+            "password",
+            "Short1!",
+            "Medium1!",
+            "Passw0rd!",
+            "Aa1!Bb2@",
+            "Ab1!efghijkl",  # 12 字符 4 种类型：曾被标为 strong 却验证失败
+            "Ab1!efghijklmnop",  # 16 字符 4 种类型
+            "StrongP@ssw0rd123!",
+            "VeryStrongPassword123!@#",
+            "a" * 24 + "A1!",
+        ]
+        for password in samples:
+            with self.subTest(password=password):
+                strength = PasswordValidator.get_strength(password)
+                expected_valid = strength in ("strong", "very_strong")
+                self.assertEqual(
+                    PasswordValidator.validate_strength(password),
+                    expected_valid,
+                    f"'{password}' 强度={strength} 与验证结论不一致",
                 )
 
     def test_check_password_requirements_internal(self) -> None:

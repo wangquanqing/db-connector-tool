@@ -285,13 +285,17 @@ class TestCryptoManager(unittest.TestCase):
         # 弱密码 - 长度不足8，缺少复杂度
         self.assertEqual(PasswordValidator.get_strength("weak"), "weak")
 
-        # 中等强度 - 8字符(1分) + 4种字符类型(4分) = 5分，但长度不足16
-        # "Medium1!" 实际得分：长度8(1分) + 大写(1) + 小写(1) + 数字(1) + 特殊(1) = 5分 -> strong
-        # 使用更短的密码测试 medium
+        # 中等强度 - 复杂度够但长度不足16（不满足强度验证门槛）
         self.assertEqual(PasswordValidator.get_strength("Med1!"), "medium")
 
-        # 强密码 - 8字符(1分) + 4种字符类型(4分) = 5分
-        self.assertEqual(PasswordValidator.get_strength("Medium1!"), "strong")
+        # 8字符 + 4种字符类型：仍属 medium，因为 validate_strength 要求至少16字符
+        self.assertEqual(PasswordValidator.get_strength("Medium1!"), "medium")
+
+        # 16字符 + 4种字符类型：达到强密码门槛，与 validate_strength 一致
+        self.assertEqual(
+            PasswordValidator.get_strength("MediumPassword1!"), "strong"
+        )
+        self.assertTrue(PasswordValidator.validate_strength("MediumPassword1!"))
 
         # 非常强密码 - 24字符以上(3分) + 4种字符类型(4分) = 7分
         self.assertEqual(

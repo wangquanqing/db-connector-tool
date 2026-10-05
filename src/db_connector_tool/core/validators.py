@@ -247,6 +247,10 @@ class PasswordValidator:
         评估密码强度并返回强度等级，分为 very_strong、strong、
         medium 和 weak 四个等级。
 
+        等级口径与 :meth:`validate_strength` **保持一致**：
+        只有 ``strong`` 与 ``very_strong`` 才会通过强度验证，
+        因此不会出现“强度不足 (strong)”这类自相矛盾的提示。
+
         Args:
             password: 要评估的密码字符串
 
@@ -256,6 +260,8 @@ class PasswordValidator:
         Example:
             >>> PasswordValidator.get_strength("StrongPassword123!")
             "strong"
+            >>> PasswordValidator.get_strength("Medium1!")
+            "medium"
             >>> PasswordValidator.get_strength("weak")
             "weak"
         """
@@ -273,7 +279,7 @@ class PasswordValidator:
 
         if length >= 24 and complexity_types == 4:
             return "very_strong"
-        if length >= 8 and complexity_types == 4:
+        if length >= 16 and complexity_types == 4:
             return "strong"
         if complexity_types >= 3:
             return "medium"
