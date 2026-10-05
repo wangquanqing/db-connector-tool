@@ -303,8 +303,10 @@ class TestSQLAlchemyDriver(unittest.TestCase):
         driver.engine = MagicMock()
         mock_connection = MagicMock()
         mock_result = MagicMock()
-        mock_result.keys.return_value = ["id", "name"]
-        mock_result.fetchall.return_value = [(1, "test")]
+        # 当前实现通过 result.mappings().all() 返回行字典列表
+        mock_result.mappings.return_value.all.return_value = [
+            {"id": 1, "name": "test"}
+        ]
         mock_connection.execute.return_value = mock_result
         driver.engine.connect.return_value.__enter__.return_value = mock_connection
 
@@ -319,13 +321,15 @@ class TestSQLAlchemyDriver(unittest.TestCase):
         driver.engine = MagicMock()
         mock_connection = MagicMock()
         mock_result = MagicMock()
-        mock_result.keys.return_value = ["id", "name"]
-        mock_result.fetchall.return_value = [(1, "test")]
+        mock_result.mappings.return_value.all.return_value = [
+            {"id": 1, "name": "test"}
+        ]
         mock_connection.execute.return_value = mock_result
         driver.engine.connect.return_value.__enter__.return_value = mock_connection
 
         results = driver.execute_query("SELECT * FROM users WHERE id = :id", {"id": 1})
         self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["id"], 1)
 
     def test_execute_command(self) -> None:
         """测试执行命令"""
@@ -903,12 +907,12 @@ class TestSQLAlchemyDriver(unittest.TestCase):
             driver.engine = MagicMock()
             mock_connection = MagicMock()
             mock_result = MagicMock()
-            mock_result.keys.return_value = ["id"]
-            mock_result.fetchall.return_value = [(1,)]
+            mock_result.mappings.return_value.all.return_value = [{"id": 1}]
             mock_connection.execute.return_value = mock_result
             driver.engine.connect.return_value.__enter__.return_value = mock_connection
             results = driver.execute_query("SELECT * FROM users")
             self.assertEqual(len(results), 1)
+            self.assertEqual(results[0]["id"], 1)
 
     def test_execute_sql_sqlalchemy_error(self) -> None:
         """测试执行SQL时的SQLAlchemy错误"""

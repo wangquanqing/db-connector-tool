@@ -622,6 +622,11 @@ class SQLAlchemyDriver:
         except (ValueError, TypeError, AttributeError) as error:
             logger.warning("连接测试失败: 配置错误 - %s", str(error))
             return False
+        except Exception as error:  # pylint: disable=broad-except
+            # 连接探测接口不抛出异常：驱动可能抛出任意类型的异常，
+            # 调用方（连接池有效性检查等）依赖 False 表示不可用。
+            logger.warning("连接测试失败: 未知错误 - %s", str(error))
+            return False
 
     def _perform_connection_test(self) -> bool:
         """执行连接测试（内部方法）

@@ -1,6 +1,5 @@
 import json
 import os
-import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -12,21 +11,20 @@ from src.db_connector_tool.core.crypto import CryptoManager
 from src.db_connector_tool.core.exceptions import ConfigError, CryptoError
 from src.db_connector_tool.core.key_manager import KeyManager
 
+from .._isolation import IsolatedTestCase
 
-class TestKeyManager(unittest.TestCase):
+
+class TestKeyManager(IsolatedTestCase):
     """测试 KeyManager 类的功能"""
 
     def setUp(self) -> None:
         """设置测试环境"""
-        self.temp_dir = tempfile.TemporaryDirectory()
+        super().setUp()
         self.app_name = f"test_app_{id(self)}"
-        self.original_env = os.environ.copy()
 
     def tearDown(self) -> None:
         """清理测试环境"""
-        os.environ.clear()
-        os.environ.update(self.original_env)
-        self.temp_dir.cleanup()
+        super().tearDown()
 
     def test_init(self) -> None:
         """测试初始化 KeyManager"""
@@ -165,7 +163,7 @@ class TestKeyManager(unittest.TestCase):
         """测试设置文件安全权限"""
         key_manager = KeyManager(self.app_name)
         # 创建临时文件
-        test_file = Path(self.temp_dir.name) / "test_file.txt"
+        test_file = Path(self.temp_path) / "test_file.txt"
         test_file.write_text("test")
         # 测试设置权限
         key_manager._set_secure_file_permissions(test_file)
@@ -525,6 +523,74 @@ class TestKeyManager(unittest.TestCase):
             raise_generic_error(key_manager)
 
         key_manager.close()
+
+    def test_load_or_create_key_falls_back_when_keyring_read_fails(self) -> None:
+        """测试密钥环读取失败时自动回退到文件存储"""
+        mock_keyring = mock.Mock()
+        mock_keyring.get_password.side_effect = OSError("CredRead failed")
+
+        with mock.patch(
+            "src.db_connector_tool.core.key_manager.keyring_available", True
+        ):
+            with mock.patch(
+                "src.db_connector_tool.core.key_manager.keyring_module", mock_keyring
+            ):
+                key_manager = KeyManager(self.app_name)
+                key_manager.load_or_create_key()
+
+                self.assertIsInstance(key_manager.crypto, CryptoManager)
+                self.assertTrue(
+                    (key_manager.config_dir / "encryption.key").exists()
+                )
+                key_manager.close()
+
+    def test_load_or_create_key_falls_back_when_keyring_write_fails(self) -> None:
+        """测试密钥环写入失败时自动回退到文件存储"""
+        mock_keyring = mock.Mock()
+        mock_keyring.get_password.return_value = None
+        mock_keyring.set_password.side_effect = OSError("CredWrite failed")
+
+        with mock.patch(
+            "src.db_connector_tool.core.key_manager.keyring_available", True
+        ):
+            with mock.patch(
+                "src.db_connector_tool.core.key_manager.keyring_module", mock_keyring
+            ):
+                key_manager = KeyManager(self.app_name)
+                key_manager.load_or_create_key()
+
+                self.assertIsInstance(key_manager.crypto, CryptoManager)
+                key_file = key_manager.config_dir / "encryption.key"
+                self.assertTrue(key_file.exists())
+                # 回退到文件后，密钥应可从文件重新加载
+                reloaded = KeyManager(self.app_name)
+                reloaded._load_existing_key(key_file)
+                self.assertEqual(
+                    reloaded.crypto.get_key_info()["password"],
+                    key_manager.crypto.get_key_info()["password"],
+                )
+                key_manager.close()
+                reloaded.close()
+
+    def test_rotate_key_falls_back_when_keyring_write_fails(self) -> None:
+        """测试轮换密钥时密钥环写入失败则回退到文件存储"""
+        mock_keyring = mock.Mock()
+        mock_keyring.set_password.side_effect = OSError("CredWrite failed")
+
+        with mock.patch(
+            "src.db_connector_tool.core.key_manager.keyring_available", True
+        ):
+            with mock.patch(
+                "src.db_connector_tool.core.key_manager.keyring_module", mock_keyring
+            ):
+                key_manager = KeyManager(self.app_name)
+                new_key = key_manager.rotate_key()
+
+                self.assertIn("password", new_key)
+                self.assertTrue(
+                    (key_manager.config_dir / "encryption.key").exists()
+                )
+                key_manager.close()
 
     def test_keyring_module_available(self) -> None:
         """测试keyring模块可用的情况"""

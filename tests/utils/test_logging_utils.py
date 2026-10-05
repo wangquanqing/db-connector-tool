@@ -1,7 +1,5 @@
 import logging
 import os
-import shutil
-import tempfile
 import unittest
 from pathlib import Path
 
@@ -15,18 +13,26 @@ from src.db_connector_tool.utils.logging_utils import (
     setup_logging,
 )
 
+from .._isolation import IsolatedTestCase
 
-class TestLoggingUtils(unittest.TestCase):
+
+class TestLoggingUtils(IsolatedTestCase):
     """测试日志工具模块"""
 
     def setUp(self):
         """设置测试环境"""
-        self.temp_dir = tempfile.mkdtemp()
+        super().setUp()
+        # 日志目录同样落在隔离的临时目录内，避免写入真实用户配置目录
+        self.temp_dir = str(self.temp_path)
         self.app_name = "test_app"
 
     def tearDown(self):
-        """清理测试环境"""
-        shutil.rmtree(self.temp_dir)
+        """清理测试环境
+
+        基类会先关闭所有文件 handler（Windows 上被占用的日志文件无法删除），
+        再删除临时目录。
+        """
+        super().tearDown()
 
     def test_validate_log_level(self):
         """测试日志级别验证"""

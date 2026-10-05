@@ -123,12 +123,17 @@ class TestThreeSqlModes(unittest.TestCase):
                 )
 
     def test_limit_without_offset(self) -> None:
-        """:meth:`Select.limit` 在三种模式下生成不同语法"""
+        """:meth:`Select.limit` 在三种模式下生成不同语法
+
+        注意：简单整型 LIMIT/OFFSET 会以 ``render_literal_execute()`` 内联，
+        因此普通 ``compile()`` 输出占位符 ``__[POSTCOMPILE_param_N]``，
+        带 ``render_postcompile=True`` 才呈现字面量。
+        """
         expected = {
             "oracle": "SELECT anon_1.a FROM (SELECT t.a AS a FROM t) AS anon_1 "
             "WHERE ROWNUM <= __[POSTCOMPILE_param_1]",
             "gbase": "SELECT FIRST 10 t.a FROM t",
-            "mysql": "SELECT t.a FROM t LIMIT ?",
+            "mysql": "SELECT t.a FROM t LIMIT __[POSTCOMPILE_param_1]",
         }
         for mode, sql in expected.items():
             with self.subTest(sqlmode=mode):
@@ -138,8 +143,11 @@ class TestThreeSqlModes(unittest.TestCase):
     def test_limit_with_offset(self) -> None:
         """:meth:`Select.offset` 在三种模式下生成不同语法"""
         expected = {
-            "gbase": "SELECT SKIP 5 FIRST 10 t.a FROM t",
-            "mysql": "SELECT t.a FROM t LIMIT ? OFFSET ?",
+            # 以实现为准：gbase 模式输出 FIRST n SKIP m
+            # （见 GBase8sCompiler._gbase_row_limit_prefix 与设计文档第 4 节）
+            "gbase": "SELECT FIRST 10 SKIP 5 t.a FROM t",
+            "mysql": "SELECT t.a FROM t LIMIT __[POSTCOMPILE_param_1] "
+            "OFFSET __[POSTCOMPILE_param_2]",
         }
         for mode, sql in expected.items():
             with self.subTest(sqlmode=mode):
@@ -418,12 +426,20 @@ class _FakeConnection:  # pylint: disable=too-few-public-methods
         """记录 SQL 片段到结果（或待抛异常）的映射"""
         self.responses = responses
         self.calls = []
+        # 方言的列名缓存依赖 connection.info（SQLAlchemy 的 Connection.info 字典）
+        self.info: dict = {}
 
     def exec_driver_sql(self, statement: str, parameters: object = None) -> _FakeResult:
-        """按片段匹配并返回预置结果"""
+        """按片段匹配并返回预置结果
+
+        结果值可以是 :class:`_FakeResult`、待抛异常，或接收 parameters 的
+        可调用对象（用于按表名等参数返回不同结果）。
+        """
         self.calls.append((statement, parameters))
         for marker, response in self.responses.items():
             if marker in statement:
+                if callable(response):
+                    response = response(parameters)
                 if isinstance(response, BaseException):
                     raise response
                 return response
@@ -464,16 +480,32 @@ class TestReflection(unittest.TestCase):
                     IndexRow("idx_pk", "u", "P", "pk_orders", 1, None),
                 ]
             ),
-            "sysreferences": _FakeResult(
-                [("fk_customer", "user_name", "customer", "cvicse", "name", "C")]
-            ),
+            "sysreferences": _FakeResult([self._foreign_key_row()]),
             "syschecks": _FakeResult(
                 [("ck_amount", "amount > 0"), ("ck_amount", " AND amount < 100")]
             ),
             "sysviews": _FakeResult([("SELECT a",), (" FROM t",)]),
-            "c.colno, c.colname": self.column_map,
+            # 列号->列名的映射按表名返回不同结果（被引用表 customer 的 1 号列是 name）
+            "c.colno, c.colname": lambda params: (
+                _FakeResult([(1, "name")])
+                if params and params[0] == "customer"
+                else self.column_map
+            ),
         }
         self.connection = _FakeConnection(self.responses)
+
+    @staticmethod
+    def _foreign_key_row() -> tuple:
+        """构造 FOREIGN_KEYS_QUERY 的结果行
+
+        列顺序与 :mod:`dictionary` 中的 ``FK_*`` 常量严格对应：
+        ``constrname, l_part1..l_part16, rt.tabname, rt.owner, r_part1..r_part16, delrule``（共 36 列）。
+        """
+        local_parts = [2] + [None] * 15
+        remote_parts = [1] + [None] * 15
+        return tuple(
+            ["fk_customer", *local_parts, "customer", "cvicse", *remote_parts, "C"]
+        )
 
     def test_schema_and_object_names(self) -> None:
         """schema、对象名与存在性判断"""
@@ -542,14 +574,29 @@ class TestReflection(unittest.TestCase):
         )
 
     def test_get_foreign_keys(self) -> None:
-        """外键包含被引用表/列与级联删除选项"""
+        """外键包含被约束列、被引用表与级联删除选项
+
+        被引用表与当前 schema 相同时按 SQLAlchemy 约定不重复给出 referred_schema。
+        """
         keys = self.dialect.get_foreign_keys(self.connection, "orders", schema="cvicse")
         self.assertEqual(len(keys), 1)
         self.assertEqual(keys[0]["constrained_columns"], ["user_name"])
         self.assertEqual(keys[0]["referred_table"], "customer")
-        self.assertEqual(keys[0]["referred_schema"], "cvicse")
+        self.assertIsNone(keys[0]["referred_schema"])
         self.assertEqual(keys[0]["referred_columns"], ["name"])
         self.assertEqual(keys[0]["options"]["ondelete"], "CASCADE")
+
+    def test_get_foreign_keys_cross_schema(self) -> None:
+        """被引用表属于其他 owner 时给出 referred_schema"""
+        responses = dict(self.responses)
+        row = list(self._foreign_key_row())
+        row[dictionary.FK_REMOTE_OWNER] = "other_owner"
+        responses["sysreferences"] = _FakeResult([tuple(row)])
+
+        keys = self.dialect.get_foreign_keys(
+            _FakeConnection(responses), "orders", schema="cvicse"
+        )
+        self.assertEqual(keys[0]["referred_schema"], "other_owner")
 
     def test_get_check_constraints(self) -> None:
         """分段的检查约束文本按序合并"""

@@ -172,7 +172,9 @@ class KeyManager:
         """加载或创建加密密钥
 
         加载现有的加密密钥，如果不存在则创建新的密钥，
-        按照安全层次结构选择密钥存储方式。
+        按照安全层次结构选择密钥存储方式：操作系统密钥环 → 环境变量 → 文件。
+        当密钥环**存在但不可用**（服务未启动、凭据库拒绝写入等）时，
+        自动降级到下一层方案，而不是直接失败。
 
         Raises:
             ConfigError: 密钥加载或创建失败
@@ -183,22 +185,33 @@ class KeyManager:
         """
 
         if keyring_available and keyring_module is not None:
-            self._load_or_create_key_from_keyring()
-        elif KeyManager._env_key_available and KeyManager._env_key:
+            try:
+                self._load_or_create_key_from_keyring()
+                return
+            except Exception as error:  # pylint: disable=broad-except
+                logger.warning(
+                    "操作系统密钥环不可用(%s: %s)，回退到环境变量/文件存储方案",
+                    type(error).__name__,
+                    str(error),
+                )
+                self.crypto = None
+
+        if KeyManager._env_key_available and KeyManager._env_key:
             try:
                 key_data = json.loads(KeyManager._env_key)
                 self._load_crypto_from_key_data(key_data)
                 logger.debug("使用环境变量中的加密密钥")
+                return
             except (json.JSONDecodeError, TypeError, ConfigError) as error:
                 logger.error(
                     "环境变量密钥格式错误: %s，请检查 DB_CONNECTOR_TOOL_ENCRYPTION_KEY 环境变量的格式",
                     str(error),
                 )
                 logger.warning("环境变量密钥加载失败，使用文件存储方案")
-                self._load_or_create_key_from_file()
         else:
             logger.warning("keyring库和环境变量都不可用，使用文件权限保护方案")
-            self._load_or_create_key_from_file()
+
+        self._load_or_create_key_from_file()
 
     def _load_or_create_key_from_keyring(self) -> None:
         """从操作系统密钥环加载或创建密钥
@@ -489,9 +502,18 @@ class KeyManager:
             service_name = self.app_name
             username = "master_key"
 
-            keyring_module.set_password(service_name, username, json.dumps(key_data))
-            logger.info("轮换加密密钥已安全存储到操作系统密钥环")
-            return
+            try:
+                keyring_module.set_password(
+                    service_name, username, json.dumps(key_data)
+                )
+                logger.info("轮换加密密钥已安全存储到操作系统密钥环")
+                return
+            except Exception as error:  # pylint: disable=broad-except
+                logger.warning(
+                    "写入操作系统密钥环失败(%s: %s)，回退到文件存储方案",
+                    type(error).__name__,
+                    str(error),
+                )
 
         if KeyManager._env_key_available:
             logger.warning(

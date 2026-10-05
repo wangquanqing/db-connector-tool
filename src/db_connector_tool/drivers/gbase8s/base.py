@@ -11,7 +11,7 @@ DDL 编译以及系统目录反射；JayDeBeApi/JDBC 相关的连接细节放在
 能力                    oracle 模式           gbase 模式                     mysql 模式
 ======================  ====================  =============================  ==================
 无 FROM 时的伪表        ``FROM DUAL``         ``FROM sysmaster:sysdual``     ``FROM sysmaster:sysdual``
-分页                    ``ROWNUM`` 双层子查询 ``SKIP n FIRST m``             ``LIMIT m OFFSET n``
+分页                    ``ROWNUM`` 双层子查询 ``FIRST n SKIP m``             ``LIMIT m OFFSET n``
 布尔字面量              ``'t'`` / ``'f'``     ``'t'`` / ``'f'``              ``'t'`` / ``'f'``
 ======================  ====================  =============================  ==================
 

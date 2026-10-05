@@ -232,8 +232,8 @@ class TestDatabaseManager(unittest.TestCase):
         db_manager = DatabaseManager(self.app_name, self.config_file)
         db_manager.get_connection = Mock(return_value=mock_driver)
 
-        # 测试执行查询
-        result = db_manager.execute_query("test_db", "SELECT * FROM users")
+        # 测试执行查询（返回 (行列表, 耗时) 元组）
+        result, elapsed = db_manager.execute_query("test_db", "SELECT * FROM users")
 
         # 验证 get_connection 方法被调用
         db_manager.get_connection.assert_called_once_with("test_db")
@@ -241,6 +241,7 @@ class TestDatabaseManager(unittest.TestCase):
         mock_driver.execute_query.assert_called_once_with("SELECT * FROM users", None)
         # 验证返回的结果
         self.assertEqual(result, [{"id": 1, "name": "test"}])
+        self.assertIsInstance(elapsed, float)
 
     @patch("src.db_connector_tool.core.connections.ConfigManager")
     @patch("src.db_connector_tool.core.connections.ConnectionPoolManager")
@@ -262,8 +263,8 @@ class TestDatabaseManager(unittest.TestCase):
         db_manager = DatabaseManager(self.app_name, self.config_file)
         db_manager.get_connection = Mock(return_value=mock_driver)
 
-        # 测试执行命令
-        affected_rows = db_manager.execute_command(
+        # 测试执行命令（返回 (影响行数, 耗时) 元组）
+        affected_rows, elapsed = db_manager.execute_command(
             "test_db", "UPDATE users SET name = 'test' WHERE id = 1"
         )
 
@@ -275,6 +276,7 @@ class TestDatabaseManager(unittest.TestCase):
         )
         # 验证返回的结果
         self.assertEqual(affected_rows, 1)
+        self.assertIsInstance(elapsed, float)
 
     @patch("src.db_connector_tool.core.connections.ConfigManager")
     @patch("src.db_connector_tool.core.connections.ConnectionPoolManager")

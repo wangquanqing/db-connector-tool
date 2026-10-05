@@ -1,5 +1,3 @@
-import os
-import tempfile
 import unittest
 from pathlib import Path
 import unittest.mock
@@ -8,28 +6,22 @@ import unittest.mock
 from src.db_connector_tool.core.config import ConfigManager
 from src.db_connector_tool.core.exceptions import ConfigError
 
+from .._isolation import IsolatedTestCase
 
-class TestConfigManager(unittest.TestCase):
+
+class TestConfigManager(IsolatedTestCase):
     """测试 ConfigManager 类的功能"""
 
     def setUp(self) -> None:
         """设置测试环境"""
-        # 创建临时目录作为测试配置目录
-        self.temp_dir = tempfile.TemporaryDirectory()
+        super().setUp()
         # 为每个测试生成唯一的应用名称，确保测试之间不相互影响
         self.app_name = f"test_app_{id(self)}"
         self.config_file = "test_connections.toml"
 
-        # 保存原始环境变量，以便在测试后恢复
-        self.original_env = os.environ.copy()
-
     def tearDown(self) -> None:
         """清理测试环境"""
-        # 恢复原始环境变量
-        os.environ.clear()
-        os.environ.update(self.original_env)
-        # 清理临时目录
-        self.temp_dir.cleanup()
+        super().tearDown()
 
     def test_init(self) -> None:
         """测试初始化 ConfigManager"""
@@ -284,21 +276,18 @@ class TestConfigManager(unittest.TestCase):
                 config_manager.remove_config("nonexistent")
 
 
-class TestConfigManagerAdvanced(unittest.TestCase):
+class TestConfigManagerAdvanced(IsolatedTestCase):
     """测试 ConfigManager 的高级功能和内部方法"""
 
     def setUp(self) -> None:
         """设置测试环境"""
-        self.temp_dir = tempfile.TemporaryDirectory()
+        super().setUp()
         self.app_name = f"test_app_advanced_{id(self)}"
         self.config_file = "test_connections.toml"
-        self.original_env = os.environ.copy()
 
     def tearDown(self) -> None:
         """清理测试环境"""
-        os.environ.clear()
-        os.environ.update(self.original_env)
-        self.temp_dir.cleanup()
+        super().tearDown()
 
     def test_str_representation(self) -> None:
         """测试 __str__ 方法"""
@@ -398,7 +387,7 @@ class TestConfigManagerAdvanced(unittest.TestCase):
             config_manager.add_config("test_db", {"host": "localhost"})
 
             # 使用自定义路径备份
-            custom_backup = Path(self.temp_dir.name) / "custom_backup.toml"
+            custom_backup = Path(self.temp_path) / "custom_backup.toml"
             backup_path = config_manager.backup_config(custom_backup)
 
             self.assertTrue(backup_path.exists())

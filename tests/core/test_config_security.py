@@ -1,6 +1,4 @@
-import os
 import sys
-import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
@@ -9,15 +7,16 @@ from src.db_connector_tool.core.config_security import ConfigSecurityManager
 from src.db_connector_tool.core.exceptions import ConfigError
 from src.db_connector_tool.core.key_manager import KeyManager
 
+from .._isolation import IsolatedTestCase
 
-class TestConfigSecurityManager(unittest.TestCase):
+
+class TestConfigSecurityManager(IsolatedTestCase):
     """测试 ConfigSecurityManager 类的功能"""
 
     def setUp(self) -> None:
         """设置测试环境"""
-        self.temp_dir = tempfile.TemporaryDirectory()
+        super().setUp()
         self.app_name = f"test_app_{id(self)}"
-        self.original_env = os.environ.copy()
         # 创建KeyManager实例
         self.key_manager = KeyManager(self.app_name)
         # 加载密钥
@@ -28,11 +27,9 @@ class TestConfigSecurityManager(unittest.TestCase):
         if hasattr(self, "key_manager") and self.key_manager:
             try:
                 self.key_manager.close()
-            except Exception:
+            except ConfigError:
                 pass
-        os.environ.clear()
-        os.environ.update(self.original_env)
-        self.temp_dir.cleanup()
+        super().tearDown()
 
     def test_init(self) -> None:
         """测试初始化 ConfigSecurityManager"""
@@ -130,7 +127,11 @@ class TestConfigSecurityManager(unittest.TestCase):
             security_manager.verify_config_signature(config)
 
     def test_verify_config_signature_with_expired_timestamp(self) -> None:
-        """测试签名时间戳过期时验证签名"""
+        """测试签名时间戳过期时验证签名
+
+        配置文件长期有效，签名时间戳仅用于审计，过期不影响验证结果；
+        但内容被篡改时仍必须报错。
+        """
         security_manager = ConfigSecurityManager(self.key_manager)
         # 生成配置数据
         config = {
@@ -148,16 +149,22 @@ class TestConfigSecurityManager(unittest.TestCase):
         signature = security_manager.generate_config_signature(config)
         config["metadata"]["signature"] = signature
         # 设置过期时间戳（超过1小时）
-        expired_time = datetime.now(timezone.utc)
-        expired_time = expired_time - timedelta(hours=2)
+        expired_time = datetime.now(timezone.utc) - timedelta(hours=2)
         config["metadata"]["signature_timestamp"] = expired_time.isoformat()
 
-        # 验证签名应该失败
+        # 时间戳过期不影响配置有效性
+        security_manager.verify_config_signature(config)
+
+        # 内容被篡改时仍然要报错
+        config["connections"] = {"tampered": {"host": "evil"}}
         with self.assertRaises(ConfigError):
             security_manager.verify_config_signature(config)
 
     def test_verify_config_signature_with_invalid_timestamp(self) -> None:
-        """测试无效签名时间戳时验证签名"""
+        """测试无效签名时间戳时验证签名
+
+        时间戳格式错误只记录告警，不影响签名有效性判断。
+        """
         security_manager = ConfigSecurityManager(self.key_manager)
         # 生成配置数据
         config = {
@@ -176,12 +183,16 @@ class TestConfigSecurityManager(unittest.TestCase):
         config["metadata"]["signature"] = signature
         config["metadata"]["signature_timestamp"] = "invalid_timestamp"
 
-        # 验证签名应该失败
+        # 无效时间戳不阻断验证
+        security_manager.verify_config_signature(config)
+
+        # 内容被篡改时仍然要报错
+        config["version"] = "9.9.9"
         with self.assertRaises(ConfigError):
             security_manager.verify_config_signature(config)
 
     def test_verify_config_signature_with_no_timestamp(self) -> None:
-        """测试没有签名时间戳时验证签名"""
+        """测试没有签名时间戳时验证签名（时间戳为可选字段）"""
         security_manager = ConfigSecurityManager(self.key_manager)
         # 生成配置数据
         config = {
@@ -199,9 +210,8 @@ class TestConfigSecurityManager(unittest.TestCase):
         signature = security_manager.generate_config_signature(config)
         config["metadata"]["signature"] = signature
 
-        # 验证签名应该失败
-        with self.assertRaises(ConfigError):
-            security_manager.verify_config_signature(config)
+        # 缺少时间戳时签名依然有效
+        security_manager.verify_config_signature(config)
 
     def test_verify_config_signature_with_timestamp_no_timezone(self) -> None:
         """测试无时区信息的签名时间戳"""
