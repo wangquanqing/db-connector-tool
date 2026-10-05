@@ -12,8 +12,10 @@
    存储过程/触发器定义除外；
 4. 基于原始 SQL 匹配可疑注释（``'--`` 截断、MySQL 版本注释）。
 
-显式的 ``DROP`` / ``TRUNCATE`` / ``CREATE`` / ``ALTER`` 等管理语句是允许的
-（CLI 亦声明支持），它们只有以“第二条语句”形式出现时才会被拒绝。
+显式的管理语句（``DROP`` / ``TRUNCATE`` / ``CREATE`` / ``ALTER`` /
+``GRANT`` / ``REVOKE`` 等）都是允许的：用户自己书写的语句属于明确意图，
+注入的真正风险在于“拼接”与“一条语句里夹带另一条”，因此本模块只拦注入特征
+与语句走私，不按语句种类设限。
 """
 
 import re
@@ -56,7 +58,6 @@ INJECTION_PATTERNS: Tuple[Tuple[str, str], ...] = (
     (r"(?i)\bCOPY\s+\w+\s+FROM\s+PROGRAM\b", "系统命令执行"),
     (r'(?i)WAITFOR\s+DELAY\s+[\'"]?\d+', "时间盲注"),
     (r"(?i)^\s*SHUTDOWN\b", "数据库关闭命令"),
-    (r"(?i)\b(GRANT|REVOKE)\s+.*\s+(ON|TO|FROM)\b", "权限变更操作"),
 )
 
 # 可疑注释特征：基于原始 SQL 匹配，特征本身依赖引号与注释符号

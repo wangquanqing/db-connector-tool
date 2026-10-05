@@ -315,8 +315,9 @@ db-connector query mysql-dev "SELECT * FROM users" --output users.json
   字面量里恰好含有这类文本的正常数据不会误报
 - **拒绝多条语句**: `SELECT 1; DROP TABLE t` 这类语句走私会被拒绝，
   存储过程/触发器定义除外
-- **显式管理语句放行**: 用户直接书写的 `DROP` / `TRUNCATE` / `CREATE` / `ALTER`
-  等语句正常执行（仅 `GRANT` / `REVOKE` 权限变更仍被拦截）
+- **不按语句种类设限**: 用户直接书写的管理语句——`DROP` / `TRUNCATE` /
+  `CREATE` / `ALTER` / `GRANT` / `REVOKE` 等——正常执行；
+  校验只针对注入特征与语句走私，不限制语句类型
 
 ### 安全配置示例
 

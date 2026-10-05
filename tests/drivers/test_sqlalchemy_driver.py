@@ -233,10 +233,10 @@ class TestSQLAlchemyDriver(unittest.TestCase):
         driver._validate_sql_query("SELECT * FROM logs WHERE msg = 'UNION SELECT'")
 
     def test_validate_sql_query_grant(self) -> None:
-        """测试验证 GRANT 命令"""
+        """显式权限语句属管理操作，应放行（与 DROP/CREATE 同等对待）"""
         driver = SQLAlchemyDriver(self.base_config)
-        with self.assertRaises(ValueError):
-            driver._validate_sql_query("GRANT ALL ON *.* TO 'user'@'%'")
+        driver._validate_sql_query("GRANT ALL ON *.* TO 'user'@'%'")
+        driver._validate_sql_query("REVOKE ALL ON *.* FROM 'user'@'%'")
 
     def test_validate_sql_query_xp_cmdshell(self) -> None:
         """测试验证 xp_cmdshell"""

@@ -76,6 +76,8 @@ class TestValidateSql(unittest.TestCase):
             "TRUNCATE TABLE t",
             "SELECT table_name FROM information_schema.tables",
             "SELECT id FROM a UNION SELECT id FROM b",
+            "GRANT ALL ON *.* TO 'user'@'%'",
+            "REVOKE ALL ON *.* FROM 'user'@'%'",
         ):
             with self.subTest(sql=sql):
                 validate_sql(sql)
@@ -105,10 +107,13 @@ class TestValidateSql(unittest.TestCase):
                     validate_sql(sql)
 
     def test_blocks_multi_statement(self) -> None:
-        """语句走私被拦截"""
+        """语句走私被拦截（含被夹带的权限语句）"""
         with self.assertRaises(ValueError) as context:
             validate_sql("SELECT 1; DROP TABLE t")
         self.assertIn("多条语句", str(context.exception))
+
+        with self.assertRaises(ValueError):
+            validate_sql("SELECT * FROM users; GRANT ALL ON *.* TO 'user'@'%'")
 
     def test_allows_procedural_body_with_semicolons(self) -> None:
         """存储过程/触发器体内的分号不算走私"""
