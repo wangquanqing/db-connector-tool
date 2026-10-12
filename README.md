@@ -174,12 +174,22 @@ JDBC jar 查找顺序：连接配置的 `jars` → 环境变量 `GBASEDBT_JDBC_J
 
 **两个目录都找不到时会自动从 Maven Central 下载最新版驱动**（坐标 `com.gbasedbt:jdbc`）
 到用户配置目录下的 `jars` 并直接使用；同一目录存在多个版本时，按文件名中的
-版本号取最高者。相关环境变量：
+版本号取最高者。
+
+> **默认包优先于 `_nobson` 变体**：厂商对同一版本会同时发布默认包与 `_nobson` 包，
+> 后者剥掉了内置的 `org.bson.*`（供自备 mongo-java-driver 的场景使用），而
+> `maven-metadata.xml` 的 `<release>` 恰好指向 `_nobson`。本工具不引入 mongo 驱动，
+> 因此**同版本存在默认包时一律选默认包**；本地只装了旧 `_nobson` 包时会自动补下默认包
+> （否则遇到 BSON/JSON 列会抛 `NoClassDefFoundError`）。确需变体时置
+> `GBASEDBT_JDBC_ALLOW_NOBSON=1`。
+
+相关环境变量：
 
 | 变量 | 默认值 | 说明 |
 | --- | --- | --- |
 | `GBASEDBT_JDBC_AUTO_DOWNLOAD` | 启用 | 置 `0`/`false`/`no`/`off` 可关闭自动下载 |
 | `GBASEDBT_JDBC_MAVEN_REPO` | `https://repo1.maven.org/maven2` | 镜像、私服，或本地目录 / `file://` 路径（便于内网离线分发） |
+| `GBASEDBT_JDBC_ALLOW_NOBSON` | 关闭 | 置 `1` 才允许使用缺 `org.bson.*` 的 `_nobson` 变体 |
 | `GBASEDBT_JDBC_DOWNLOAD_TIMEOUT` | `20` | 单次请求超时（秒） |
 | `GBASEDBT_JDBC_DOWNLOAD_MAX_SIZE` | `41943040` | 下载大小上限（字节） |
 

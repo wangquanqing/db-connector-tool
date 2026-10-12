@@ -184,6 +184,13 @@ set GBASEDBT_JDBC_DOWNLOAD_MAX_SIZE=41943040
 下载会校验官方 `.sha1` 与 ZIP 文件头，先写临时文件再原子替换；失败只在日志中告警，
 不影响 `CLASSPATH` 方案。同一目录存在多个版本时按版本号取最高者。
 
+> **默认包优先于 `_nobson` 变体**：厂商对同一版本会同时发布默认包与 `_nobson` 包，
+> 后者剥掉了内置的 `org.bson.*`（供自备 mongo-java-driver 的场景使用），而
+> `maven-metadata.xml` 的 `<release>` 恰好指向 `_nobson`。本工具不引入 mongo 驱动，
+> 因此**同版本存在默认包时一律选默认包**；本地只装了旧 `_nobson` 包时会自动补下默认包
+> （否则遇到 BSON/JSON 列会抛 `NoClassDefFoundError`）。确需变体时置
+> `GBASEDBT_JDBC_ALLOW_NOBSON=1`。
+
 #### 执行查询与命令
 
 SQL 参数统一使用 **命名参数** 风格（`:name` 占位符 + 字典传参）：

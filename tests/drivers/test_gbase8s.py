@@ -466,9 +466,9 @@ class TestJarLookup(unittest.TestCase):
             self.assertIsNone(_first_jar_in(os.path.join(tmp, "not-exist")))
 
     def test_local_jar_preferred_over_download(self) -> None:
-        """本地已有 jar 时不应触发下载"""
+        """本地已有默认包 jar 时不应触发下载"""
         with tempfile.TemporaryDirectory() as tmp:
-            jar = Path(tmp, "jdbc-3.6.5.21_nobson.jar")
+            jar = Path(tmp, "jdbc-3.6.5.21.jar")
             jar.write_bytes(b"PK\x03\x04")
             with patch(
                 "src.db_connector_tool.drivers.gbase8s.jaydebeapi._jar_search_dirs",
@@ -478,6 +478,81 @@ class TestJarLookup(unittest.TestCase):
                 ".download_latest_jar"
             ) as download:
                 self.assertEqual(find_jdbc_jar(), str(jar))
+            download.assert_not_called()
+
+    def test_plain_jar_preferred_over_nobson_in_directory(self) -> None:
+        """同目录同版本时默认包优先于 _nobson 变体
+
+        两者数字段相同（``3.6.5.21`` / ``3.6.5.21_nobson``），而变体缺少
+        ``org.bson.*``；若不显式区分，谁先命中取决于目录遍历顺序。
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            Path(tmp, "gbasedbt-jdbc-3.6.5.21_nobson.jar").write_bytes(b"PK\x03\x04")
+            Path(tmp, "gbasedbt-jdbc-3.6.5.21.jar").write_bytes(b"PK\x03\x04")
+            self.assertEqual(
+                Path(_first_jar_in(tmp)).name, "gbasedbt-jdbc-3.6.5.21.jar"
+            )
+
+    def test_newer_nobson_still_beats_older_plain(self) -> None:
+        """更新版本的变体仍胜过更旧的默认包（不做无谓降级）"""
+        with tempfile.TemporaryDirectory() as tmp:
+            Path(tmp, "gbasedbt-jdbc-3.6.5.21.jar").write_bytes(b"PK\x03\x04")
+            Path(tmp, "gbasedbt-jdbc-3.7.0_nobson.jar").write_bytes(b"PK\x03\x04")
+            self.assertEqual(
+                Path(_first_jar_in(tmp)).name, "gbasedbt-jdbc-3.7.0_nobson.jar"
+            )
+
+    def test_only_nobson_locally_triggers_plain_download(self) -> None:
+        """本地只有 _nobson 变体时补下默认包，并用默认包作为结果
+
+        回归：早期自动下载装的是 ``_nobson`` 包，缺 ``org.bson.*``，
+        遇到 BSON/JSON 列会 NoClassDefFoundError。
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            legacy = Path(tmp, "gbasedbt-jdbc-3.6.5.21_nobson.jar")
+            legacy.write_bytes(b"PK\x03\x04")
+            plain = Path(tmp, "gbasedbt-jdbc-3.6.5.21.jar")
+            with patch(
+                "src.db_connector_tool.drivers.gbase8s.jaydebeapi._jar_search_dirs",
+                return_value=[tmp],
+            ), patch(
+                "src.db_connector_tool.drivers.gbase8s.jaydebeapi.jar_downloader"
+                ".download_latest_jar",
+                return_value=plain,
+            ) as download:
+                self.assertEqual(find_jdbc_jar(), str(plain))
+            download.assert_called_once()
+
+    def test_nobson_fallback_when_plain_download_fails(self) -> None:
+        """补下默认包失败时回退到本地变体，不至于无驱动可用"""
+        with tempfile.TemporaryDirectory() as tmp:
+            legacy = Path(tmp, "gbasedbt-jdbc-3.6.5.21_nobson.jar")
+            legacy.write_bytes(b"PK\x03\x04")
+            with patch(
+                "src.db_connector_tool.drivers.gbase8s.jaydebeapi._jar_search_dirs",
+                return_value=[tmp],
+            ), patch(
+                "src.db_connector_tool.drivers.gbase8s.jaydebeapi.jar_downloader"
+                ".download_latest_jar",
+                return_value=None,
+            ):
+                self.assertEqual(find_jdbc_jar(), str(legacy))
+
+    def test_allow_nobson_skips_plain_download(self) -> None:
+        """显式允许变体时不再补下默认包"""
+        with tempfile.TemporaryDirectory() as tmp:
+            legacy = Path(tmp, "gbasedbt-jdbc-3.6.5.21_nobson.jar")
+            legacy.write_bytes(b"PK\x03\x04")
+            with patch.dict(
+                os.environ, {jar_downloader.ALLOW_NOBSON_ENV: "1"}
+            ), patch(
+                "src.db_connector_tool.drivers.gbase8s.jaydebeapi._jar_search_dirs",
+                return_value=[tmp],
+            ), patch(
+                "src.db_connector_tool.drivers.gbase8s.jaydebeapi.jar_downloader"
+                ".download_latest_jar"
+            ) as download:
+                self.assertEqual(find_jdbc_jar(), str(legacy))
             download.assert_not_called()
 
     @patch("src.db_connector_tool.drivers.gbase8s.jaydebeapi._jar_search_dirs")

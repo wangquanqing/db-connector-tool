@@ -10,6 +10,7 @@ import tempfile
 import unittest
 import urllib.error
 from pathlib import Path
+from typing import Optional
 from unittest import mock
 
 from src.db_connector_tool.drivers.gbase8s import jar_downloader
@@ -24,15 +25,28 @@ from src.db_connector_tool.drivers.gbase8s.jar_downloader import (
     select_latest_version,
 )
 FAKE_JAR = b"PK\x03\x04" + b"fake-jdbc-driver-payload" * 8
-VERSION = "3.6.5.21_nobson"
+# 厂商把 ``_nobson`` 变体标成了 <release>（真实 Maven 元数据即如此），
+# 而该变体缺少 org.bson.*，因此默认包 VERSION 才是应被选中的那个。
+VERSION = "3.6.5.21"
+VARIANT_VERSION = "3.6.5.21_nobson"
 OLD_VERSION = "3.6.3.34"
 
 
-def build_repo(root: Path, version: str = VERSION, payload: bytes = FAKE_JAR) -> Path:
-    """在临时目录里搭一个 Maven 仓库布局"""
+def build_repo(
+    root: Path,
+    version: str = VERSION,
+    payload: bytes = FAKE_JAR,
+    release: Optional[str] = None,
+) -> Path:
+    """在临时目录里搭一个 Maven 仓库布局
+
+    ``release`` 默认取 ``version``；传入 ``VARIANT_VERSION`` 可复现真实仓库
+    「release 指向 _nobson 变体、但同版本默认包也在列表里」的情形。
+    """
     group_dir = root / "com" / "gbasedbt" / "jdbc"
     artifact_dir = group_dir / version
     artifact_dir.mkdir(parents=True, exist_ok=True)
+    release_value = release if release is not None else version
 
     (group_dir / "maven-metadata.xml").write_text(
         f"""<?xml version="1.0" encoding="UTF-8"?>
@@ -40,21 +54,25 @@ def build_repo(root: Path, version: str = VERSION, payload: bytes = FAKE_JAR) ->
   <groupId>com.gbasedbt</groupId>
   <artifactId>jdbc</artifactId>
   <versioning>
-    <latest>{version}</latest>
-    <release>{version}</release>
+    <latest>{release_value}</latest>
+    <release>{release_value}</release>
     <versions>
       <version>{OLD_VERSION}</version>
-      <version>{version}</version>
+      <version>{VERSION}</version>
+      <version>{VARIANT_VERSION}</version>
     </versions>
   </versioning>
 </metadata>
 """,
         encoding="utf-8",
     )
-    (artifact_dir / f"jdbc-{version}.jar").write_bytes(payload)
-    (artifact_dir / f"jdbc-{version}.jar.sha1").write_text(
-        hashlib.sha1(payload).hexdigest(), encoding="utf-8"
-    )
+    for name in {version, release_value}:
+        variant_dir = group_dir / name
+        variant_dir.mkdir(parents=True, exist_ok=True)
+        (variant_dir / f"jdbc-{name}.jar").write_bytes(payload)
+        (variant_dir / f"jdbc-{name}.jar.sha1").write_text(
+            hashlib.sha1(payload).hexdigest(), encoding="utf-8"
+        )
     return root
 
 
@@ -133,6 +151,64 @@ class TestVersionSelection(unittest.TestCase):
         with self.assertRaises(JarDownloadError):
             select_latest_version([])
 
+    def test_release_pointing_to_nobson_uses_same_version_plain(self) -> None:
+        """release 指向 _nobson 变体时改用同数字段的默认包
+
+        回归真实 Maven 元数据：``<release>`` 是 ``3.6.5.21_nobson``，
+        但同版本的 ``3.6.5.21`` 也在列表里，应选后者（变体缺 ``org.bson.*``）。
+        """
+        versions = ["3.6.3.34", "3.6.5.21", "3.6.5.21_nobson"]
+        self.assertEqual(
+            select_latest_version(versions, "3.6.5.21_nobson"), "3.6.5.21"
+        )
+
+    def test_nobson_only_repo_keeps_variant(self) -> None:
+        """仓库里确实只有变体时不做版本降级，仍返回该变体"""
+        self.assertEqual(
+            select_latest_version(["3.6.5.21_nobson"], "3.6.5.21_nobson"),
+            "3.6.5.21_nobson",
+        )
+
+    def test_allow_nobson_env_keeps_release(self) -> None:
+        """显式允许变体时，release 原样采用（不做替换）"""
+        versions = ["3.6.5.21", "3.6.5.21_nobson"]
+        with mock.patch.dict(
+            os.environ, {jar_downloader.ALLOW_NOBSON_ENV: "1"}
+        ):
+            self.assertEqual(
+                select_latest_version(versions, "3.6.5.21_nobson"),
+                "3.6.5.21_nobson",
+            )
+
+    def test_release_nobson_without_sibling_falls_back(self) -> None:
+        """release 是变体且无同版本默认包时，仍返回 release（不擅自降级）"""
+        versions = ["3.6.3.34", "3.6.5.21_nobson"]
+        self.assertEqual(
+            select_latest_version(versions, "3.6.5.21_nobson"), "3.6.5.21_nobson"
+        )
+
+    def test_is_nobson_variant_detection(self) -> None:
+        """变体识别覆盖版本号与文件名两种形态，且不误伤相似词"""
+        self.assertTrue(jar_downloader.is_nobson_variant("3.6.5.21_nobson"))
+        self.assertTrue(jar_downloader.is_nobson_variant("3.6.3.34.nobson"))
+        self.assertTrue(
+            jar_downloader.is_nobson_variant("gbasedbt-jdbc-3.6.5.21_nobson.jar")
+        )
+        for value in ("3.6.5.21", "3.6.3.34", "3.6.5.21_nobsonplus", ""):
+            with self.subTest(value=value):
+                self.assertFalse(jar_downloader.is_nobson_variant(value))
+
+    def test_version_rank_plain_first_same_numbers(self) -> None:
+        """数字段相同时默认包排在变体之前；跨版本仍按数字段大小"""
+        self.assertGreater(
+            jar_downloader.version_rank("3.6.5.21"),
+            jar_downloader.version_rank("3.6.5.21_nobson"),
+        )
+        self.assertGreater(
+            jar_downloader.version_rank("3.7.0_nobson"),
+            jar_downloader.version_rank("3.6.5.21"),
+        )
+
 
 class TestVersionValidation(unittest.TestCase):
     """版本号必须能安全地用作文件名
@@ -171,6 +247,13 @@ class TestVersionValidation(unittest.TestCase):
         """挑选最新版本时跳过不安全的版本号"""
         versions = ["3.6.3.34", "../../../../evil"]
         self.assertEqual(select_latest_version(versions), "3.6.3.34")
+
+    def test_unsafe_release_ignored_when_versions_available(self) -> None:
+        """release 不安全但列表里有可用版本时，退回按版本号挑选"""
+        versions = ["3.6.3.34", "3.6.5.21"]
+        self.assertEqual(
+            select_latest_version(versions, "../../../../evil"), "3.6.5.21"
+        )
 
     def test_select_latest_version_rejects_all_unsafe(self) -> None:
         """全部不安全时抛错"""

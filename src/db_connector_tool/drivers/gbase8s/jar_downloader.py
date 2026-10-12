@@ -13,8 +13,14 @@
 * 限制响应体大小（默认 40MB）与超时（默认 20 秒），失败只记录日志，
   并在进程内缓存失败结果，避免每次建连都重试。
 
-Maven 坐标：``com.gbasedbt:jdbc``，最新版本取 ``maven-metadata.xml`` 的
-``<release>``（例如 ``3.6.5.21_nobson``）。
+Maven 坐标：``com.gbasedbt:jdbc``，版本取 ``maven-metadata.xml`` 的 ``<release>``，
+但**不采用**其中的 ``_nobson`` 变体（见下）。
+
+关于 ``_nobson`` 变体：厂商对同一版本同时发布两个产物，默认包内置 ``org.bson.*``，
+``_nobson`` 包则把这些类剥掉（供调用方自备 mongo-java-driver 的场景使用）。
+本工具不会额外引入 mongo 驱动，使用 ``_nobson`` 包时一旦遇到 BSON/JSON 列就会因
+缺类抛 ``NoClassDefFoundError``（实测：``com/gbasedbt/jdbc/IfxBSONObject`` 仍引用
+``org/bson/*``），因此**默认包优先**，仅在仓库中确实没有默认包时才回退到变体。
 """
 
 from __future__ import annotations
@@ -44,6 +50,7 @@ DEFAULT_MAVEN_REPO = "https://repo1.maven.org/maven2"
 # 环境变量
 AUTO_DOWNLOAD_ENV = "GBASEDBT_JDBC_AUTO_DOWNLOAD"
 MAVEN_REPO_ENV = "GBASEDBT_JDBC_MAVEN_REPO"
+ALLOW_NOBSON_ENV = "GBASEDBT_JDBC_ALLOW_NOBSON"
 DOWNLOAD_TIMEOUT_ENV = "GBASEDBT_JDBC_DOWNLOAD_TIMEOUT"
 DOWNLOAD_MAX_SIZE_ENV = "GBASEDBT_JDBC_DOWNLOAD_MAX_SIZE"
 
@@ -60,6 +67,12 @@ _ZIP_MAGIC = b"PK\x03\x04"
 
 # 版本号解析：取数字段用于比较，例如 3.6.5.21_nobson -> (3, 6, 5, 21)
 _VERSION_NUMBER_PATTERN = re.compile(r"\d+")
+
+# 剥离 ``org.bson.*`` 的变体后缀（如 ``3.6.5.21_nobson``、``3.6.3.34.nobson``）。
+# 该变体需要调用方自备 mongo-java-driver，本工具不提供，故默认包优先。
+# 作为 token 匹配，避免误伤 ``nobsonxyz`` 这类无关版本号；
+# 同时兼容文件名形式（``gbasedbt-jdbc-3.6.5.21_nobson.jar``）。
+_NOBSON_VARIANT_PATTERN = re.compile(r"(?:^|[._-])nobson(?:[._-]|$)", re.IGNORECASE)
 
 # 下载落盘使用的文件名前缀。刻意带上 gbasedbt 关键字，确保能被
 # jaydebeapi._first_jar_in 的关键字识别到（Maven 原始名
@@ -143,6 +156,68 @@ def maven_repo_url() -> str:
     return base
 
 
+def allow_nobson_variant() -> bool:
+    """是否允许使用 ``_nobson`` 变体（默认不允许）
+
+    变体缺少 ``org.bson.*``，只有调用方自己提供 mongo-java-driver 时才有意义；
+    置 ``GBASEDBT_JDBC_ALLOW_NOBSON=1`` 可显式放开（此时连「同版本默认包优先」
+    的替换也会跳过）。
+
+    Example:
+        >>> os.environ[ALLOW_NOBSON_ENV] = "0"
+        >>> allow_nobson_variant()
+        False
+    """
+    return _env_flag(ALLOW_NOBSON_ENV, False)
+
+
+def is_nobson_variant(version: str) -> bool:
+    """判断版本号是否为剥离 ``org.bson.*`` 的变体
+
+    厂商对同一版本同时发布默认包与 ``_nobson`` 包：后者剥掉了内置的
+    ``org.bson.*`` 类，需要调用方自备 mongo-java-driver。本工具不引入该依赖，
+    因此默认包优先（详见模块文档）。
+
+    Args:
+        version: Maven 版本号或 jar 文件名（``.jar`` 后缀会被忽略）
+
+    Returns:
+        bool: 是否为 ``_nobson`` 变体
+
+    Example:
+        >>> is_nobson_variant("3.6.5.21_nobson")
+        True
+        >>> is_nobson_variant("3.6.5.21")
+        False
+    """
+    stem = re.sub(r"\.jar$", "", (version or "").strip(), flags=re.IGNORECASE)
+    return bool(_NOBSON_VARIANT_PATTERN.search(stem))
+
+
+def version_rank(version: str) -> Tuple[Tuple[int, ...], int]:
+    """返回版本排序键：**先比数字段，同版本内默认包优先**
+
+    数字段完全相同的默认包与 ``_nobson`` 包（``3.6.5.21`` / ``3.6.5.21_nobson``）
+    必须让默认包排在前，否则会出现「装了却用不了」的 BSON 缺类问题；
+    而更新版本的变体（``3.7.0_nobson``）仍应胜过旧的默认包（``3.6.5.21``），
+    因此不能简单地把变体一律降权——这里是「同版本内默认包优先」。
+
+    Args:
+        version: Maven 版本号
+
+    Returns:
+        Tuple[Tuple[int, ...], int]: 比较键，先比数字段，再比「是否变体」（默认包为 1）
+
+    Example:
+        >>> version_rank("3.6.5.21") > version_rank("3.6.5.21_nobson")
+        True
+        >>> version_rank("3.7.0_nobson") > version_rank("3.6.5.21")
+        True
+    """
+    key = parse_version_key(version)
+    return (key, 0 if is_nobson_variant(version) else 1)
+
+
 def is_safe_version(version: str) -> bool:
     """判断版本号是否可安全地用于 URL 与文件名
 
@@ -188,12 +263,14 @@ def parse_version_key(version: str) -> Tuple[int, ...]:
 
 
 def select_latest_version(versions: List[str], release: Optional[str] = None) -> str:
-    """从版本列表中挑出最新版本
+    """从版本列表中挑出最新版本（默认包优先）
 
-    优先使用 ``maven-metadata.xml`` 的 ``<release>``，但它可能指向
-    ``_nobson`` 之类的变体；其余情况按数字段比较取最大者。
+    ``maven-metadata.xml`` 的 ``<release>`` 优先，但**不直接照搬**：厂商把
+    ``_nobson`` 变体标成了 release（例如 ``3.6.5.21_nobson``），而该变体剥掉了
+    ``org.bson.*``，本工具不引入 mongo 驱动，用它会缺类。因此当 ``<release>``
+    是变体、而列表里存在**同数字段的默认包**时，改用默认包。
 
-    只接受通过 :func:`is_safe_version` 的版本号（元数据不可信）。
+    仅接受通过 :func:`is_safe_version` 的版本号（元数据不可信）。
 
     Args:
         versions: ``<versions>`` 中列出的全部版本
@@ -204,6 +281,10 @@ def select_latest_version(versions: List[str], release: Optional[str] = None) ->
 
     Raises:
         JarDownloadError: 版本列表为空，或没有任何安全可用版本
+
+    Example:
+        >>> select_latest_version(["3.6.5.21", "3.6.5.21_nobson"], "3.6.5.21_nobson")
+        '3.6.5.21'
     """
     candidates = [item.strip() for item in versions if item and item.strip()]
     safe_candidates = [item for item in candidates if is_safe_version(item)]
@@ -211,14 +292,52 @@ def select_latest_version(versions: List[str], release: Optional[str] = None) ->
     if rejected:
         logger.warning("忽略不安全的版本号: %s", rejected)
 
-    if release and release.strip() and is_safe_version(release.strip()):
-        return release.strip()
-    if release and release.strip():
-        logger.warning("忽略不安全的 release 字段: %s", release.strip())
-
     if not safe_candidates:
+        if release and release.strip():
+            logger.warning("忽略不安全的 release 字段: %s", release.strip())
         raise JarDownloadError("Maven 元数据中没有安全可用的版本号")
-    return max(safe_candidates, key=parse_version_key)
+
+    release_value = (release or "").strip()
+    if release_value and not is_safe_version(release_value):
+        logger.warning("忽略不安全的 release 字段: %s", release_value)
+        release_value = ""
+
+    if (
+        release_value
+        and is_nobson_variant(release_value)
+        and not allow_nobson_variant()
+    ):
+        # 变体被标成 release：改用**同数字段**的默认包（不做版本降级）
+        sibling = [
+            item
+            for item in safe_candidates
+            if not is_nobson_variant(item)
+            and parse_version_key(item) == parse_version_key(release_value)
+        ]
+        if sibling:
+            logger.info(
+                "Maven release 指向 _nobson 变体(%s)，改用同版本默认包 %s"
+                "（该变体缺少 org.bson.*）",
+                release_value,
+                sibling[0],
+            )
+            return sibling[0]
+        logger.warning(
+            "Maven release 指向 _nobson 变体(%s)，且仓库中没有同版本默认包；"
+            "该变体缺少 org.bson.*，遇到 BSON/JSON 列会抛 NoClassDefFoundError",
+            release_value,
+        )
+
+    if release_value:
+        return release_value
+
+    selected = max(safe_candidates, key=version_rank)
+    if is_nobson_variant(selected) and not allow_nobson_variant():
+        logger.warning(
+            "最新版本 %s 是 _nobson 变体，缺少 org.bson.*，遇到 BSON/JSON 列会失败",
+            selected,
+        )
+    return selected
 
 
 def _metadata_url(repo_url: str) -> str:

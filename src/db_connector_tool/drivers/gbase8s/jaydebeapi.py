@@ -126,6 +126,10 @@ def _first_jar_in(directory: str) -> Optional[str]:
     同一目录可能存在多个版本（例如自动下载的新版本与用户手工放置的旧版本），
     这里按``文件名中的数字段``取最高版本；损坏的文件（文件头不是 ZIP）会被
     跳过，从而回退到其他候选或触发重新下载。
+
+    数字段相同时**默认包优先于 ``_nobson`` 变体**：两者版本号数字段一致
+    （``3.6.5.21`` / ``3.6.5.21_nobson``），而变体缺少 ``org.bson.*``，
+    若被排到前面会出现「装了却用不了」的缺类问题。
     """
     candidates: List[str] = []
     try:
@@ -142,7 +146,7 @@ def _first_jar_in(directory: str) -> Optional[str]:
 
     ordered = sorted(
         candidates,
-        key=lambda path: jar_downloader.parse_version_key(os.path.basename(path)),
+        key=lambda path: jar_downloader.version_rank(os.path.basename(path)),
         reverse=True,
     )
     for candidate in ordered:
@@ -163,6 +167,10 @@ def find_jdbc_jar(explicit: Optional[str] = None) -> Optional[str]:
     则从 Maven Central 拉取**最新版本**到用户配置目录下的 jars 并返回其路径；
     下载失败只记录告警并返回 ``None``（此时由 ``CLASSPATH`` 决定）。
 
+    特例：目录里**只有** ``_nobson`` 变体时（该变体缺少 ``org.bson.*``，早期
+    自动下载可能装过），会先尝试补下默认包；补下成功就用默认包，失败才回退到
+    变体（并给出告警）。设置 ``GBASEDBT_JDBC_ALLOW_NOBSON=1`` 可跳过这个补下。
+
     Args:
         explicit: 通过 URL 查询参数 ``jars`` 显式指定的 jar 路径
 
@@ -182,13 +190,34 @@ def find_jdbc_jar(explicit: Optional[str] = None) -> Optional[str]:
                     return candidate
             except OSError:
                 continue
+
+    local_jar: Optional[str] = None
     for directory in _jar_search_dirs():
         found = _first_jar_in(directory)
         if found:
-            return found
+            local_jar = found
+            break
+
+    # 只有 _nobson 变体时，先试着补下默认包（同版本默认包会排在变体之前）
+    needs_plain = (
+        local_jar is not None
+        and jar_downloader.is_nobson_variant(os.path.basename(local_jar))
+        and not jar_downloader.allow_nobson_variant()
+    )
+    if local_jar is not None and not needs_plain:
+        return local_jar
+
+    if needs_plain:
+        logger.warning(
+            "本地只有 _nobson 变体驱动（%s），该变体缺少 org.bson.*，"
+            "尝试从 Maven 获取同版本默认包",
+            local_jar,
+        )
 
     downloaded = jar_downloader.download_latest_jar(auto_download_dir())
-    return str(downloaded) if downloaded else None
+    if downloaded:
+        return str(downloaded)
+    return local_jar
 
 
 class GBase8sDialect_jaydebeapi(GBase8sDialect):  # NOSONAR

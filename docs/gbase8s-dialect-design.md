@@ -40,10 +40,23 @@ gbase8s://host:9088/dbname:GBASEDBTSERVER=server?user=u&password=p&sqlmode=mysql
 | 项 | 值 |
 | --- | --- |
 | 坐标 | `com.gbasedbt:jdbc` |
-| 版本来源 | `maven-metadata.xml` 的 `<release>`（缺失时按数字段取最大） |
+| 版本来源 | `maven-metadata.xml` 的 `<release>`；**为 `_nobson` 变体时改用同数字段的默认包**（缺失时按数字段取最大，同数字段默认包优先） |
 | 元数据 | `…/com/gbasedbt/jdbc/maven-metadata.xml` |
 | 产物 | `…/com/gbasedbt/jdbc/<version>/jdbc-<version>.jar` + `.sha1` |
 | 落盘名 | `gbasedbt-jdbc-<version>.jar`（带 gbase 关键字，确保能被搜索逻辑识别） |
+
+**`_nobson` 变体的处理**（重要）：厂商对同一版本同时发布两个产物，默认包内置
+`org.bson.*`，`_nobson` 包把这些类剥掉（供调用方自备 mongo-java-driver）。实测
+`3.6.5.21.jar` 含 67 个 `org/bson/*` 类、`3.6.5.21_nobson.jar` 为 0 个，但后者的
+`com/gbasedbt/jdbc/IfxBSONObject.class` **仍引用** `org/bson/BSONObject` 等 4 个类 ——
+即遇到 BSON/JSON 列会抛 `NoClassDefFoundError`。而 Maven 元数据的 `<release>`
+恰好指向 `3.6.5.21_nobson`，故必须显式规避：
+
+- 选择阶段：`release` 是变体且列表里有**同数字段**的默认包 → 改用默认包；
+- 排序阶段：`version_rank()` 在数字段相同时让默认包排在变体之前（`_first_jar_in`
+  也用它），避免目录遍历顺序决定命中哪个；
+- 自愈：本地只装了变体时，`find_jdbc_jar()` 会尝试补下同版本默认包，失败才回退到变体；
+- 逃生口：`GBASEDBT_JDBC_ALLOW_NOBSON=1` 显式允许变体（此时不做上述替换与补下）。
 
 实现要点：
 
@@ -53,8 +66,9 @@ gbase8s://host:9088/dbname:GBASEDBTSERVER=server?user=u&password=p&sqlmode=mysql
 - **失败策略**：只告警不抛出，返回 `None` 交由 `CLASSPATH` 处理；版本解析按仓库
   缓存、失败版本按进程记忆，避免每次建连都重试；
 - **可关闭/可换源**：`GBASEDBT_JDBC_AUTO_DOWNLOAD`、
-  `GBASEDBT_JDBC_MAVEN_REPO`（支持镜像、私服、本地目录与 `file://`）；
-- **多版本共存**：同目录按文件名数字段取最高版本，避免旧 jar 抢先命中。
+  `GBASEDBT_JDBC_MAVEN_REPO`（支持镜像、私服、本地目录与 `file://`）、
+  `GBASEDBT_JDBC_ALLOW_NOBSON`；
+- **多版本共存**：同目录按文件名数字段取最高版本，数字段相同则默认包优先。
 
 ## 4. 一库三模实现
 
