@@ -15,9 +15,15 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from ...utils.logging_utils import get_logger
+from ...utils.path_utils import PathHelper
+from . import jar_downloader
 from .base import GBase8sDialect, normalize_sqlmode
+
+logger = get_logger(__name__)
 
 # pylint: disable=invalid-name
 # ``GBase8sDialect_jaydebeapi`` / ``dialect`` 沿用 SQLAlchemy 各 DBAPI 方言模块的
@@ -29,6 +35,10 @@ from .base import GBase8sDialect, normalize_sqlmode
 JDBC_DRIVER_CLASS = "com.gbasedbt.jdbc.Driver"
 JDBC_SUBPROTOCOL = "gbasedbt-sqli"
 DEFAULT_PORT = 9088
+
+# 自动下载的落盘目录：用户配置目录下的 jars（Windows 为 %APPDATA%\db_connector_tool\jars）
+AUTO_DOWNLOAD_APP_NAME = "db_connector_tool"
+AUTO_DOWNLOAD_SUBDIR = "jars"
 
 # 方言级查询参数，不会被写入 JDBC 连接属性
 _DIALECT_QUERY_KEYS = ("user", "password", "sqlmode", "jars")
@@ -49,17 +59,34 @@ _DISCONNECT_MARKERS = (
 )
 
 
+def auto_download_dir() -> Path:
+    """返回自动下载的落盘目录（用户配置目录下的 jars）
+
+    Returns:
+        Path: 例如 Windows 上的 ``%APPDATA%\\db_connector_tool\\jars``
+
+    Example:
+        >>> auto_download_dir().name
+        'jars'
+    """
+    return Path(PathHelper.get_user_config_dir(AUTO_DOWNLOAD_APP_NAME)) / (
+        AUTO_DOWNLOAD_SUBDIR
+    )
+
+
 def _jar_search_dirs() -> List[str]:
     """返回 JDBC 驱动 jar 的候选搜索目录
 
-    额外搜索路径可通过环境变量 ``GBASEDBT_JDBC_SEARCH_DIRS`` 以
-    ``os.pathsep`` 分隔追加。
+    顺序：用户配置目录下的 jars（自动下载的落盘位置） → 当前工作目录的 jars
+    → 其他约定目录。额外搜索路径可通过环境变量 ``GBASEDBT_JDBC_SEARCH_DIRS``
+    以 ``os.pathsep`` 分隔追加。
     """
     home = os.path.expanduser("~")
     dirs = [
+        str(auto_download_dir()),
+        os.path.join(os.getcwd(), "jars"),
         os.path.join(home, ".sqlalchemy-jdbcapi", "drivers"),
         os.path.join(home, "db_connector_tool", "jars"),
-        os.path.join(os.getcwd(), "jars"),
     ]
     extra = os.environ.get("GBASEDBT_JDBC_SEARCH_DIRS", "")
     if extra:
@@ -67,36 +94,66 @@ def _jar_search_dirs() -> List[str]:
     return dirs
 
 
+def _is_gbase_jar(filename: str) -> bool:
+    """判断文件名是否为 GBase JDBC 驱动 jar
+
+    识别两类命名：
+
+    * 含 gbasedbt / gbase 关键字（厂商原始名与自动下载名）；
+    * Maven 规范名 ``jdbc-<数字>.jar``（``com.gbasedbt:jdbc`` 产物）。
+    """
+    lowered = filename.lower()
+    if not lowered.endswith(".jar"):
+        return False
+    if any(keyword in lowered for keyword in _JAR_NAME_KEYWORDS):
+        return True
+    return bool(jar_downloader.MAVEN_JAR_NAME_PATTERN.match(filename))
+
+
 def _first_jar_in(directory: str) -> Optional[str]:
-    """返回目录中第一个 GBase JDBC jar 的完整路径"""
+    """返回目录中版本最高的 GBase JDBC jar 的完整路径
+
+    同一目录可能存在多个版本（例如自动下载的新版本与用户手工放置的旧版本），
+    这里按``文件名中的数字段``取最高版本，避免旧 jar 抢先命中。
+    """
+    candidates: List[str] = []
     try:
         if not os.path.isdir(directory):
             return None
-        for name in sorted(os.listdir(directory)):
-            lowered = name.lower()
-            if lowered.endswith(".jar") and any(
-                keyword in lowered for keyword in _JAR_NAME_KEYWORDS
-            ):
-                return os.path.join(directory, name)
+        for name in os.listdir(directory):
+            if _is_gbase_jar(name):
+                candidates.append(os.path.join(directory, name))
     except OSError:
-        pass
-    return None
+        return None
+
+    if not candidates:
+        return None
+    return max(
+        candidates,
+        key=lambda path: jar_downloader.parse_version_key(os.path.basename(path)),
+    )
 
 
 def find_jdbc_jar(explicit: Optional[str] = None) -> Optional[str]:
     """定位 GBase 8s 的 JDBC 驱动 jar
 
-    按“显式配置 -> 环境变量 -> 约定目录”的顺序查找。
+    查找顺序：显式配置（URL 的 ``jars`` 参数） → 环境变量
+    （``GBASEDBT_JDBC_JAR`` / ``GBASE8S_JDBC_JAR``） → 约定目录
+    （用户配置目录 jars、程序运行目录 jars、``GBASEDBT_JDBC_SEARCH_DIRS``）。
+
+    若仍然找不到，且未通过 ``GBASEDBT_JDBC_AUTO_DOWNLOAD`` 关闭自动下载，
+    则从 Maven Central 拉取**最新版本**到用户配置目录下的 jars 并返回其路径；
+    下载失败只记录告警并返回 ``None``（此时由 ``CLASSPATH`` 决定）。
 
     Args:
         explicit: 通过 URL 查询参数 ``jars`` 显式指定的 jar 路径
 
     Returns:
-        Optional[str]: jar 文件路径；未找到时返回 ``None``，此时由 ``CLASSPATH`` 决定
+        Optional[str]: jar 文件路径；未找到时返回 ``None``
 
     Example:
         >>> find_jdbc_jar()
-        'C:\\Users\\me\\.sqlalchemy-jdbcapi\\drivers\\gbasedbt-jdbc-3.5.1.jar'
+        'C:\\Users\\me\\AppData\\Roaming\\db_connector_tool\\jars\\jdbc-3.6.5.21_nobson.jar'
     """
     candidates = [explicit]
     candidates.extend(os.environ.get(name) for name in _JAR_ENV_VARS)
@@ -111,7 +168,9 @@ def find_jdbc_jar(explicit: Optional[str] = None) -> Optional[str]:
         found = _first_jar_in(directory)
         if found:
             return found
-    return None
+
+    downloaded = jar_downloader.download_latest_jar(auto_download_dir())
+    return str(downloaded) if downloaded else None
 
 
 class GBase8sDialect_jaydebeapi(GBase8sDialect):  # NOSONAR

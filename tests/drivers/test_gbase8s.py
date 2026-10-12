@@ -14,6 +14,7 @@ import os
 import tempfile
 import unittest
 from collections import namedtuple
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from sqlalchemy import (
@@ -48,8 +49,13 @@ from src.db_connector_tool.drivers.gbase8s import (
     dictionary,
     normalize_sqlmode,
 )
+from src.db_connector_tool.drivers.gbase8s import jar_downloader
 from src.db_connector_tool.drivers.gbase8s.jaydebeapi import (
     JDBC_DRIVER_CLASS,
+    _first_jar_in,
+    _is_gbase_jar,
+    _jar_search_dirs,
+    auto_download_dir,
     find_jdbc_jar,
 )
 from src.db_connector_tool.drivers.gbase8s.types import LVARCHAR, MONEY, SERIAL, SERIAL8
@@ -339,9 +345,115 @@ class TestJarLookup(unittest.TestCase):
         {"GBASEDBT_JDBC_JAR": "", "GBASE8S_JDBC_JAR": ""},
     )
     def test_returns_none_when_absent(self, search_dirs: MagicMock) -> None:
-        """都找不到时返回 None，交由 CLASSPATH 决定"""
+        """都找不到且自动下载关闭时返回 None，交由 CLASSPATH 决定"""
         search_dirs.return_value = []
-        self.assertIsNone(find_jdbc_jar())
+        with patch.dict(os.environ, {"GBASEDBT_JDBC_AUTO_DOWNLOAD": "0"}):
+            self.assertIsNone(find_jdbc_jar())
+
+    @patch("src.db_connector_tool.drivers.gbase8s.jaydebeapi._jar_search_dirs")
+    @patch.dict(
+        os.environ,
+        {"GBASEDBT_JDBC_JAR": "", "GBASE8S_JDBC_JAR": ""},
+    )
+    def test_downloads_when_absent(self, search_dirs: MagicMock) -> None:
+        """都找不到时尝试自动下载，并把下载结果作为 jar 路径返回"""
+        search_dirs.return_value = []
+        with patch(
+            "src.db_connector_tool.drivers.gbase8s.jaydebeapi.jar_downloader"
+            ".download_latest_jar",
+            return_value=Path("/tmp/jdbc-3.6.5.21_nobson.jar"),
+        ) as download:
+            self.assertEqual(find_jdbc_jar(), str(Path("/tmp/jdbc-3.6.5.21_nobson.jar")))
+        download.assert_called_once()
+
+    def test_auto_download_dir_is_user_config_jars(self) -> None:
+        """自动下载目录为用户配置目录下的 jars"""
+        self.assertEqual(auto_download_dir().name, "jars")
+        self.assertEqual(auto_download_dir().parent.name, "db_connector_tool")
+
+    def test_search_dirs_include_config_and_cwd(self) -> None:
+        """搜索目录包含用户配置目录 jars 与程序运行目录 jars，且配置目录优先"""
+        dirs = [os.path.normcase(d) for d in _jar_search_dirs()]
+        self.assertIn(os.path.normcase(str(auto_download_dir())), dirs)
+        self.assertIn(os.path.normcase(os.path.join(os.getcwd(), "jars")), dirs)
+        self.assertLess(
+            dirs.index(os.path.normcase(str(auto_download_dir()))),
+            dirs.index(os.path.normcase(os.path.join(os.getcwd(), "jars"))),
+        )
+
+    def test_search_dirs_honour_extra_env(self) -> None:
+        """GBASEDBT_JDBC_SEARCH_DIRS 可追加搜索目录"""
+        extra = os.path.join(os.getcwd(), "extra-jars")
+        with patch.dict(os.environ, {"GBASEDBT_JDBC_SEARCH_DIRS": extra}):
+            dirs = [os.path.normcase(d) for d in _jar_search_dirs()]
+        self.assertIn(os.path.normcase(extra), dirs)
+
+    def test_highest_version_wins_in_directory(self) -> None:
+        """同目录多版本时选版本最高的 jar"""
+        with tempfile.TemporaryDirectory() as tmp:
+            for name in (
+                "gbasedbtjdbc_3.6.3_3X2_1_377ee9.jar",
+                "gbasedbt-jdbc-3.6.5.21_nobson.jar",
+                "gbasedbt-jdbc-2.0.1.26.jar",
+            ):
+                Path(tmp, name).write_bytes(b"PK\x03\x04")
+            self.assertEqual(
+                Path(_first_jar_in(tmp)).name, "gbasedbt-jdbc-3.6.5.21_nobson.jar"
+            )
+
+    def test_maven_named_jar_is_recognised(self) -> None:
+        """Maven 规范名 jdbc-<版本>.jar 也能被识别（下载文件曾被过滤掉的回归）"""
+        with tempfile.TemporaryDirectory() as tmp:
+            Path(tmp, "jdbc-3.6.5.21_nobson.jar").write_bytes(b"PK\x03\x04")
+            self.assertEqual(
+                Path(_first_jar_in(tmp)).name, "jdbc-3.6.5.21_nobson.jar"
+            )
+
+    def test_downloaded_file_name_is_searchable(self) -> None:
+        """自动下载的文件名必须能被搜索逻辑识别"""
+        filename = jar_downloader._jar_filename(  # pylint: disable=protected-access
+            "3.6.5.21_nobson"
+        )
+        self.assertTrue(_is_gbase_jar(filename), f"{filename} 无法被搜索逻辑识别")
+        self.assertIn("gbasedbt", filename)
+
+    def test_first_jar_in_ignores_non_gbase_and_missing_dir(self) -> None:
+        """忽略非 GBase jar；目录不存在时返回 None"""
+        with tempfile.TemporaryDirectory() as tmp:
+            Path(tmp, "postgresql-42.7.0.jar").write_bytes(b"PK\x03\x04")
+            Path(tmp, "readme.txt").write_text("x", encoding="utf-8")
+            self.assertIsNone(_first_jar_in(tmp))
+            self.assertIsNone(_first_jar_in(os.path.join(tmp, "not-exist")))
+
+    def test_local_jar_preferred_over_download(self) -> None:
+        """本地已有 jar 时不应触发下载"""
+        with tempfile.TemporaryDirectory() as tmp:
+            jar = Path(tmp, "jdbc-3.6.5.21_nobson.jar")
+            jar.write_bytes(b"PK\x03\x04")
+            with patch(
+                "src.db_connector_tool.drivers.gbase8s.jaydebeapi._jar_search_dirs",
+                return_value=[tmp],
+            ), patch(
+                "src.db_connector_tool.drivers.gbase8s.jaydebeapi.jar_downloader"
+                ".download_latest_jar"
+            ) as download:
+                self.assertEqual(find_jdbc_jar(), str(jar))
+            download.assert_not_called()
+
+    @patch("src.db_connector_tool.drivers.gbase8s.jaydebeapi._jar_search_dirs")
+    @patch.dict(
+        os.environ,
+        {"GBASEDBT_JDBC_JAR": "", "GBASE8S_JDBC_JAR": ""},
+    )
+    def test_download_failure_falls_back_to_none(self, search_dirs: MagicMock) -> None:
+        """下载失败时仍返回 None，不影响 CLASSPATH 方案"""
+        search_dirs.return_value = []
+        with patch(
+            "src.db_connector_tool.drivers.gbase8s.jaydebeapi.jar_downloader"
+            ".download_latest_jar",
+            return_value=None,
+        ):
+            self.assertIsNone(find_jdbc_jar())
 
 
 class TestDictionaryParsing(unittest.TestCase):
