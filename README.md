@@ -168,12 +168,11 @@ db-connector add gb8s -T gbase8s -H 127.0.0.1 -P 9088 -S gbase01 \
 ```
 
 JDBC jar 查找顺序：连接配置的 `jars` → 环境变量 `GBASEDBT_JDBC_JAR` /
-`GBASE8S_JDBC_JAR` → 约定目录（用户配置目录下的 `jars`，即
-`%APPDATA%\db_connector_tool\jars`；程序运行目录下的 `./jars`；
-`~/.sqlalchemy-jdbcapi/drivers`；可用 `GBASEDBT_JDBC_SEARCH_DIRS` 追加）
+`GBASE8S_JDBC_JAR` → **只搜索两个目录**（程序运行目录下的 `./jars`；
+用户配置目录下的 `jars`，即 `%APPDATA%\db_connector_tool\jars`）
 → 由 `CLASSPATH` 决定。
 
-**都找不到时会自动从 Maven Central 下载最新版驱动**（坐标 `com.gbasedbt:jdbc`）
+**两个目录都找不到时会自动从 Maven Central 下载最新版驱动**（坐标 `com.gbasedbt:jdbc`）
 到用户配置目录下的 `jars` 并直接使用；同一目录存在多个版本时，按文件名中的
 版本号取最高者。相关环境变量：
 

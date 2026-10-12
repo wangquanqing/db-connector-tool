@@ -29,12 +29,12 @@ gbase8s://host:9088/dbname:GBASEDBTSERVER=server?user=u&password=p&sqlmode=mysql
   `CLIENT_LOCALE`）一并追加为 JDBC 属性；
 - `sqlmode` 既写入 JDBC 连接串，也同步到方言实例，保证会话模式与生成的 SQL 一致；
 - jar 定位顺序：URL `jars` 参数 → 环境变量 `GBASEDBT_JDBC_JAR` / `GBASE8S_JDBC_JAR`
-  → 约定目录（用户配置目录 `jars`、程序运行目录 `./jars`、
-  `~/.sqlalchemy-jdbcapi/drivers` 等）→ 由 `CLASSPATH` 决定。
+  → **只搜索两个目录**（程序运行目录 `./jars`、用户配置目录 `jars`）
+  → 由 `CLASSPATH` 决定。
 
 ### 3.1 驱动 jar 的自动获取（`jar_downloader.py`）
 
-本地都找不到驱动时，从 Maven Central 拉取最新版到用户配置目录下的 `jars`
+两个搜索目录都找不到驱动时，从 Maven Central 拉取最新版到用户配置目录下的 `jars`
 （Windows 为 `%APPDATA%\db_connector_tool\jars`）：
 
 | 项 | 值 |

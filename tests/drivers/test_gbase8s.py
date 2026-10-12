@@ -371,22 +371,29 @@ class TestJarLookup(unittest.TestCase):
         self.assertEqual(auto_download_dir().name, "jars")
         self.assertEqual(auto_download_dir().parent.name, "db_connector_tool")
 
-    def test_search_dirs_include_config_and_cwd(self) -> None:
-        """搜索目录包含用户配置目录 jars 与程序运行目录 jars，且配置目录优先"""
+    def test_search_dirs_are_exactly_two(self) -> None:
+        """搜索目录严格只有两个：程序运行目录 jars、用户配置目录 jars"""
         dirs = [os.path.normcase(d) for d in _jar_search_dirs()]
-        self.assertIn(os.path.normcase(str(auto_download_dir())), dirs)
-        self.assertIn(os.path.normcase(os.path.join(os.getcwd(), "jars")), dirs)
-        self.assertLess(
-            dirs.index(os.path.normcase(str(auto_download_dir()))),
-            dirs.index(os.path.normcase(os.path.join(os.getcwd(), "jars"))),
-        )
 
-    def test_search_dirs_honour_extra_env(self) -> None:
-        """GBASEDBT_JDBC_SEARCH_DIRS 可追加搜索目录"""
+        cwd_jars = os.path.normcase(os.path.join(os.getcwd(), "jars"))
+        config_jars = os.path.normcase(str(auto_download_dir()))
+
+        self.assertEqual(dirs, [cwd_jars, config_jars])
+        self.assertEqual(auto_download_dir().parent.name, "db_connector_tool")
+
+    def test_search_dirs_exclude_legacy_locations(self) -> None:
+        """不再搜索 ~/.sqlalchemy-jdbcapi 等历史目录
+
+        历史变量 ``GBASEDBT_JDBC_SEARCH_DIRS`` 已被移除，此处一并断言它不再生效。
+        """
+        legacy = os.path.join(os.path.expanduser("~"), ".sqlalchemy-jdbcapi", "drivers")
         extra = os.path.join(os.getcwd(), "extra-jars")
         with patch.dict(os.environ, {"GBASEDBT_JDBC_SEARCH_DIRS": extra}):
             dirs = [os.path.normcase(d) for d in _jar_search_dirs()]
-        self.assertIn(os.path.normcase(extra), dirs)
+
+        self.assertNotIn(os.path.normcase(legacy), dirs)
+        self.assertNotIn(os.path.normcase(extra), dirs)
+        self.assertEqual(len(dirs), 2)
 
     def test_highest_version_wins_in_directory(self) -> None:
         """同目录多版本时选版本最高的 jar"""

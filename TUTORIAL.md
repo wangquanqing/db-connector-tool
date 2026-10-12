@@ -162,9 +162,12 @@ GBase 8s 的一库三模会影响分页与伪表写法：`oracle` 模式用 `ROW
 #### GBase 8s 驱动 jar 的获取
 
 按「连接配置 `jars` → 环境变量 `GBASEDBT_JDBC_JAR`/`GBASE8S_JDBC_JAR` →
-用户配置目录 `jars`（`%APPDATA%\db_connector_tool\jars`）→ 程序运行目录 `./jars`
-→ 其他约定目录」的顺序查找；**都找不到时自动从 Maven Central 下载最新版**
-（`com.gbasedbt:jdbc`）到用户配置目录下的 `jars` 并直接使用。
+**只搜索两个目录**：程序运行目录 `./jars`、用户配置目录 `jars`
+（`%APPDATA%\db_connector_tool\jars`）」的顺序查找；**两个目录都没有时自动从
+Maven Central 下载最新版**（`com.gbasedbt:jdbc`）到用户配置目录下的 `jars` 并直接使用。
+
+> 需要把 jar 放在别处时，用连接配置的 `jars` 参数或上面两个环境变量显式指定，
+> 它们优先于目录搜索。
 
 ```bash
 # 关闭自动下载（例如内网环境自行分发 jar）

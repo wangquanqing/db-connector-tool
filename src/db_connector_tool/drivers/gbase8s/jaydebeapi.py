@@ -77,21 +77,19 @@ def auto_download_dir() -> Path:
 def _jar_search_dirs() -> List[str]:
     """返回 JDBC 驱动 jar 的候选搜索目录
 
-    顺序：用户配置目录下的 jars（自动下载的落盘位置） → 当前工作目录的 jars
-    → 其他约定目录。额外搜索路径可通过环境变量 ``GBASEDBT_JDBC_SEARCH_DIRS``
-    以 ``os.pathsep`` 分隔追加。
+    **只搜索两个目录**（按顺序）：
+
+    1. 程序运行目录下的 ``jars``（``./jars``，便于随程序分发）；
+    2. 用户配置目录下的 ``jars``（Windows 为 ``%APPDATA%\\db_connector_tool\\jars``，
+       也是自动下载的落盘位置）。
+
+    显式指定路径请用连接配置的 ``jars`` 参数或环境变量
+    ``GBASEDBT_JDBC_JAR`` / ``GBASE8S_JDBC_JAR``；这两者优先级高于目录搜索。
     """
-    home = os.path.expanduser("~")
-    dirs = [
-        str(auto_download_dir()),
+    return [
         os.path.join(os.getcwd(), "jars"),
-        os.path.join(home, ".sqlalchemy-jdbcapi", "drivers"),
-        os.path.join(home, "db_connector_tool", "jars"),
+        str(auto_download_dir()),
     ]
-    extra = os.environ.get("GBASEDBT_JDBC_SEARCH_DIRS", "")
-    if extra:
-        dirs.extend(extra.split(os.pathsep))
-    return dirs
 
 
 def _is_gbase_jar(filename: str) -> bool:
@@ -138,8 +136,8 @@ def find_jdbc_jar(explicit: Optional[str] = None) -> Optional[str]:
     """定位 GBase 8s 的 JDBC 驱动 jar
 
     查找顺序：显式配置（URL 的 ``jars`` 参数） → 环境变量
-    （``GBASEDBT_JDBC_JAR`` / ``GBASE8S_JDBC_JAR``） → 约定目录
-    （用户配置目录 jars、程序运行目录 jars、``GBASEDBT_JDBC_SEARCH_DIRS``）。
+    （``GBASEDBT_JDBC_JAR`` / ``GBASE8S_JDBC_JAR``） → **两个目录**
+    （程序运行目录 ``./jars``、用户配置目录 jars）。
 
     若仍然找不到，且未通过 ``GBASEDBT_JDBC_AUTO_DOWNLOAD`` 关闭自动下载，
     则从 Maven Central 拉取**最新版本**到用户配置目录下的 jars 并返回其路径；
@@ -153,7 +151,7 @@ def find_jdbc_jar(explicit: Optional[str] = None) -> Optional[str]:
 
     Example:
         >>> find_jdbc_jar()
-        'C:\\Users\\me\\AppData\\Roaming\\db_connector_tool\\jars\\jdbc-3.6.5.21_nobson.jar'
+        'C:\\\\dbct\\\\jars\\\\gbasedbt-jdbc-3.6.5.21.jar'
     """
     candidates = [explicit]
     candidates.extend(os.environ.get(name) for name in _JAR_ENV_VARS)
