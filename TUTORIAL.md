@@ -179,7 +179,15 @@ set GBASEDBT_JDBC_MAVEN_REPO=https://mirror.example.com/maven
 # 调整超时（秒）与大小上限（字节）
 set GBASEDBT_JDBC_DOWNLOAD_TIMEOUT=30
 set GBASEDBT_JDBC_DOWNLOAD_MAX_SIZE=41943040
+
+# 关闭 JVM 原生访问授权注入（仅在因此启动失败时需要）
+set GBASEDBT_JDBC_NATIVE_ACCESS=0
 ```
+
+> **JDK 24+ 的 JNI 警告**：连接时若看到
+> `WARNING: A restricted method in java.lang.System has been called`，那是 JPype 启动 JVM
+> 时调用受限的 `System::load`（[JEP 472](https://openjdk.org/jeps/472)）所致。本工具会在
+> 启动 JVM 前自动补上 `--enable-native-access=ALL-UNNAMED`，无需手工处理。
 
 下载会校验官方 `.sha1` 与 ZIP 文件头，先写临时文件再原子替换；失败只在日志中告警，
 不影响 `CLASSPATH` 方案。同一目录存在多个版本时按版本号取最高者。

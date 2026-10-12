@@ -10,6 +10,7 @@
 
 # pylint: disable=protected-access
 
+import importlib
 import os
 import tempfile
 import unittest
@@ -52,9 +53,13 @@ from src.db_connector_tool.drivers.gbase8s import (
 from src.db_connector_tool.drivers.gbase8s import jar_downloader
 from src.db_connector_tool.drivers.gbase8s.jaydebeapi import (
     JDBC_DRIVER_CLASS,
+    NATIVE_ACCESS_ENV,
+    NATIVE_ACCESS_FLAG,
     _first_jar_in,
+    _install_native_access_flag,
     _is_gbase_jar,
     _jar_search_dirs,
+    _native_access_enabled,
     auto_download_dir,
     find_jdbc_jar,
 )
@@ -319,6 +324,115 @@ class TestConnectArgs(unittest.TestCase):
         """不含 JDBC 属性时返回空字典"""
         self.assertEqual(GBase8sDialect_jaydebeapi._parse_database(""), ("", {}))
         self.assertEqual(GBase8sDialect_jaydebeapi._parse_database("db"), ("db", {}))
+
+
+class TestNativeAccessFlag(unittest.TestCase):
+    """JVM 原生访问授权（JEP 472）
+
+    JDK 24 起 ``java.lang.System::load`` 属受限方法，JPype 启动 JVM 时调用它
+    会打印 4 行 WARNING；JDK 后续版本将直接拒绝。JayDeBeApi 内部自行调用
+    ``jpype.startJVM`` 且不暴露 JVM 参数，故由本模块包装注入。
+    """
+
+    def setUp(self) -> None:
+        # 每个用例都从「未注入」的干净状态开始
+        jaydebeapi_module = importlib.import_module(
+            "src.db_connector_tool.drivers.gbase8s.jaydebeapi"
+        )
+        self._original_installed = jaydebeapi_module._NATIVE_ACCESS_INSTALLED
+        self._module = jaydebeapi_module
+        jaydebeapi_module._NATIVE_ACCESS_INSTALLED = False
+
+    def tearDown(self) -> None:
+        self._module._NATIVE_ACCESS_INSTALLED = self._original_installed
+
+    def test_enabled_by_default(self) -> None:
+        """默认注入授权"""
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop(NATIVE_ACCESS_ENV, None)
+            self.assertTrue(_native_access_enabled())
+
+    def test_disabled_by_env(self) -> None:
+        """0/false/no/off 均视为关闭"""
+        for value in ("0", "false", "FALSE", "no", "off", ""):
+            with self.subTest(value=value):
+                with patch.dict(os.environ, {NATIVE_ACCESS_ENV: value}):
+                    self.assertFalse(_native_access_enabled())
+
+    def test_install_wraps_start_jvm_once(self) -> None:
+        """包装后 startJVM 被追加授权参数，且重复安装不会层层套娃"""
+        fake = MagicMock()
+        with patch.dict("sys.modules", {"jpype": fake}):
+            self.assertTrue(_install_native_access_flag())
+            wrapped = fake.startJVM
+            self.assertIsNot(wrapped, MagicMock)
+            # 第二次调用应直接返回 False，不再包装
+            self.assertFalse(_install_native_access_flag())
+            self.assertIs(fake.startJVM, wrapped)
+
+    def test_wrapper_injects_flag(self) -> None:
+        """真正调用时把授权参数追加到位置参数末尾"""
+        fake = MagicMock()
+        original = fake.startJVM
+        with patch.dict("sys.modules", {"jpype": fake}):
+            _install_native_access_flag()
+            fake.startJVM("/path/to/jvm.dll", "-Xmx1g")
+        self.assertEqual(original.call_args.kwargs, {})
+        self.assertEqual(
+            original.call_args.args,
+            ("/path/to/jvm.dll", "-Xmx1g", NATIVE_ACCESS_FLAG),
+        )
+
+    def test_wrapper_keeps_existing_flag(self) -> None:
+        """调用方已自带该参数时不重复追加"""
+        fake = MagicMock()
+        original = fake.startJVM
+        with patch.dict("sys.modules", {"jpype": fake}):
+            _install_native_access_flag()
+            fake.startJVM("/path/to/jvm.dll", NATIVE_ACCESS_FLAG)
+        self.assertEqual(
+            original.call_args.args, ("/path/to/jvm.dll", NATIVE_ACCESS_FLAG)
+        )
+
+    def test_wrapper_forwards_kwargs(self) -> None:
+        """关键字参数原样透传（JayDeBeApi 会传 ignoreUnrecognized 等）"""
+        fake = MagicMock()
+        original = fake.startJVM
+        with patch.dict("sys.modules", {"jpype": fake}):
+            _install_native_access_flag()
+            fake.startJVM("/path/to/jvm.dll", ignoreUnrecognized=True)
+        self.assertEqual(original.call_args.kwargs, {"ignoreUnrecognized": True})
+        self.assertEqual(
+            original.call_args.args, ("/path/to/jvm.dll", NATIVE_ACCESS_FLAG)
+        )
+
+    def test_wrapper_returns_original_result(self) -> None:
+        """包装函数返回原函数的返回值"""
+        fake = MagicMock()
+        fake.startJVM.return_value = "started"
+        with patch.dict("sys.modules", {"jpype": fake}):
+            _install_native_access_flag()
+            self.assertEqual(fake.startJVM("/jvm.dll"), "started")
+
+    def test_install_skipped_when_disabled(self) -> None:
+        """显式关闭时不包装"""
+        fake = MagicMock()
+        original = fake.startJVM
+        with patch.dict("sys.modules", {"jpype": fake}), patch.dict(
+            os.environ, {NATIVE_ACCESS_ENV: "0"}
+        ):
+            self.assertFalse(_install_native_access_flag())
+        self.assertIs(fake.startJVM, original)
+
+    def test_import_dbapi_installs_flag(self) -> None:
+        """SQLAlchemy 建引擎时（import_dbapi）即完成注入"""
+        fake = MagicMock()
+        with patch.dict("sys.modules", {"jpype": fake}):
+            with patch.dict(
+                os.environ, {NATIVE_ACCESS_ENV: "1"}
+            ):
+                self._module.GBase8sDialect_jaydebeapi.import_dbapi()
+        self.assertTrue(self._module._NATIVE_ACCESS_INSTALLED)
 
 
 class TestJarLookup(unittest.TestCase):

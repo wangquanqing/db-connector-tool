@@ -70,6 +70,28 @@ gbase8s://host:9088/dbname:GBASEDBTSERVER=server?user=u&password=p&sqlmode=mysql
   `GBASEDBT_JDBC_ALLOW_NOBSON`；
 - **多版本共存**：同目录按文件名数字段取最高版本，数字段相同则默认包优先。
 
+### 3.2 JVM 原生访问授权（JEP 472）
+
+JPype 启动 JVM 时会调用 `java.lang.System::load` 加载 `_jpype` 原生库，而该方法自
+JDK 24 起被 [JEP 472](https://openjdk.org/jeps/472) 列为**受限方法**：默认只打印
+4 行 `WARNING`，后续 JDK 版本将直接拒绝。该警告对功能无影响，但会污染日志。
+
+JayDeBeApi 在 `_jdbc_connect_jpype()` 内部自行调用 `jpype.startJVM`，**不对外暴露
+任何 JVM 参数入口**，因此无法通过 `create_connect_args` 传参。本工具的做法是在
+JVM 启动前**包装 `jpype.startJVM`**，调用时若参数里还没有该开关就补上：
+
+| 项 | 值 |
+| --- | --- |
+| 注入参数 | `--enable-native-access=ALL-UNNAMED` |
+| 注入时机 | `import_dbapi()`（建引擎时，早于首次连接）；`create_connect_args()` 兜底 |
+| 幂等性 | 模块级 `_NATIVE_ACCESS_INSTALLED` 标志 + 参数存在性检查，避免重复包装/重复追加 |
+| 逃生口 | `GBASEDBT_JDBC_NATIVE_ACCESS=0` 关闭注入 |
+
+兼容性：`--enable-native-access` 自 JDK 17 起被识别；更早的 JDK 视为未知参数，而
+JayDeBeApi 调用 `startJVM` 时带 `ignoreUnrecognized=True`，未知参数会被忽略而非报错，
+故老环境不会因此启动失败。若 JVM 已被其他代码抢先启动，则注入无从生效（警告已输出），
+但不报错。
+
 ## 4. 一库三模实现
 
 | 能力 | oracle 模式 | gbase 模式 | mysql 模式 |

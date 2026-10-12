@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import functools
 import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -57,6 +58,20 @@ _DISCONNECT_MARKERS = (
     "connection was closed",
     "no current connection",
 )
+
+# JPype 启动 JVM 时会调用 ``java.lang.System::load`` 加载自身原生库，
+# 而 JDK 24 起该受限方法默认只发警告（JEP 472），JDK 后续版本将直接拒绝。
+# 这里在启动 JVM 前补上显式授权，既消除 4 行 WARNING，也为将来做好准备。
+NATIVE_ACCESS_FLAG = "--enable-native-access=ALL-UNNAMED"
+
+# 关闭上述注入的逃生口（个别环境若因该参数启动失败可置 0）
+NATIVE_ACCESS_ENV = "GBASEDBT_JDBC_NATIVE_ACCESS"
+
+# 视作「关闭」的取值（与 jar_downloader 保持一致）
+_FALSY_VALUES = {"0", "false", "no", "off", ""}
+
+# 原生访问授权是否已注入（``startJVM`` 只包装一次）
+_NATIVE_ACCESS_INSTALLED = False
 
 
 def auto_download_dir() -> Path:
@@ -156,6 +171,64 @@ def _first_jar_in(directory: str) -> Optional[str]:
     return None
 
 
+def _native_access_enabled() -> bool:
+    """是否注入 JVM 原生访问授权（默认注入）
+
+    Example:
+        >>> os.environ[NATIVE_ACCESS_ENV] = "0"
+        >>> _native_access_enabled()
+        False
+    """
+    raw = os.environ.get(NATIVE_ACCESS_ENV)
+    if raw is None:
+        return True
+    return raw.strip().lower() not in _FALSY_VALUES
+
+
+def _install_native_access_flag() -> bool:
+    """为 ``jpype.startJVM`` 补上 ``--enable-native-access``（幂等）
+
+    JayDeBeApi 在内部自行调用 :func:`jpype.startJVM`，且不对外暴露任何 JVM
+    参数入口，因此只能在此处包一层：真正启动 JVM 时若参数里还没有该开关就补上。
+
+    该开关只对**首次**启动 JVM 有效。若 JVM 已被其他代码抢先启动，则无从生效
+    （此时警告已输出），但本函数不会报错。
+
+    兼容性：JDK 17+ 认识该参数；更早的 JDK 会视为未知参数，而 JayDeBeApi 调用
+    ``startJVM`` 时带 ``ignoreUnrecognized=True``，未知参数会被忽略而非报错。
+
+    Returns:
+        bool: 本次是否完成包装（已包装过或显式关闭时返回 ``False``）
+
+    Example:
+        >>> _install_native_access_flag()
+        True
+    """
+    global _NATIVE_ACCESS_INSTALLED  # pylint: disable=global-statement
+    if _NATIVE_ACCESS_INSTALLED or not _native_access_enabled():
+        return False
+    try:
+        import jpype  # pylint: disable=import-outside-toplevel
+    except ImportError:  # pragma: no cover - 缺 jpype 时交由 jaydebeapi 报错
+        return False
+
+    original = jpype.startJVM
+
+    @functools.wraps(original)
+    def start_jvm_with_native_access(*args: Any, **kwargs: Any) -> Any:
+        if not any(
+            isinstance(arg, str) and arg.startswith("--enable-native-access")
+            for arg in args
+        ):
+            args = (*args, NATIVE_ACCESS_FLAG)
+        return original(*args, **kwargs)
+
+    jpype.startJVM = start_jvm_with_native_access  # type: ignore[assignment]
+    _NATIVE_ACCESS_INSTALLED = True
+    logger.debug("已为 JVM 注入原生访问授权: %s", NATIVE_ACCESS_FLAG)
+    return True
+
+
 def find_jdbc_jar(explicit: Optional[str] = None) -> Optional[str]:
     """定位 GBase 8s 的 JDBC 驱动 jar
 
@@ -231,13 +304,21 @@ class GBase8sDialect_jaydebeapi(GBase8sDialect):  # NOSONAR
 
     @classmethod
     def import_dbapi(cls) -> Any:
-        """返回 JayDeBeApi 模块作为 DBAPI 2.0 实现"""
+        """返回 JayDeBeApi 模块作为 DBAPI 2.0 实现
+
+        顺带安装 JVM 原生访问授权（见 :func:`_install_native_access_flag`）：
+        该函数在 SQLAlchemy 建引擎时即被调用，早于任何一次 JDBC 连接，
+        因此能保证参数在 JVM 启动前就位。
+        """
         import jaydebeapi  # pylint: disable=import-outside-toplevel
 
+        _install_native_access_flag()
         return jaydebeapi
 
     def create_connect_args(self, url: Any) -> Tuple[list, dict]:
         """把 SQLAlchemy URL 翻译为 ``jaydebeapi.connect`` 的位置参数"""
+        # 兜底：绕过 create_engine 直接构造方言时也能补上授权（幂等）
+        _install_native_access_flag()
         if url.query.get("sqlmode"):
             self.sqlmode = normalize_sqlmode(url.query["sqlmode"])
         database, properties = self._parse_database(url.database)

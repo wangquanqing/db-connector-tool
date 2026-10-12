@@ -190,8 +190,16 @@ JDBC jar 查找顺序：连接配置的 `jars` → 环境变量 `GBASEDBT_JDBC_J
 | `GBASEDBT_JDBC_AUTO_DOWNLOAD` | 启用 | 置 `0`/`false`/`no`/`off` 可关闭自动下载 |
 | `GBASEDBT_JDBC_MAVEN_REPO` | `https://repo1.maven.org/maven2` | 镜像、私服，或本地目录 / `file://` 路径（便于内网离线分发） |
 | `GBASEDBT_JDBC_ALLOW_NOBSON` | 关闭 | 置 `1` 才允许使用缺 `org.bson.*` 的 `_nobson` 变体 |
+| `GBASEDBT_JDBC_NATIVE_ACCESS` | 启用 | 置 `0` 可关闭 `--enable-native-access` 注入（见下方说明） |
 | `GBASEDBT_JDBC_DOWNLOAD_TIMEOUT` | `20` | 单次请求超时（秒） |
 | `GBASEDBT_JDBC_DOWNLOAD_MAX_SIZE` | `41943040` | 下载大小上限（字节） |
+
+> **JDK 24+ 的 JNI 警告**：JPype 启动 JVM 时调用 `java.lang.System::load`，而该方法自
+> JDK 24 起属受限原生方法（[JEP 472](https://openjdk.org/jeps/472)），默认会打印 4 行
+> `WARNING: A restricted method in java.lang.System has been called`。本工具在启动 JVM 前
+> 自动补上 `--enable-native-access=ALL-UNNAMED`，警告随之消失，也避免将来被直接拒绝。
+> 该参数对 JDK 17+ 有效，更早的 JDK 会被 JPype 忽略（`ignoreUnrecognized=True`）。
+> 个别环境若因此启动失败，可置 `GBASEDBT_JDBC_NATIVE_ACCESS=0` 关闭注入。
 
 下载会校验官方 `.sha1` 与 ZIP 文件头，先写临时文件再原子替换；失败只记录告警
 （不影响 `CLASSPATH` 方案），且同一版本在同一进程内不会反复重试。
