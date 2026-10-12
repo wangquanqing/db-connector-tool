@@ -422,6 +422,8 @@ class TestSQLAlchemyDriver(unittest.TestCase):
         """测试执行连接测试"""
         driver = SQLAlchemyDriver(self.base_config)
         driver.engine = MagicMock()
+        # 方言需提供真实的字符串（真实方言都有该属性）
+        driver.engine.dialect._dialect_specific_select_one = "SELECT 1"
         mock_connection = MagicMock()
         mock_result = MagicMock()
         mock_result.fetchone.return_value = (1,)
@@ -430,6 +432,39 @@ class TestSQLAlchemyDriver(unittest.TestCase):
 
         result = driver._perform_connection_test()
         self.assertTrue(result)
+
+    def test_connection_test_uses_dialect_select_one(self) -> None:
+        """连接测试必须采用方言渲染的语句，而非硬编码的 ``SELECT 1``
+
+        回归 GBase 8s：gbase/mysql 模式下不接受无 FROM 的 SELECT，
+        硬编码会让连接测试误报失败。方言会把伪表补进
+        ``_dialect_specific_select_one``，因此必须以它为准。
+        """
+        driver = SQLAlchemyDriver(self.base_config)
+        driver.engine = MagicMock()
+        driver.engine.dialect._dialect_specific_select_one = (
+            "SELECT 1 FROM sysmaster:sysdual"
+        )
+        mock_connection = MagicMock()
+        mock_connection.execute.return_value.fetchone.return_value = (1,)
+        driver.engine.connect.return_value.__enter__.return_value = mock_connection
+
+        self.assertTrue(driver._perform_connection_test())
+        executed = mock_connection.execute.call_args[0][0]
+        self.assertIn("sysmaster:sysdual", str(executed))
+
+    def test_connection_test_falls_back_without_dialect_hook(self) -> None:
+        """方言未实现该属性时回退到通用写法，不抛异常"""
+        driver = SQLAlchemyDriver(self.base_config)
+        driver.engine = MagicMock()
+        del driver.engine.dialect._dialect_specific_select_one
+        mock_connection = MagicMock()
+        mock_connection.execute.return_value.fetchone.return_value = (1,)
+        driver.engine.connect.return_value.__enter__.return_value = mock_connection
+
+        self.assertTrue(driver._perform_connection_test())
+        executed = mock_connection.execute.call_args[0][0]
+        self.assertIn("SELECT 1", str(executed))
 
     def test_test_connection_success(self) -> None:
         """测试连接测试成功"""
