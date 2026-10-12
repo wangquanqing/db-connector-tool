@@ -108,11 +108,24 @@ def _is_gbase_jar(filename: str) -> bool:
     return bool(jar_downloader.MAVEN_JAR_NAME_PATTERN.match(filename))
 
 
+def _looks_like_jar(path: str) -> bool:
+    """校验文件头是否为 ZIP（jar），用于跳过损坏/半截文件
+
+    只读前 4 个字节，开销可忽略；坏文件被跳过而不是交给 JDBC 报出难懂的错。
+    """
+    try:
+        with open(path, "rb") as handle:
+            return handle.read(4) == b"PK\x03\x04"
+    except OSError:
+        return False
+
+
 def _first_jar_in(directory: str) -> Optional[str]:
-    """返回目录中版本最高的 GBase JDBC jar 的完整路径
+    """返回目录中版本最高的**完好** GBase JDBC jar 的完整路径
 
     同一目录可能存在多个版本（例如自动下载的新版本与用户手工放置的旧版本），
-    这里按``文件名中的数字段``取最高版本，避免旧 jar 抢先命中。
+    这里按``文件名中的数字段``取最高版本；损坏的文件（文件头不是 ZIP）会被
+    跳过，从而回退到其他候选或触发重新下载。
     """
     candidates: List[str] = []
     try:
@@ -126,10 +139,17 @@ def _first_jar_in(directory: str) -> Optional[str]:
 
     if not candidates:
         return None
-    return max(
+
+    ordered = sorted(
         candidates,
         key=lambda path: jar_downloader.parse_version_key(os.path.basename(path)),
+        reverse=True,
     )
+    for candidate in ordered:
+        if _looks_like_jar(candidate):
+            return candidate
+        logger.warning("跳过损坏的驱动文件（文件头不是 jar）: %s", candidate)
+    return None
 
 
 def find_jdbc_jar(explicit: Optional[str] = None) -> Optional[str]:

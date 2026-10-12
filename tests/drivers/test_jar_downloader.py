@@ -23,7 +23,6 @@ from src.db_connector_tool.drivers.gbase8s.jar_downloader import (
     reset_download_state,
     select_latest_version,
 )
-
 FAKE_JAR = b"PK\x03\x04" + b"fake-jdbc-driver-payload" * 8
 VERSION = "3.6.5.21_nobson"
 OLD_VERSION = "3.6.3.34"
@@ -133,6 +132,108 @@ class TestVersionSelection(unittest.TestCase):
         """空版本列表报错"""
         with self.assertRaises(JarDownloadError):
             select_latest_version([])
+
+
+class TestVersionValidation(unittest.TestCase):
+    """版本号必须能安全地用作文件名
+
+    Maven 元数据来自仓库（可能是镜像/私服），``<release>`` 不可信：
+    含路径分隔符或 ``..`` 时会逃逸出目标目录，必须拒绝。
+    """
+
+    MALICIOUS = (
+        "../../../../escaped-version",
+        "..",
+        "3.6.5/../../evil",
+        "3.6.5\\..\\evil",
+        "3.6.5:21*?",  # Windows 非法字符
+        "",
+        "   ",
+        "3.6.5\n21",
+    )
+
+    def test_rejects_malicious_versions(self) -> None:
+        """含路径穿越、分隔符或非法字符的版本号被拒绝"""
+        for version in self.MALICIOUS:
+            with self.subTest(version=version):
+                self.assertFalse(
+                    jar_downloader.is_safe_version(version),
+                    f"{version!r} 不应被视为安全版本号",
+                )
+
+    def test_accepts_real_versions(self) -> None:
+        """真实版本号通过校验"""
+        for version in ("3.6.5.21_nobson", "3.6.3.34", "2.0.1.26", "3.5.1"):
+            with self.subTest(version=version):
+                self.assertTrue(jar_downloader.is_safe_version(version))
+
+    def test_select_latest_version_skips_unsafe(self) -> None:
+        """挑选最新版本时跳过不安全的版本号"""
+        versions = ["3.6.3.34", "../../../../evil"]
+        self.assertEqual(select_latest_version(versions), "3.6.3.34")
+
+    def test_select_latest_version_rejects_all_unsafe(self) -> None:
+        """全部不安全时抛错"""
+        with self.assertRaises(JarDownloadError):
+            select_latest_version(["../../../evil", "3.6.5/.."])
+
+    def test_download_refuses_traversal_release(self) -> None:
+        """元数据 release 含穿越时既不下载也不越权落盘"""
+        with tempfile.TemporaryDirectory(prefix="dct_trav_") as tmp:
+            root = Path(tmp)
+            repo = root / "repo"
+            group = repo / "com" / "gbasedbt" / "jdbc"
+            group.mkdir(parents=True)
+            evil = "../../../../escaped-version"
+            (group / "maven-metadata.xml").write_text(
+                f"<metadata><versioning><release>{evil}</release>"
+                f"<versions><version>{evil}</version></versions>"
+                "</versioning></metadata>",
+                encoding="utf-8",
+            )
+            target = root / "jars"
+
+            with mock.patch.dict(
+                os.environ,
+                {
+                    jar_downloader.MAVEN_REPO_ENV: str(repo),
+                    jar_downloader.AUTO_DOWNLOAD_ENV: "1",
+                },
+            ):
+                reset_download_state()
+                self.assertIsNone(download_latest_jar(target))
+
+            escaped = [
+                path
+                for path in root.rglob("*")
+                if path.is_file() and "escaped-version" in path.name
+            ]
+            self.assertEqual(escaped, [], "不应在目标目录之外落盘")
+
+    def test_illegal_filename_is_handled(self) -> None:
+        """Windows 非法字符不会导致异常逃逸，只记录失败"""
+        with tempfile.TemporaryDirectory(prefix="dct_badname_") as tmp:
+            root = Path(tmp)
+            repo = root / "repo"
+            group = repo / "com" / "gbasedbt" / "jdbc"
+            group.mkdir(parents=True)
+            bad = "3.6.5:21*?"
+            (group / "maven-metadata.xml").write_text(
+                f"<metadata><versioning><release>{bad}</release>"
+                f"<versions><version>{bad}</version></versions>"
+                "</versioning></metadata>",
+                encoding="utf-8",
+            )
+
+            with mock.patch.dict(
+                os.environ,
+                {
+                    jar_downloader.MAVEN_REPO_ENV: str(repo),
+                    jar_downloader.AUTO_DOWNLOAD_ENV: "1",
+                },
+            ):
+                reset_download_state()
+                self.assertIsNone(download_latest_jar(root / "jars"))
 
 
 class TestDownloadFromLocalRepo(unittest.TestCase):

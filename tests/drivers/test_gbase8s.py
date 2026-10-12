@@ -408,6 +408,39 @@ class TestJarLookup(unittest.TestCase):
                 Path(_first_jar_in(tmp)).name, "gbasedbt-jdbc-3.6.5.21_nobson.jar"
             )
 
+    def test_corrupt_jar_is_skipped(self) -> None:
+        """损坏（文件头非 ZIP）的最高版本被跳过，回退到完好版本"""
+        with tempfile.TemporaryDirectory() as tmp:
+            Path(tmp, "gbasedbt-jdbc-9.9.9.jar").write_bytes(b"half-downloaded")
+            Path(tmp, "gbasedbt-jdbc-3.6.5.21_nobson.jar").write_bytes(b"PK\x03\x04rest")
+            self.assertEqual(
+                Path(_first_jar_in(tmp)).name, "gbasedbt-jdbc-3.6.5.21_nobson.jar"
+            )
+
+    def test_all_corrupt_jars_return_none(self) -> None:
+        """全部损坏时返回 None，交由后续（自动下载/CLASSPATH）处理"""
+        with tempfile.TemporaryDirectory() as tmp:
+            Path(tmp, "gbasedbt-jdbc-9.9.9.jar").write_bytes(b"broken")
+            Path(tmp, "gbasedbt-jdbc-8.8.8.jar").write_bytes(b"")
+            self.assertIsNone(_first_jar_in(tmp))
+
+    def test_corrupt_local_jar_triggers_download(self) -> None:
+        """本地 jar 损坏时，搜索失败应回退到自动下载"""
+        with tempfile.TemporaryDirectory() as tmp:
+            Path(tmp, "gbasedbt-jdbc-9.9.9.jar").write_bytes(b"broken")
+            with patch(
+                "src.db_connector_tool.drivers.gbase8s.jaydebeapi._jar_search_dirs",
+                return_value=[tmp],
+            ), patch(
+                "src.db_connector_tool.drivers.gbase8s.jaydebeapi.jar_downloader"
+                ".download_latest_jar",
+                return_value=Path("/tmp/gbasedbt-jdbc-3.6.5.21_nobson.jar"),
+            ) as download:
+                self.assertEqual(
+                    find_jdbc_jar(), str(Path("/tmp/gbasedbt-jdbc-3.6.5.21_nobson.jar"))
+                )
+            download.assert_called_once()
+
     def test_maven_named_jar_is_recognised(self) -> None:
         """Maven 规范名 jdbc-<版本>.jar 也能被识别（下载文件曾被过滤掉的回归）"""
         with tempfile.TemporaryDirectory() as tmp:
