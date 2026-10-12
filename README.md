@@ -168,8 +168,24 @@ db-connector add gb8s -T gbase8s -H 127.0.0.1 -P 9088 -S gbase01 \
 ```
 
 JDBC jar 查找顺序：连接配置的 `jars` → 环境变量 `GBASEDBT_JDBC_JAR` /
-`GBASE8S_JDBC_JAR` → `~/.sqlalchemy-jdbcapi/drivers`、`~/db_connector_tool/jars`、
-`./jars`（可用 `GBASEDBT_JDBC_SEARCH_DIRS` 追加）→ 由 `CLASSPATH` 决定。
+`GBASE8S_JDBC_JAR` → 约定目录（用户配置目录下的 `jars`，即
+`%APPDATA%\db_connector_tool\jars`；程序运行目录下的 `./jars`；
+`~/.sqlalchemy-jdbcapi/drivers`；可用 `GBASEDBT_JDBC_SEARCH_DIRS` 追加）
+→ 由 `CLASSPATH` 决定。
+
+**都找不到时会自动从 Maven Central 下载最新版驱动**（坐标 `com.gbasedbt:jdbc`）
+到用户配置目录下的 `jars` 并直接使用；同一目录存在多个版本时，按文件名中的
+版本号取最高者。相关环境变量：
+
+| 变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `GBASEDBT_JDBC_AUTO_DOWNLOAD` | 启用 | 置 `0`/`false`/`no`/`off` 可关闭自动下载 |
+| `GBASEDBT_JDBC_MAVEN_REPO` | `https://repo1.maven.org/maven2` | 镜像、私服，或本地目录 / `file://` 路径（便于内网离线分发） |
+| `GBASEDBT_JDBC_DOWNLOAD_TIMEOUT` | `20` | 单次请求超时（秒） |
+| `GBASEDBT_JDBC_DOWNLOAD_MAX_SIZE` | `41943040` | 下载大小上限（字节） |
+
+下载会校验官方 `.sha1` 与 ZIP 文件头，先写临时文件再原子替换；失败只记录告警
+（不影响 `CLASSPATH` 方案），且同一版本在同一进程内不会反复重试。
 方言的设计与真机验证结论见 [docs/gbase8s-dialect-design.md](docs/gbase8s-dialect-design.md)。
 
 ### 批量连接管理示例

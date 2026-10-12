@@ -142,7 +142,7 @@ db.add_connection("mssql_db", {
     "database": "test_db",
 })
 
-# GBase 8s连接（JDBC，需自备驱动 jar，详见 docs/gbase8s-dialect-design.md）
+# GBase 8s连接（JDBC，驱动 jar 会自动获取，详见 docs/gbase8s-dialect-design.md）
 db.add_connection("gb8s_db", {
     "type": "gbase8s",
     "host": "127.0.0.1",
@@ -152,12 +152,34 @@ db.add_connection("gb8s_db", {
     "username": "cvicse",
     "password": "password",
     "sqlmode": "oracle",      # oracle / gbase / mysql，默认 oracle
-    # "jars": r"C:\path\to\gbasedbt-jdbc.jar",
+    # "jars": r"C:\path\to\gbasedbt-jdbc.jar",   # 显式指定时优先使用
 })
 ```
 
 GBase 8s 的一库三模会影响分页与伪表写法：`oracle` 模式用 `ROWNUM`/`DUAL`，
 `gbase` 模式用 `FIRST n SKIP m`/`sysmaster:sysdual`，`mysql` 模式用 `LIMIT ... OFFSET ...`。
+
+#### GBase 8s 驱动 jar 的获取
+
+按「连接配置 `jars` → 环境变量 `GBASEDBT_JDBC_JAR`/`GBASE8S_JDBC_JAR` →
+用户配置目录 `jars`（`%APPDATA%\db_connector_tool\jars`）→ 程序运行目录 `./jars`
+→ 其他约定目录」的顺序查找；**都找不到时自动从 Maven Central 下载最新版**
+（`com.gbasedbt:jdbc`）到用户配置目录下的 `jars` 并直接使用。
+
+```bash
+# 关闭自动下载（例如内网环境自行分发 jar）
+set GBASEDBT_JDBC_AUTO_DOWNLOAD=0
+
+# 换用镜像/私服，或指向本地目录/ file:// 路径实现离线分发
+set GBASEDBT_JDBC_MAVEN_REPO=https://mirror.example.com/maven
+
+# 调整超时（秒）与大小上限（字节）
+set GBASEDBT_JDBC_DOWNLOAD_TIMEOUT=30
+set GBASEDBT_JDBC_DOWNLOAD_MAX_SIZE=41943040
+```
+
+下载会校验官方 `.sha1` 与 ZIP 文件头，先写临时文件再原子替换；失败只在日志中告警，
+不影响 `CLASSPATH` 方案。同一目录存在多个版本时按版本号取最高者。
 
 #### 执行查询与命令
 

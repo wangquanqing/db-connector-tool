@@ -29,7 +29,32 @@ gbase8s://host:9088/dbname:GBASEDBTSERVER=server?user=u&password=p&sqlmode=mysql
   `CLIENT_LOCALE`）一并追加为 JDBC 属性；
 - `sqlmode` 既写入 JDBC 连接串，也同步到方言实例，保证会话模式与生成的 SQL 一致；
 - jar 定位顺序：URL `jars` 参数 → 环境变量 `GBASEDBT_JDBC_JAR` / `GBASE8S_JDBC_JAR`
-  → `~/.sqlalchemy-jdbcapi/drivers` 等约定目录 → 由 `CLASSPATH` 决定。
+  → 约定目录（用户配置目录 `jars`、程序运行目录 `./jars`、
+  `~/.sqlalchemy-jdbcapi/drivers` 等）→ 由 `CLASSPATH` 决定。
+
+### 3.1 驱动 jar 的自动获取（`jar_downloader.py`）
+
+本地都找不到驱动时，从 Maven Central 拉取最新版到用户配置目录下的 `jars`
+（Windows 为 `%APPDATA%\db_connector_tool\jars`）：
+
+| 项 | 值 |
+| --- | --- |
+| 坐标 | `com.gbasedbt:jdbc` |
+| 版本来源 | `maven-metadata.xml` 的 `<release>`（缺失时按数字段取最大） |
+| 元数据 | `…/com/gbasedbt/jdbc/maven-metadata.xml` |
+| 产物 | `…/com/gbasedbt/jdbc/<version>/jdbc-<version>.jar` + `.sha1` |
+| 落盘名 | `gbasedbt-jdbc-<version>.jar`（带 gbase 关键字，确保能被搜索逻辑识别） |
+
+实现要点：
+
+- **校验**：先比对官方 `.sha1`（缺失时降级为仅校验 ZIP 文件头），再原子替换；
+- **原子性**：写临时文件（`.gbasedbt-*.part`）后 `os.replace`，避免半截文件被加载；
+- **限流**：默认 20 秒超时、40MB 上限，均可由环境变量覆盖；
+- **失败策略**：只告警不抛出，返回 `None` 交由 `CLASSPATH` 处理；版本解析按仓库
+  缓存、失败版本按进程记忆，避免每次建连都重试；
+- **可关闭/可换源**：`GBASEDBT_JDBC_AUTO_DOWNLOAD`、
+  `GBASEDBT_JDBC_MAVEN_REPO`（支持镜像、私服、本地目录与 `file://`）；
+- **多版本共存**：同目录按文件名数字段取最高版本，避免旧 jar 抢先命中。
 
 ## 4. 一库三模实现
 
