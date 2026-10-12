@@ -618,6 +618,55 @@ class DatabaseManager:
             logger.error(error_message)
             raise DatabaseError(f"查询执行失败: {str(error)}") from error
 
+    def execute_query_with_metadata(
+        self, connection_name: str, query: str, params: Dict[str, Any] | None = None
+    ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], float]:
+        """执行SQL查询并同时返回列元数据
+
+        相比 :meth:`execute_query` 多返回一份列类型信息，供结果网格渲染、
+        列宽计算、编辑器选择等场景使用（模拟 DBeaver 类客户端所需）。
+
+        Args:
+            connection_name: 连接名称
+            query: SQL查询语句
+            params: 查询参数字典，可选
+
+        Returns:
+            Tuple[List[Dict[str, Any]], List[Dict[str, Any]], float]:
+            ``(行列表, 列元数据, 执行时间)``；列元数据每项含 ``name`` /
+            ``type_name`` / ``python_type`` / ``precision`` / ``scale`` /
+            ``nullable`` 等键
+
+        Raises:
+            DatabaseError: 当查询执行失败时
+            ConfigError: 当连接配置不存在时
+
+        Example:
+            >>> rows, columns, cost = db_manager.execute_query_with_metadata(
+            ...     "mysql_db", "SELECT id FROM users"
+            ... )
+            >>> columns[0]["name"]
+            'id'
+        """
+
+        def _execute_query():
+            driver = self.get_connection(connection_name)
+            start_time = time.time()
+            result, columns = driver.execute_query_with_metadata(query, params)
+            response_time = time.time() - start_time
+
+            self.pool_manager.update_query_metadata(connection_name, response_time)
+
+            return result, columns, response_time
+
+        try:
+            return _execute_query()
+        except (OSError, DatabaseError) as error:
+            self.pool_manager.record_connection_error(connection_name, error)
+            error_message = f"查询执行失败 {connection_name}: {str(error)}"
+            logger.error(error_message)
+            raise DatabaseError(f"查询执行失败: {str(error)}") from error
+
     def execute_command(
         self,
         connection_name: str,

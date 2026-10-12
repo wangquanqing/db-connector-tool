@@ -7,8 +7,10 @@
 import io
 import json
 import os
+import tempfile
 import unittest
 from contextlib import redirect_stdout
+from decimal import Decimal
 from unittest import mock
 
 from src.db_connector_tool.cli import create_argument_parser, main
@@ -205,8 +207,61 @@ class TestOutputHelpers(CLITestCase):
         to_serializable = DBConnectorCLI._to_serializable  # pylint: disable=protected-access
         self.assertEqual(to_serializable({"a": 1}), {"a": 1})
         self.assertEqual(to_serializable([1, 2]), [1, 2])
-        # 无法映射为字典/序列的标量退化为字符串，保证可 JSON 序列化
-        self.assertEqual(to_serializable(3), "3")
+        # JSON 原生类型原样保留，避免数字被写成字符串
+        self.assertEqual(to_serializable(3), 3)
+        self.assertEqual(to_serializable(1.5), 1.5)
+        self.assertIs(to_serializable(True), True)
+        self.assertEqual(to_serializable("x"), "x")
+        self.assertIsNone(to_serializable(None))
+
+    def test_to_serializable_decimal_keeps_precision(self) -> None:
+        """Decimal 转字符串而非 float，避免丢精度"""
+        to_serializable = DBConnectorCLI._to_serializable  # pylint: disable=protected-access
+        self.assertEqual(to_serializable(Decimal("1.50")), "1.50")
+        self.assertEqual(
+            to_serializable(Decimal("12345678901234567.89")),
+            "12345678901234567.89",
+        )
+
+    def test_to_serializable_java_object_not_lost(self) -> None:
+        """回归：带空 __dict__ 的 Java 对象不再被转成 {}
+
+        JPype 包装的 Java 数值（java.lang.Integer / JDouble）带一个空的
+        ``__dict__``；若先走 ``__dict__`` 分支，导出 CSV 时整列变成 ``{}``。
+        """
+
+        class FakeJavaInteger:
+            """模拟 JPype 包装对象：空 __dict__，不可迭代"""
+
+            def __init__(self) -> None:
+                self.__dict__ = {}
+
+            def __str__(self) -> str:
+                return "1"
+
+        to_serializable = DBConnectorCLI._to_serializable  # pylint: disable=protected-access
+        self.assertEqual(to_serializable(FakeJavaInteger()), "1")
+        self.assertNotEqual(to_serializable(FakeJavaInteger()), {})
+
+    def test_save_csv_keeps_java_object_values(self) -> None:
+        """回归：CSV 导出不再写出 {} """
+
+        class FakeJavaInteger:
+            def __init__(self) -> None:
+                self.__dict__ = {}
+
+            def __str__(self) -> str:
+                return "1"
+
+        with tempfile.TemporaryDirectory() as tmp:
+            output = os.path.join(tmp, "result.csv")
+            self.cli._save_csv(  # pylint: disable=protected-access
+                [{"i": FakeJavaInteger(), "s": "x"}], output
+            )
+            with open(output, encoding="utf-8") as handle:
+                content = handle.read()
+        self.assertIn("1,x", content)
+        self.assertNotIn("{}", content)
 
     def test_display_width_counts_cjk_as_two(self) -> None:
         """CJK 字符按 2 列计算"""

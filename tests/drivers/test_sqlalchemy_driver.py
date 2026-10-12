@@ -341,6 +341,47 @@ class TestSQLAlchemyDriver(unittest.TestCase):
         self.assertEqual(results[0]["id"], 1)
         self.assertEqual(results[0]["name"], "test")
 
+    def test_execute_query_with_metadata(self) -> None:
+        """测试同时返回列元数据的查询
+
+        元数据必须在取值**之前**读取（取完最后一行后结果集关闭、
+        ``cursor.description`` 失效），故断言方言钩子被优先调用。
+        """
+        driver = SQLAlchemyDriver(self.base_config)
+        driver.engine = MagicMock()
+        mock_connection = MagicMock()
+        mock_result = MagicMock()
+        mock_result.mappings.return_value.all.return_value = [{"id": 1}]
+        mock_result.cursor = MagicMock()
+        mock_connection.execute.return_value = mock_result
+        driver.engine.connect.return_value.__enter__.return_value = mock_connection
+        driver.engine.dialect.get_column_metadata.return_value = [
+            {"name": "id", "type_name": "INTEGER", "python_type": "int"}
+        ]
+
+        rows, columns = driver.execute_query_with_metadata("SELECT id FROM users")
+        self.assertEqual(rows, [{"id": 1}])
+        self.assertEqual(columns[0]["python_type"], "int")
+        driver.engine.dialect.get_column_metadata.assert_called_once_with(
+            mock_result.cursor
+        )
+
+    def test_execute_query_with_metadata_falls_back(self) -> None:
+        """方言未提供元数据钩子时退回 DBAPI description"""
+        driver = SQLAlchemyDriver(self.base_config)
+        driver.engine = MagicMock()
+        del driver.engine.dialect.get_column_metadata
+        mock_connection = MagicMock()
+        mock_result = MagicMock()
+        mock_result.mappings.return_value.all.return_value = []
+        mock_result.cursor.description = [("id", None, None, None, 10, 0, True)]
+        mock_connection.execute.return_value = mock_result
+        driver.engine.connect.return_value.__enter__.return_value = mock_connection
+
+        _, columns = driver.execute_query_with_metadata("SELECT id FROM users")
+        self.assertEqual(columns[0]["name"], "id")
+        self.assertEqual(columns[0]["precision"], 10)
+
     def test_execute_query_with_parameters(self) -> None:
         """测试带参数的查询"""
         driver = SQLAlchemyDriver(self.base_config)

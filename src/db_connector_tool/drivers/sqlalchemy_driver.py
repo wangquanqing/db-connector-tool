@@ -108,6 +108,50 @@ def parse_kingbase_version(self, connection: Any) -> Tuple[int, ...]:
 PGDialect._get_server_version_info = parse_kingbase_version
 
 
+def _column_metadata_from_description(cursor: Any) -> List[Dict[str, Any]]:
+    """从 DBAPI 游标的 ``description`` 提取列元数据（通用回退）
+
+    ``description`` 的 7 元组遵循 PEP 249：
+    ``(name, type_code, display_size, internal_size, precision, scale, null_ok)``。
+    各驱动的 ``type_code`` 形态不一（可能是类型对象，也可能是数字类型号），
+    这里统一转成字符串，取不到类型名时置 ``None``。
+
+    Args:
+        cursor: DBAPI 游标
+
+    Returns:
+        List[Dict[str, Any]]: 每列一项；游标无 ``description`` 时返回空列表
+
+    Example:
+        >>> _column_metadata_from_description(cursor)[0]["name"]
+        'id'
+    """
+    columns: List[Dict[str, Any]] = []
+    for description in getattr(cursor, "description", None) or ():
+        type_code = description[1]
+        # jaydebeapi 的 DBAPITypeObject 带 values 元组（JDBC 类型名）
+        names = getattr(type_code, "values", None)
+        if names:
+            type_name: Optional[str] = str(names[0]).upper()
+        elif type_code is None:
+            type_name = None
+        else:
+            type_name = str(type_code)
+        columns.append(
+            {
+                "name": str(description[0]),
+                "type_name": type_name,
+                "jdbc_type": None,
+                "python_type": None,
+                "precision": description[4],
+                "scale": description[5],
+                "nullable": None if description[6] is None else bool(description[6]),
+                "java_class": None,
+            }
+        )
+    return columns
+
+
 class SQLAlchemyDriver:
     """SQLAlchemy 数据库驱动类 (SQLAlchemy Driver)
 
@@ -753,6 +797,88 @@ class SQLAlchemyDriver:
                     return sql_result.rowcount
                 results = sql_result.mappings().all()
                 return results
+
+        except SQLAlchemyError as error:
+            raise QueryError(f"SQL执行失败: 数据库错误 - {str(error)}") from error
+        except ValueError as error:
+            raise QueryError(f"SQL执行失败: 验证错误 - {str(error)}") from error
+        except Exception as error:
+            raise QueryError(f"SQL执行失败: {str(error)}") from error
+
+    def _read_column_metadata(self, cursor: Any) -> List[Dict[str, Any]]:
+        """读取列元数据（**必须在取值之前调用**）
+
+        元数据只在结果集打开期间有效，取完最后一行后游标会关闭结果集，
+        ``cursor.description`` 随之失效。
+
+        优先交给方言实现（GBase 8s 的 JDBC 元数据含类型名/精度/可空/Java 类名），
+        方言未提供时退回 DBAPI 的 ``cursor.description``。
+
+        Args:
+            cursor: DBAPI 游标
+
+        Returns:
+            List[Dict[str, Any]]: 每列一项；取不到信息时返回空列表
+
+        Example:
+            >>> metadata = driver._read_column_metadata(result.cursor)
+            >>> metadata[0]["name"]
+            'id'
+        """
+        # 方言可选实现；用 getattr 探测，避免要求所有方言都提供该钩子
+        hook = getattr(
+            getattr(self.engine, "dialect", None), "get_column_metadata", None
+        )
+        if hook is not None:
+            try:
+                # pylint: disable=not-callable  # 运行期才确定的方言方法
+                return hook(cursor)
+            except Exception as error:  # pylint: disable=broad-except
+                logger.debug("方言列元数据读取失败，回退 DBAPI description: %s", error)
+        return _column_metadata_from_description(cursor)
+
+    def execute_query_with_metadata(
+        self, query: str, parameters: Dict[str, Any] | None = None
+    ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+        """执行查询并同时返回列元数据
+
+        与 :meth:`execute_query` 的区别在于额外返回列类型信息，供结果网格渲染、
+        列宽计算、编辑器选择等场景使用（模拟 DBeaver 类客户端所需）。
+
+        Args:
+            query: SQL查询语句
+            parameters: 查询参数字典，用于参数化查询
+
+        Returns:
+            Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+            ``(行列表, 列元数据)``；列元数据每项含 ``name`` / ``type_name`` /
+            ``python_type`` / ``precision`` / ``scale`` / ``nullable`` 等键
+
+        Raises:
+            QueryError: 当SQL执行失败时
+
+        Example:
+            >>> rows, columns = driver.execute_query_with_metadata("SELECT id FROM t")
+            >>> columns[0]["name"], columns[0]["python_type"]
+            ('id', 'int')
+        """
+        if not self.engine:
+            self.connect()
+        assert self.engine is not None, "数据库引擎应该已经初始化，执行查询"
+
+        self._validate_sql_query(query)
+
+        try:
+            with self.engine.connect() as connection:
+                if parameters:
+                    sql_result = connection.execute(text(query), parameters)
+                else:
+                    sql_result = connection.execute(text(query))
+
+                # 元数据必须先于取值读取（取完即失效）
+                columns = self._read_column_metadata(sql_result.cursor)
+                rows = sql_result.mappings().all()
+                return rows, columns
 
         except SQLAlchemyError as error:
             raise QueryError(f"SQL执行失败: 数据库错误 - {str(error)}") from error

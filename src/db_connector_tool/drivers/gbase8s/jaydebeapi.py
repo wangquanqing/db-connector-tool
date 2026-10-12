@@ -21,7 +21,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from ...utils.logging_utils import get_logger
 from ...utils.path_utils import PathHelper
-from . import jar_downloader
+from . import converters, jar_downloader
 from .base import GBase8sDialect, normalize_sqlmode
 
 logger = get_logger(__name__)
@@ -376,12 +376,58 @@ class GBase8sDialect_jaydebeapi(GBase8sDialect):  # NOSONAR
         return [f"{key}={value}" for key, value in properties.items()]
 
     def on_connect(self) -> Any:
-        """连接建立后关闭 JDBC 自动提交，交由 SQLAlchemy 管理事务"""
+        """连接建立后的收尾：安装取值转换器 + 关闭 JDBC 自动提交
+
+        此处是安装归一化转换器的最佳时机——JVM 已启动（``java.sql.Types``
+        可用），且连接刚建立。JayDeBeApi 的 ``_converters`` 是共享字典，
+        原地更新后本连接与后续连接都会生效（见
+        :func:`converters.install_converters`）。
+        """
 
         def connect(dbapi_connection: Any) -> None:
+            self._install_value_converters()
             dbapi_connection.jconn.setAutoCommit(False)
 
         return connect
+
+    @staticmethod
+    def _install_value_converters() -> int:
+        """安装 GBase 8s 的取值转换器，返回覆盖的类型数量
+
+        失败只记录告警——类型归一化是「更好用」而非「能用」的前提，
+        不应因此阻断连接。
+
+        Example:
+            >>> GBase8sDialect_jaydebeapi._install_value_converters() > 0
+            True
+        """
+        try:
+            import jpype  # pylint: disable=import-outside-toplevel
+
+            return converters.install_converters(jpype.java.sql.Types)
+        except Exception as error:  # pylint: disable=broad-except
+            logger.warning("安装取值转换器失败，返回值可能保持驱动原始类型: %s", error)
+            return 0
+
+    @staticmethod
+    def get_column_metadata(cursor: Any) -> List[Dict[str, Any]]:
+        """返回列的 JDBC 元数据（**必须在取值之前调用**）
+
+        GBase 8s 的 ``ResultSetMetaData`` 比 DBAPI 的 ``description`` 更丰富，
+        含 JDBC 类型名、精度、标度、可空性与 Java 类名，供结果网格渲染与
+        编辑器选择等场景使用。
+
+        Args:
+            cursor: JayDeBeApi 游标
+
+        Returns:
+            List[Dict[str, Any]]: 每列一项的元数据
+
+        Example:
+            >>> GBase8sDialect_jaydebeapi.get_column_metadata(cursor)[0]["type_name"]
+            'INT'
+        """
+        return converters.column_metadata(cursor)
 
     def is_disconnect(self, e: Any, connection: Any, cursor: Any) -> bool:
         """判断异常是否表示连接已断开"""

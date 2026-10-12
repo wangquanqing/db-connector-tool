@@ -15,6 +15,7 @@
 | `drivers/gbase8s/types.py` | GBase 8s 专用类型（`SERIAL` / `SERIAL8` / `MONEY` / `LVARCHAR`）与 `ischema_names` 类型号映射 |
 | `drivers/gbase8s/dictionary.py` | 系统目录 SQL 与结果解析（`systables` / `syscolumns` / `sysconstraints` / `sysindexes` 等） |
 | `drivers/gbase8s/jaydebeapi.py` | DBAPI 层：URL → `jaydebeapi.connect` 参数、jar 定位、事务与断连判定 |
+| `drivers/gbase8s/converters.py` | 取值类型归一化（JDBC → Python 原生类型）与列元数据提取 |
 
 ## 3. 注册与连接 URL
 
@@ -91,6 +92,61 @@ JVM 启动前**包装 `jpype.startJVM`**，调用时若参数里还没有该开�
 JayDeBeApi 调用 `startJVM` 时带 `ignoreUnrecognized=True`，未知参数会被忽略而非报错，
 故老环境不会因此启动失败。若 JVM 已被其他代码抢先启动，则注入无从生效（警告已输出），
 但不报错。
+
+### 3.3 取值类型归一化（`converters.py`）
+
+JayDeBeApi 自带的取值转换器有两个问题，会把 GBase 8s 与其它数据库的返回类型割裂：
+
+1. **精度丢失**：`DECIMAL`/`NUMERIC` 走 `_java_to_py_bigdecimal()`，只要 `scale != 0`
+   就调 `doubleValue()`，把 `BigDecimal` 降级为 float。真机实测
+   `DECIMAL(19,2)` 的 `12345678901234567.89` 变成 `1.2345678901234568e+16`；
+2. **类型不统一**：日期/时间戳被转成 `str`，整数/浮点则原样返回 JPype 包装的
+   Java 对象（`java.lang.Integer` / `JDouble`），而其它驱动返回 Python 原生类型。
+
+此外其转换器表只覆盖部分 `java.sql.Types`：`BIGINT`、`REAL`、`VARCHAR`、`BLOB` 等
+未注册，会走兜底直接返回 Java 对象。
+
+**做法**：在连接建立后（`on_connect`）原地更新 JayDeBeApi 的 `_converters` 字典——
+该字典被 `Connection`/`Cursor` 共享引用，原地更新即可让已建立的连接立即生效。
+
+归一化映射：
+
+| JDBC 类型 | Python 类型 | 说明 |
+| --- | --- | --- |
+| `INTEGER` / `SMALLINT` / `TINYINT` / `BIGINT` / `INT8` | `int` | 含 Java 的 `Long`/`Short`/`BigInteger` |
+| `DECIMAL` / `NUMERIC` / `MONEY` | `decimal.Decimal` | 经 `toPlainString()`，不经 float |
+| `DOUBLE` / `FLOAT` / `REAL` / `SMALLFLOAT` | `float` | |
+| `CHAR` / `VARCHAR` / `LVARCHAR` / `TEXT` / `CLOB` | `str` | |
+| `DATE` | `datetime.date` | |
+| `TIME` | `datetime.time` | |
+| `TIMESTAMP` / `DATETIME ...` | `datetime.datetime` | 微秒精确 |
+| `BINARY` / `VARBINARY` / `BYTE` / `BLOB` | `bytes` | |
+| `BOOLEAN` / `BIT` | `bool` | |
+
+**微秒换算修正**：JayDeBeApi 用 `int(str(nanos)[:6])`，当纳秒不足 9 位时结果偏大
+（`1010000` ns 应为 `1010` µs，却算出 `101000`，放大 100 倍）。本实现改为整除
+（见 `_nanos_to_microseconds`）。
+
+### 3.4 列元数据
+
+`ResultSetMetaData` 只在结果集打开期间有效——取完最后一行后 JayDeBeApi 会关闭
+`_rs`/`_meta`，`cursor.description` 随即变为 `None`。因此元数据**必须在取值之前**
+读取，`SQLAlchemyDriver.execute_query_with_metadata()` 即按此顺序实现。
+
+GBase 8s 的 JDBC 元数据比 DBAPI 的 `description` 更丰富，提供类型名、精度、标度、
+可空性与 Java 类名：
+
+| 字段 | 示例 |
+| --- | --- |
+| `name` | `dec` |
+| `type_name` | `DECIMAL` / `INT8` / `DATETIME YEAR TO FRACTION(3)` |
+| `python_type` | `Decimal` / `int` / `datetime` |
+| `precision` / `scale` | `19` / `2` |
+| `nullable` | `True` |
+| `java_class` | `java.math.BigDecimal` |
+
+GBase 把时间戳报成 Informix 语法 `DATETIME YEAR TO FRACTION(3)`、整型报成 `INT8`，
+故 `python_type_for()` 先精确匹配再按前缀匹配。
 
 ## 4. 一库三模实现
 

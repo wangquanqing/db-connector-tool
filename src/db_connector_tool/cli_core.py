@@ -17,10 +17,12 @@ Example:
 import argparse
 import codecs
 import csv
+import datetime
 import getpass
 import json
 import shutil
 import sys
+from decimal import Decimal
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import sqlparse
@@ -443,29 +445,76 @@ class DBConnectorCLI:
     def _to_serializable(obj: Any) -> Any:
         """将数据库驱动对象转换为可序列化原生类型
 
+        **标量先于容器判断**：JPype 包装的 Java 对象带一个**空的 ``__dict__``**，
+        若先走 ``obj.__dict__`` 分支，``java.lang.Integer`` 之类的数值会被静默变成
+        ``{}``，导出 CSV 时整列数据丢失。
+
+        JSON 原生类型（``int`` / ``float`` / ``bool`` / ``str`` / ``None``）原样返回，
+        以免 JSON 导出把数字变成字符串；``Decimal`` 与日期时间转为字符串，
+        既保证可序列化，又避免 ``Decimal`` 经 float 中转丢精度。
+
         Args:
-            obj: 原始对象（Row/ResultProxy 等）
+            obj: 原始对象（Row/ResultProxy/标量等）
 
         Returns:
             Any: 可序列化的 Python 原生类型
+
+        Example:
+            >>> DBConnectorCLI._to_serializable(3)
+            3
+            >>> DBConnectorCLI._to_serializable({"a": 1})
+            {'a': 1}
+            >>> DBConnectorCLI._to_serializable(Decimal("1.50"))
+            '1.50'
         """
-        try:
-            return dict(obj)
-        except (TypeError, ValueError):
-            pass
-        if hasattr(obj, "_asdict") and callable(getattr(obj, "_asdict")):
-            try:
-                return obj._asdict()
-            except (TypeError, ValueError):
-                pass
-        if hasattr(obj, "__dict__"):
-            return obj.__dict__
-        if hasattr(obj, "__iter__") and not isinstance(obj, (str, bytes)):
-            try:
-                return list(obj)
-            except (TypeError, ValueError):
-                pass
+        # JSON 原生类型：直接返回，保持数字/布尔/字符串的原始语义
+        if obj is None or isinstance(obj, (str, int, float, bool)):
+            return obj
+        # 非 JSON 原生标量：转字符串（Decimal 保持精度，不经过 float）
+        if isinstance(obj, (Decimal, datetime.date, datetime.time, bytes, bytearray)):
+            return str(obj)
+
+        result = DBConnectorCLI._to_container(obj)
+        if result is not None:
+            return result
+        # 仅当 __dict__ 确有内容时才采用，空字典视为「无结构信息」
+        attributes = getattr(obj, "__dict__", None)
+        if attributes:
+            return attributes
         return str(obj)
+
+    @staticmethod
+    def _to_container(obj: Any) -> Any:
+        """尝试把对象转为字典或列表，无法转换时返回 ``None``
+
+        Args:
+            obj: 待转换对象
+
+        Returns:
+            Any: 字典/列表，或 ``None`` 表示不是容器
+
+        Example:
+            >>> DBConnectorCLI._to_container({"a": 1})
+            {'a': 1}
+            >>> DBConnectorCLI._to_container(3) is None
+            True
+        """
+        for converter in (
+            dict,
+            lambda item: item._asdict(),  # pylint: disable=protected-access
+            list,
+        ):
+            if converter is list and not (
+                hasattr(obj, "__iter__") and not isinstance(obj, (str, bytes))
+            ):
+                continue
+            if converter is dict and not hasattr(obj, "keys"):
+                continue
+            try:
+                return converter(obj)
+            except (TypeError, ValueError, AttributeError):
+                continue
+        return None
 
     def _save_json(self, results: List[Dict], output_path: str) -> None:
         """将结果保存为 JSON（UTF-8，2空格缩进）
