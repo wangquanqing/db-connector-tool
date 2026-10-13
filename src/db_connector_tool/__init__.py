@@ -10,7 +10,10 @@
 from .batch_manager import BatchDatabaseManager, cleanup_temp_configs, generate_ip_range
 
 # 核心模块导入
+from .__about__ import __version__
 from .core.config import ConfigManager
+from .core.config_security import ConfigSecurityManager
+from .core.connection_pool import ConnectionPoolManager
 from .core.connections import DatabaseManager
 from .core.crypto import CryptoManager
 # pylint: disable=duplicate-code
@@ -36,12 +39,16 @@ from .utils.path_utils import PathHelper
 
 # 公共API导出列表
 __all__ = [
+    # 元数据
+    "__version__",
     # 批量管理
     "BatchDatabaseManager",
     "cleanup_temp_configs",
     "generate_ip_range",
     # 核心管理类
     "ConfigManager",
+    "ConfigSecurityManager",
+    "ConnectionPoolManager",
     "CryptoManager",
     "DatabaseManager",
     "KeyManager",

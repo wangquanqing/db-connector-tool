@@ -15,8 +15,12 @@ from src.db_connector_tool.__about__ import __version__
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DOC_FILES = ("README.md", "TUTORIAL.md")
+# 既要匹配顶格的 ``from db_connector_tool import X``，也要匹配 docstring 里
+# 缩进书写、带 ``>>>`` 提示符的等价写法 —— 后者此前被漏掉，导致
+# ConfigSecurityManager / ConnectionPoolManager / __version__ 的“文档承诺但导不通”
+# 长期未被发现（见 __about__.py、core/config_security.py、core/connection_pool.py）。
 ROOT_IMPORT_PATTERN = re.compile(
-    r"^from db_connector_tool import ([A-Za-z_][\w]*(?:\s*,\s*[A-Za-z_][\w]*)*)",
+    r"^\s*(?:>>>\s*)?from db_connector_tool import ([A-Za-z_][\w]*(?:\s*,\s*[A-Za-z_][\w]*)*)",
     re.MULTILINE,
 )
 
@@ -71,6 +75,25 @@ class TestPublicApi(unittest.TestCase):
     def test_version_available(self) -> None:
         """版本号可读取"""
         self.assertRegex(__version__, r"^\d+\.\d+\.\d+$")
+
+    def test_docstring_promised_root_names(self) -> None:
+        """docstring 中（含缩进/>>> 写法）承诺的根级名字必须真的导得进
+
+        回归守卫：这三处此前只写在 docstring 里、未实际导出，而
+        ``ROOT_IMPORT_PATTERN`` 原先要求顶格 ``from``，于是长期漏检。
+        """
+        for name in ("__version__", "ConfigSecurityManager", "ConnectionPoolManager"):
+            with self.subTest(name=name):
+                self.assertTrue(hasattr(dct, name), f"包根缺少 {name}")
+                self.assertIn(name, dct.__all__, f"{name} 未列入 __all__")
+
+    def test_indented_docstring_imports_are_scanned(self) -> None:
+        """扫描正则必须覆盖 docstring 的缩进 ``>>>`` 写法"""
+        sample = "    >>> from db_connector_tool import Foo, Bar\n"
+        self.assertEqual(
+            ROOT_IMPORT_PATTERN.findall(sample), ["Foo, Bar"],
+            "缩进的 docstring 导入没有被扫描到（根因回归）",
+        )
 
 
 if __name__ == "__main__":
