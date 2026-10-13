@@ -32,6 +32,7 @@ from .core.exceptions import (
     ValidationError,
 )
 from .core.key_manager import KeyManager
+from .core.result import ColumnInfo, QueryChunk, QueryResult
 from .core.validators import ConfigValidator, GenericValidator, PasswordValidator
 from .drivers.sqlalchemy_driver import SQLAlchemyDriver
 from .utils.logging_utils import LogManager, get_logger, set_log_level, setup_logging
@@ -53,6 +54,10 @@ __all__ = [
     "DatabaseManager",
     "KeyManager",
     "SQLAlchemyDriver",
+    # 结果载体（保真的查询结果：列身份与显示名分离）
+    "ColumnInfo",
+    "QueryChunk",
+    "QueryResult",
     # 异常体系
     "ConfigError",
     "CryptoError",

@@ -12,6 +12,7 @@ from src.db_connector_tool.core.exceptions import (
     DatabaseError,
     DBConnectionError,
 )
+from src.db_connector_tool.core.result import ColumnInfo, QueryChunk, QueryResult
 
 
 class TestDatabaseManager(unittest.TestCase):
@@ -21,6 +22,98 @@ class TestDatabaseManager(unittest.TestCase):
         """设置测试环境"""
         self.app_name = "test_app"
         self.config_file = "test_connections.toml"
+
+    @patch("src.db_connector_tool.core.connections.ConfigManager")
+    @patch("src.db_connector_tool.core.connections.ConnectionPoolManager")
+    def test_execute_query_result_passes_through(
+        self, mock_pool_manager, mock_config_manager
+    ):
+        """execute_query_result 透传驱动结果并回填耗时"""
+        mock_config_manager.return_value = Mock()
+        mock_pool_manager.return_value = Mock()
+
+        expected = QueryResult(
+            columns=(ColumnInfo(0, "a", "a"),), rows=[(1,)], elapsed=0.0
+        )
+        mock_driver = Mock()
+        mock_driver.execute_query_result.return_value = expected
+
+        db_manager = DatabaseManager(self.app_name, self.config_file)
+        db_manager.get_connection = Mock(return_value=mock_driver)
+
+        result = db_manager.execute_query_result("test_db", "SELECT 1")
+        self.assertIs(result, expected)
+        mock_driver.execute_query_result.assert_called_once_with("SELECT 1", None)
+        # 管理器负责把真实耗时写回结果对象
+        self.assertGreaterEqual(result.elapsed, 0.0)
+        self.assertIsInstance(result.elapsed, float)
+
+    @patch("src.db_connector_tool.core.connections.ConfigManager")
+    @patch("src.db_connector_tool.core.connections.ConnectionPoolManager")
+    def test_execute_query_result_wraps_errors(
+        self, mock_pool_manager, mock_config_manager
+    ):
+        """驱动异常被包装为 DatabaseError"""
+        mock_config_manager.return_value = Mock()
+        mock_pool_instance = Mock()
+        mock_pool_manager.return_value = mock_pool_instance
+
+        mock_driver = Mock()
+        mock_driver.execute_query_result.side_effect = DatabaseError("boom")
+
+        db_manager = DatabaseManager(self.app_name, self.config_file)
+        db_manager.get_connection = Mock(return_value=mock_driver)
+
+        with self.assertRaises(DatabaseError):
+            db_manager.execute_query_result("test_db", "SELECT 1")
+        mock_pool_instance.record_connection_error.assert_called_once()
+
+    @patch("src.db_connector_tool.core.connections.ConfigManager")
+    @patch("src.db_connector_tool.core.connections.ConnectionPoolManager")
+    def test_execute_query_stream_yields_chunks(
+        self, mock_pool_manager, mock_config_manager
+    ):
+        """execute_query_stream 逐批透传，且末批带 is_last"""
+        mock_config_manager.return_value = Mock()
+        mock_pool_manager.return_value = Mock()
+
+        columns = (ColumnInfo(0, "n", "n"),)
+        chunks = [
+            QueryChunk(columns=columns, rows=[(1,), (2,)], chunk_index=0),
+            QueryChunk(columns=columns, rows=[(3,)], is_last=True, chunk_index=1),
+        ]
+        mock_driver = Mock()
+        mock_driver.execute_query_stream.return_value = iter(chunks)
+
+        db_manager = DatabaseManager(self.app_name, self.config_file)
+        db_manager.get_connection = Mock(return_value=mock_driver)
+
+        got = list(db_manager.execute_query_stream("test_db", "SELECT n FROM t", None, 2))
+        self.assertEqual([len(c) for c in got], [2, 1])
+        self.assertTrue(got[-1].is_last)
+        mock_driver.execute_query_stream.assert_called_once_with(
+            "SELECT n FROM t", None, 2
+        )
+
+    @patch("src.db_connector_tool.core.connections.ConfigManager")
+    @patch("src.db_connector_tool.core.connections.ConnectionPoolManager")
+    def test_execute_query_stream_wraps_errors(
+        self, mock_pool_manager, mock_config_manager
+    ):
+        """流式取数出错时同样包装为 DatabaseError"""
+        mock_config_manager.return_value = Mock()
+        mock_pool_instance = Mock()
+        mock_pool_manager.return_value = mock_pool_instance
+
+        mock_driver = Mock()
+        mock_driver.execute_query_stream.side_effect = DatabaseError("boom")
+
+        db_manager = DatabaseManager(self.app_name, self.config_file)
+        db_manager.get_connection = Mock(return_value=mock_driver)
+
+        with self.assertRaises(DatabaseError):
+            list(db_manager.execute_query_stream("test_db", "SELECT 1"))
+        mock_pool_instance.record_connection_error.assert_called_once()
 
     @patch("src.db_connector_tool.core.connections.ConfigManager")
     @patch("src.db_connector_tool.core.connections.ConnectionPoolManager")

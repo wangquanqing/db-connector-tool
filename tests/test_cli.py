@@ -20,8 +20,42 @@ from src.db_connector_tool.core.exceptions import (
     DatabaseError,
     DBConnectorError,
 )
+from src.db_connector_tool.core.result import ColumnInfo, QueryResult
 
 from ._isolation import IsolatedTestCase
+
+
+def make_result(rows, elapsed: float = 0.01, names=None):
+    """构造 ``QueryResult`` 供 CLI 测试使用
+
+    CLI 现在消费 ``execute_query_result()`` 返回的 ``QueryResult``
+    （按位置保真），因此测试也要给出同形态的对象，而不是裸字典列表。
+
+    Args:
+        rows: 行数据；元素为字典时按字典值取列，否则视作按位置的序列
+        elapsed: 耗时
+        names: 列名列表；``None`` 时从数据推断（字典取键，序列用 ``c0/c1...``）
+
+    Returns:
+        QueryResult: 构造好的结果对象
+    """
+    materialized = [dict(row) if isinstance(row, dict) else tuple(row) for row in rows]
+    if materialized and isinstance(rows[0], dict):
+        column_names = list(rows[0].keys())
+        position_rows = [tuple(row.values()) for row in materialized]
+    else:
+        position_rows = materialized
+        if names is not None:
+            column_names = list(names)
+        elif position_rows:
+            column_names = [f"c{i}" for i in range(len(position_rows[0]))]
+        else:
+            column_names = []
+    columns = [
+        ColumnInfo(ordinal=i, name=name, display_name=name)
+        for i, name in enumerate(column_names)
+    ]
+    return QueryResult(columns=columns, rows=position_rows, elapsed=elapsed)
 
 
 class CLITestCase(IsolatedTestCase):
@@ -299,7 +333,7 @@ class TestOutputHelpers(CLITestCase):
 
         # 宽度 60：只能放下第一列
         with mock.patch(
-            "src.db_connector_tool.cli_core.shutil.get_terminal_size"
+            "src.db_connector_tool.result_render.shutil.get_terminal_size"
         ) as mock_size:
             mock_size.return_value = os.terminal_size((60, 24))
             _, output = self.capture(self.cli._show_results, rows)  # pylint: disable=protected-access
@@ -308,7 +342,7 @@ class TestOutputHelpers(CLITestCase):
 
         # 宽度 20：一列都放不下
         with mock.patch(
-            "src.db_connector_tool.cli_core.shutil.get_terminal_size"
+            "src.db_connector_tool.result_render.shutil.get_terminal_size"
         ) as mock_size:
             mock_size.return_value = os.terminal_size((20, 24))
             _, output = self.capture(self.cli._show_results, rows)  # pylint: disable=protected-access
@@ -387,7 +421,7 @@ class TestSqlFileExecution(CLITestCase):
 
     def test_run_single_sql_routes_by_statement_type(self) -> None:
         """SELECT 走查询，其余走命令"""
-        self.cli.db_manager.execute_query.return_value = ([{"c": 1}], 0.01)
+        self.cli.db_manager.execute_query_result.return_value = make_result([{"c": 1}])
         self.cli.db_manager.execute_command.return_value = (2, 0.01)
 
         ok, output = self.capture(
@@ -415,7 +449,7 @@ class TestSqlFileExecution(CLITestCase):
         """文件执行统计成功/失败与成功率"""
         path = self.temp_path / "script.sql"
         path.write_text("SELECT 1;\nSELECT 2;\n", encoding="utf-8")
-        self.cli.db_manager.execute_query.return_value = ([], 0.01)
+        self.cli.db_manager.execute_query_result.return_value = make_result([])
         args = self.parse(["file", "db", str(path), "-c"])
 
         _, output = self.capture(self.cli.execute_file, args)
@@ -426,7 +460,7 @@ class TestSqlFileExecution(CLITestCase):
         """未指定 --continue-on-error 时遇错即退出"""
         path = self.temp_path / "script.sql"
         path.write_text("SELECT 1;\nSELECT 2;\n", encoding="utf-8")
-        self.cli.db_manager.execute_query.side_effect = ConfigError("boom")
+        self.cli.db_manager.execute_query_result.side_effect = ConfigError("boom")
         args = self.parse(["file", "db", str(path)])
 
         with self.assertRaises(SystemExit) as context:
@@ -539,7 +573,7 @@ class TestCommandHandlers(CLITestCase):
 
     def test_execute_query_with_output_file(self) -> None:
         """query 子命令把结果写入文件"""
-        self.cli.db_manager.execute_query.return_value = ([{"id": 1}], 0.02)
+        self.cli.db_manager.execute_query_result.return_value = make_result([{"id": 1}])
         out_path = self.temp_path / "rows.csv"
         args = self.parse(["query", "db", "SELECT 1", "-o", str(out_path)])
         _, output = self.capture(self.cli.execute_query, args)
@@ -558,7 +592,7 @@ class TestCommandHandlers(CLITestCase):
         """交互式 Shell 支持 help 与退出指令"""
         outputs = []
         with mock.patch("builtins.input", side_effect=["help", "SELECT 1", "exit"]):
-            self.cli.db_manager.execute_query.return_value = ([], 0.0)
+            self.cli.db_manager.execute_query_result.return_value = make_result([])
             _, output = self.capture(
                 self.cli.interactive_shell, self.parse(["shell", "db"])
             )
@@ -614,7 +648,7 @@ class TestCommandHandlerFailures(CLITestCase):
 
     def test_execute_query_failure(self) -> None:
         """query 执行失败时友好退出"""
-        self.cli.db_manager.execute_query.side_effect = DatabaseError("boom")
+        self.cli.db_manager.execute_query_result.side_effect = DatabaseError("boom")
         self._assert_exit_1(self.cli.execute_query, ["query", "db", "SELECT 1"])
 
     def test_execute_command_failure(self) -> None:
@@ -624,7 +658,7 @@ class TestCommandHandlerFailures(CLITestCase):
 
     def test_save_output_oserror_is_friendly(self) -> None:
         """导出目录不存在时应给出中文提示而非裸 traceback"""
-        self.cli.db_manager.execute_query.return_value = ([{"id": 1}], 0.01)
+        self.cli.db_manager.execute_query_result.return_value = make_result([{"id": 1}])
         bad_path = str(self.temp_path / "no_such_dir" / "out.csv")
 
         output = self._assert_exit_1(

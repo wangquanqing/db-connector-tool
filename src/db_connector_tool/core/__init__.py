@@ -18,6 +18,7 @@ from .exceptions import (
     ValidationError,
 )
 from .key_manager import KeyManager
+from .result import ColumnInfo, QueryChunk, QueryResult
 
 # 公共API导出列表
 __all__ = [
@@ -27,6 +28,9 @@ __all__ = [
     "CryptoManager",
     "DatabaseManager",
     "KeyManager",
+    "ColumnInfo",
+    "QueryChunk",
+    "QueryResult",
     "ConfigError",
     "CryptoError",
     "DatabaseError",

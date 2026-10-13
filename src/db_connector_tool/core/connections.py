@@ -24,18 +24,19 @@ Example:
 import atexit
 import threading
 import time
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List
 
 from ..drivers.sqlalchemy_driver import SQLAlchemyDriver
 from ..utils.logging_utils import get_logger
 from .config import ConfigManager
 from .connection_pool import ConnectionPoolManager
 from .exceptions import ConfigError, DatabaseError, DBConnectionError
+from .query_mixin import QueryMixin
 
 logger = get_logger(__name__)
 
 
-class DatabaseManager:
+class DatabaseManager(QueryMixin):
     """数据库管理器类 (Database Manager)
 
     提供统一的数据库连接管理接口，实现连接池管理和生命周期控制。
@@ -572,151 +573,6 @@ class DatabaseManager:
             logger.error("连接测试失败 %s: %s", name, str(connect_error))
             self.pool_manager.remove_connection(name)
             return False
-
-    def execute_query(
-        self, connection_name: str, query: str, params: Dict[str, Any] | None = None
-    ) -> Tuple[List[Dict[str, Any]], float]:
-        """执行SQL查询语句
-
-        Args:
-            connection_name: 连接名称
-            query: SQL查询语句
-            params: 查询参数字典，可选
-
-        Returns:
-            Tuple[List[Dict[str, Any]], float]: 查询结果列表和执行时间
-
-        Raises:
-            DatabaseError: 当查询执行失败时
-            ConfigError: 当连接配置不存在时
-
-        Example:
-            >>> results = db_manager.execute_query(
-            ...     "mysql_db",
-            ...     "SELECT * FROM users WHERE age > :age",
-            ...     {"age": 18}
-            ... )
-            >>> with DatabaseManager("my_app") as dbm:
-            ...     results = dbm.execute_query("postgres_db", "SELECT * FROM products")
-        """
-
-        def _execute_query():
-            driver = self.get_connection(connection_name)
-            start_time = time.time()
-            result = driver.execute_query(query, params)
-            response_time = time.time() - start_time
-
-            self.pool_manager.update_query_metadata(connection_name, response_time)
-
-            return result, response_time
-
-        try:
-            return _execute_query()
-        except (OSError, DatabaseError) as error:
-            self.pool_manager.record_connection_error(connection_name, error)
-            error_message = f"查询执行失败 {connection_name}: {str(error)}"
-            logger.error(error_message)
-            raise DatabaseError(f"查询执行失败: {str(error)}") from error
-
-    def execute_query_with_metadata(
-        self, connection_name: str, query: str, params: Dict[str, Any] | None = None
-    ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], float]:
-        """执行SQL查询并同时返回列元数据
-
-        相比 :meth:`execute_query` 多返回一份列类型信息，供结果网格渲染、
-        列宽计算、编辑器选择等场景使用（模拟 DBeaver 类客户端所需）。
-
-        Args:
-            connection_name: 连接名称
-            query: SQL查询语句
-            params: 查询参数字典，可选
-
-        Returns:
-            Tuple[List[Dict[str, Any]], List[Dict[str, Any]], float]:
-            ``(行列表, 列元数据, 执行时间)``；列元数据每项含 ``name`` /
-            ``type_name`` / ``python_type`` / ``precision`` / ``scale`` /
-            ``nullable`` 等键
-
-        Raises:
-            DatabaseError: 当查询执行失败时
-            ConfigError: 当连接配置不存在时
-
-        Example:
-            >>> rows, columns, cost = db_manager.execute_query_with_metadata(
-            ...     "mysql_db", "SELECT id FROM users"
-            ... )
-            >>> columns[0]["name"]
-            'id'
-        """
-
-        def _execute_query():
-            driver = self.get_connection(connection_name)
-            start_time = time.time()
-            result, columns = driver.execute_query_with_metadata(query, params)
-            response_time = time.time() - start_time
-
-            self.pool_manager.update_query_metadata(connection_name, response_time)
-
-            return result, columns, response_time
-
-        try:
-            return _execute_query()
-        except (OSError, DatabaseError) as error:
-            self.pool_manager.record_connection_error(connection_name, error)
-            error_message = f"查询执行失败 {connection_name}: {str(error)}"
-            logger.error(error_message)
-            raise DatabaseError(f"查询执行失败: {str(error)}") from error
-
-    def execute_command(
-        self,
-        connection_name: str,
-        command: str,
-        params: Dict[str, Any] | None = None,
-    ) -> Tuple[int, float]:
-        """执行非查询SQL命令（INSERT/UPDATE/DELETE等）
-
-        Args:
-            connection_name: 连接名称
-            command: SQL命令语句
-            params: 命令参数字典，可选
-
-        Returns:
-            Tuple[int, float]: 影响的行数和执行时间
-
-        Raises:
-            DatabaseError: 当命令执行失败时
-            ConfigError: 当连接配置不存在时
-
-        Example:
-            >>> affected_rows = db_manager.execute_command(
-            ...     "mysql_db",
-            ...     "UPDATE users SET name = :name WHERE id = :id",
-            ...     {"name": "Bob", "id": 1}
-            ... )
-            >>> with DatabaseManager("my_app") as dbm:
-            ...     affected_rows = dbm.execute_command(
-            ...         "postgres_db",
-            ...         "DELETE FROM products WHERE id = 1"
-            ...     )
-        """
-
-        def _execute_command():
-            driver = self.get_connection(connection_name)
-            start_time = time.time()
-            result = driver.execute_command(command, params)
-            response_time = time.time() - start_time
-
-            self.pool_manager.update_command_metadata(connection_name, response_time)
-
-            return result, response_time
-
-        try:
-            return _execute_command()
-        except (OSError, DatabaseError) as error:
-            self.pool_manager.record_connection_error(connection_name, error)
-            error_message = f"命令执行失败 {connection_name}: {str(error)}"
-            logger.error(error_message)
-            raise DatabaseError(f"命令执行失败: {str(error)}") from error
 
     def get_connection_info(self, name: str) -> Dict[str, Any]:
         """获取连接详细信息（包含统计信息）

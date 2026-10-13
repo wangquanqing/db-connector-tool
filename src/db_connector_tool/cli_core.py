@@ -16,17 +16,11 @@ Example:
 
 import argparse
 import codecs
-import csv
-import datetime
 import getpass
-import json
-import shutil
 import sys
-from decimal import Decimal
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import sqlparse
-from sqlalchemy import RowMapping
 
 from .__about__ import __version__
 from .core.connections import DatabaseManager
@@ -37,15 +31,15 @@ from .core.exceptions import (
     FileSystemError,
 )
 from .drivers.sqlalchemy_driver import BASIC_PARAMS
+from .result_render import ResultRenderMixin
 from .utils.logging_utils import get_logger, setup_logging
-from .utils.path_utils import PathHelper
 
 # 注意：日志在 DBConnectorCLI 实例化时才初始化（见 __init__），
 # 避免仅仅 import 本模块就在用户配置目录里创建日志文件。
 logger = get_logger(__name__)
 
 
-class DBConnectorCLI:
+class DBConnectorCLI(ResultRenderMixin):
     """命令行接口主类 (DB Connector CLI)
 
     管理数据库连接配置并通过命令行执行 SQL 操作，提供连接增删改查、
@@ -400,375 +394,19 @@ class DBConnectorCLI:
         """
         db_manager = self._ensure_db_manager()
         try:
-            results, elapsed = db_manager.execute_query(
+            # 用保真接口：行按位置存放，重名列（SELECT * JOIN）不会互相覆盖
+            result = db_manager.execute_query_result(
                 args.connection, args.sql_content
             )
             if args.output:
-                self._save_output(results, args.output)
+                self._save_output(result, args.output)
             else:
-                self._show_results(results)
-            print(f"✅ 总计: {len(results)} 行 ({elapsed:.3f} 秒)")
+                self._show_results(result)
+            print(f"✅ 总计: {len(result)} 行 ({result.elapsed:.3f} 秒)")
         except (DatabaseError, ConfigError, FileSystemError) as error:
             logger.error("执行SQL失败: %s", error)
             print(f"❌ 执行SQL失败: {error}")
             sys.exit(1)
-
-    def _save_output(self, results: List[Dict], output_path: str) -> None:
-        """将查询结果保存到文件
-
-        根据扩展名自动选择 JSON 或 CSV 格式。
-
-        Args:
-            results: 查询结果列表
-            output_path: 输出文件路径（.json/.csv）
-
-        Raises:
-            SystemExit: 格式不支持或保存失败时退出
-        """
-        try:
-            ext = PathHelper.get_file_extension(output_path, include_dot=False)
-            if ext == "json":
-                self._save_json(results, output_path)
-            elif ext == "csv":
-                self._save_csv(results, output_path)
-            else:
-                raise FileSystemError(f"不支持的输出文件格式: {output_path}")
-            print(f"✅ 结果已保存到: {output_path}")
-        except (DatabaseError, ConfigError, FileSystemError, OSError) as error:
-            # OSError 覆盖目录不存在、磁盘已满、权限不足等文件系统错误，
-            # 否则用户会看到裸 traceback 而不是统一的中文提示
-            logger.error("保存结果失败: %s", error)
-            print(f"❌ 保存结果失败: {error}")
-            sys.exit(1)
-
-    @staticmethod
-    def _to_serializable(obj: Any) -> Any:
-        """将数据库驱动对象转换为可序列化原生类型
-
-        **标量先于容器判断**：JPype 包装的 Java 对象带一个**空的 ``__dict__``**，
-        若先走 ``obj.__dict__`` 分支，``java.lang.Integer`` 之类的数值会被静默变成
-        ``{}``，导出 CSV 时整列数据丢失。
-
-        JSON 原生类型（``int`` / ``float`` / ``bool`` / ``str`` / ``None``）原样返回，
-        以免 JSON 导出把数字变成字符串；``Decimal`` 与日期时间转为字符串，
-        既保证可序列化，又避免 ``Decimal`` 经 float 中转丢精度。
-
-        Args:
-            obj: 原始对象（Row/ResultProxy/标量等）
-
-        Returns:
-            Any: 可序列化的 Python 原生类型
-
-        Example:
-            >>> DBConnectorCLI._to_serializable(3)
-            3
-            >>> DBConnectorCLI._to_serializable({"a": 1})
-            {'a': 1}
-            >>> DBConnectorCLI._to_serializable(Decimal("1.50"))
-            '1.50'
-        """
-        # JSON 原生类型：直接返回，保持数字/布尔/字符串的原始语义
-        if obj is None or isinstance(obj, (str, int, float, bool)):
-            return obj
-        # 非 JSON 原生标量：转字符串（Decimal 保持精度，不经过 float）
-        if isinstance(obj, (Decimal, datetime.date, datetime.time, bytes, bytearray)):
-            return str(obj)
-
-        result = DBConnectorCLI._to_container(obj)
-        if result is not None:
-            return result
-        # 仅当 __dict__ 确有内容时才采用，空字典视为「无结构信息」
-        attributes = getattr(obj, "__dict__", None)
-        if attributes:
-            return attributes
-        return str(obj)
-
-    @staticmethod
-    def _to_container(obj: Any) -> Any:
-        """尝试把对象转为字典或列表，无法转换时返回 ``None``
-
-        Args:
-            obj: 待转换对象
-
-        Returns:
-            Any: 字典/列表，或 ``None`` 表示不是容器
-
-        Example:
-            >>> DBConnectorCLI._to_container({"a": 1})
-            {'a': 1}
-            >>> DBConnectorCLI._to_container(3) is None
-            True
-        """
-        for converter in (
-            dict,
-            lambda item: item._asdict(),  # pylint: disable=protected-access
-            list,
-        ):
-            if converter is list and not (
-                hasattr(obj, "__iter__") and not isinstance(obj, (str, bytes))
-            ):
-                continue
-            if converter is dict and not hasattr(obj, "keys"):
-                continue
-            try:
-                return converter(obj)
-            except (TypeError, ValueError, AttributeError):
-                continue
-        return None
-
-    def _save_json(self, results: List[Dict], output_path: str) -> None:
-        """将结果保存为 JSON（UTF-8，2空格缩进）
-
-        Args:
-            results: 查询结果列表
-            output_path: 输出文件路径
-
-        Raises:
-            SystemExit: 序列化失败时退出
-        """
-        if not results:
-            return
-        try:
-            with open(output_path, "w", encoding="utf-8") as fh:
-                json.dump(
-                    results,
-                    fh,
-                    indent=2,
-                    ensure_ascii=False,
-                    default=self._to_serializable,
-                )
-        except (ValueError, TypeError) as error:
-            logger.error("JSON序列化失败: %s", error)
-            print(f"❌ JSON保存失败: {error}")
-            sys.exit(1)
-
-    def _save_csv(self, results: List[Dict], output_path: str) -> None:
-        """将结果保存为 CSV（UTF-8）
-
-        Args:
-            results: 查询结果列表
-            output_path: 输出文件路径
-        """
-        if not results:
-            return
-        with open(output_path, "w", newline="", encoding="utf-8") as fh:
-            headers = list(results[0].keys())
-            writer = csv.DictWriter(fh, fieldnames=headers)
-            writer.writeheader()
-            for row in results:
-                writer.writerow(
-                    {key: self._to_serializable(value) for key, value in row.items()}
-                )
-
-    def _show_results(self, results: List[Dict]) -> None:
-        """以表格格式在终端显示查询结果
-
-        终端宽度不足时自动选择可容纳的列，提示使用 --output 导出完整数据。
-
-        Args:
-            results: 查询结果列表
-        """
-        if not results:
-            print("没有结果")
-            return
-        headers = list(results[0].keys())
-        term_width = self._get_term_width()
-        col_widths = self._calc_col_widths(headers, results)
-        table_width = sum(col_widths[header] + 3 for header in headers) - 1
-        if table_width > term_width:
-            display_headers = self._pick_display_cols(headers, term_width, col_widths)
-            hidden = len(headers) - len(display_headers)
-            if display_headers:
-                print(
-                    f"📋 显示 {len(display_headers)}/{len(headers)} 列（终端宽度限制）"
-                )
-                print(f"🔍 隐藏了 {hidden} 列，使用 --output csv/json 查看完整数据")
-                print()
-                trimmed = [
-                    {k: v for k, v in row.items() if k in display_headers}
-                    for row in results
-                ]
-                trimmed_widths = {h: col_widths[h] for h in display_headers}
-                self._print_table(display_headers, trimmed, trimmed_widths)
-            else:
-                print("❌ 终端宽度过小，无法显示任何列")
-                print("💡 建议使用 --output csv/json 参数导出数据查看")
-        else:
-            self._print_table(headers, results, col_widths)
-
-    def _get_term_width(self) -> int:
-        """获取终端宽度
-
-        Returns:
-            int: 终端字符列数，失败时返回 120
-        """
-        try:
-            return shutil.get_terminal_size().columns
-        except OSError:
-            return 120
-
-    def _calc_col_widths(
-        self, headers: List[str], results: List[Dict]
-    ) -> Dict[str, int]:
-        """计算每列最大显示宽度（上限50）
-
-        Args:
-            headers: 表头列表
-            results: 查询结果列表
-
-        Returns:
-            Dict[str, int]: 列名到宽度的映射
-        """
-        max_width = 50
-        col_widths: Dict[str, int] = {}
-        for header in headers:
-            col_widths[header] = self._get_display_width(str(header))
-        for row in results:
-            for header in headers:
-                w = self._get_display_width(str(row.get(header, "")))
-                col_widths[header] = max(col_widths[header], w)
-        for header in headers:
-            col_widths[header] = min(col_widths[header], max_width)
-        return col_widths
-
-    def _get_display_width(self, text: str) -> int:
-        """计算字符串终端显示宽度（中文2，英文1）
-
-        Args:
-            text: 输入字符串
-
-        Returns:
-            int: 终端显示宽度
-        """
-        return sum(self._get_char_width(char) for char in text)
-
-    def _get_char_width(self, char: str) -> int:
-        """计算单字符终端显示宽度
-
-        Args:
-            char: 单个字符
-
-        Returns:
-            int: CJK统一汉字/CJK标点/全角字符返回2，其余返回1
-        """
-        if (
-            "\u4e00" <= char <= "\u9fff"
-            or "\u3000" <= char <= "\u303f"
-            or "\uff00" <= char <= "\uffef"
-        ):
-            return 2
-        return 1
-
-    def _pick_display_cols(
-        self, headers: List[str], term_width: int, col_widths: Dict[str, int]
-    ) -> List[str]:
-        """按终端宽度从左到右选择可容纳的列
-
-        Args:
-            headers: 所有表头
-            term_width: 终端可用宽度
-            col_widths: 列宽映射
-
-        Returns:
-            List[str]: 可容纳的列名列表
-        """
-        if not headers:
-            return []
-        selected: List[str] = []
-        current = 0
-        for header in headers:
-            col_total = col_widths[header] + 3
-            if current + col_total <= term_width:
-                selected.append(header)
-                current += col_total
-            else:
-                break
-        return selected
-
-    def _print_table(
-        self, headers: List[str], results: List[Dict], col_widths: Dict[str, int]
-    ) -> None:
-        """打印带边框的格式化数据表格
-
-        Args:
-            headers: 表头列表
-            results: 查询结果行
-            col_widths: 列宽映射
-        """
-        sep_parts = ["-" * (col_widths[header] + 2) for header in headers]
-        separator = "+" + "+".join(sep_parts) + "+"
-        print(separator)
-        self._print_row(headers, headers, col_widths, is_header=True)
-        print(separator)
-        for row in results:
-            self._print_row(row, headers, col_widths, is_header=False)
-        print(separator)
-
-    def _print_row(
-        self,
-        row_data: List[str] | Dict[str, Any],
-        headers: List[str],
-        col_widths: Dict[str, int],
-        is_header: bool = False,
-    ) -> None:
-        """打印表格单行（居中，表头不截断）
-
-        Args:
-            row_data: 行数据（表头为List，数据行为Dict）
-            headers: 当前表头列表
-            col_widths: 列宽映射
-            is_header: 是否为表头行
-        """
-        cells: List[str] = []
-        for header in headers:
-            if is_header:
-                cell_text = str(
-                    row_data[headers.index(header)]
-                    if isinstance(row_data, list)
-                    else header
-                )
-            else:
-                cell_text = self._truncate_cell(
-                    (
-                        str(row_data.get(header, ""))
-                        if isinstance(row_data, (dict, RowMapping))
-                        else ""
-                    ),
-                    col_widths[header],
-                )
-            actual = self._get_display_width(cell_text)
-            padding = col_widths[header] - actual
-            left_pad = padding // 2
-            right_pad = padding - left_pad
-            cells.append(f"{' ' * left_pad}{cell_text}{' ' * right_pad}")
-        print(f"| {' | '.join(cells)} |")
-
-    def _truncate_cell(self, value: str, max_width: int) -> str:
-        """智能截断过长单元格（考虑CJK宽度）
-
-        Args:
-            value: 原始文本
-            max_width: 最大显示宽度
-
-        Returns:
-            str: 截断后文本，末尾带 ...
-
-        Example:
-        >>> cli = DBConnectorCLI()
-        >>> cli._truncate_cell("长文本内容", 5)
-        '长...'
-        """
-        if self._get_display_width(value) <= max_width:
-            return value
-        current_width = 0
-        truncated = ""
-        for char in value:
-            char_width = self._get_char_width(char)
-            if current_width + char_width > max_width - 3:
-                break
-            truncated += char
-            current_width += char_width
-        return truncated + "..."
 
     def execute_command(self, args: argparse.Namespace) -> None:
         """执行 SQL 增删改操作
@@ -905,9 +543,9 @@ class DBConnectorCLI:
             print(f"执行: {self._shorten_sql(sql)}")
         try:
             if sql.lower().strip().startswith("select"):
-                results, elapsed = db_manager.execute_query(conn_name, sql)
-                self._show_results(results)
-                print(f"✅ 总计: {len(results)} 行 ({elapsed:.3f} 秒)")
+                result = db_manager.execute_query_result(conn_name, sql)
+                self._show_results(result)
+                print(f"✅ 总计: {len(result)} 行 ({result.elapsed:.3f} 秒)")
             else:
                 affected, elapsed = db_manager.execute_command(conn_name, sql)
                 print(f"✅ 影响: {affected} 行 ({elapsed:.3f} 秒)")
