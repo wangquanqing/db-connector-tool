@@ -164,8 +164,13 @@ GBase 把时间戳报成 Informix 语法 `DATETIME YEAR TO FRACTION(3)`、整型
 - gbase 模式在 `get_select_precolumns` 中输出 `FIRST n SKIP m`；
 - mysql 模式在 `limit_clause` 中输出 `LIMIT ... OFFSET ...`；仅 OFFSET 时取 BIGINT
   最大值并以字面量内联 OFFSET（详见第 5 节实测结论）；
-- `_dialect_specific_select_one` 沿默认实现自动套用 `default_from`，因此 pre-ping 语句
-  随模式自动变化，无需覆写。
+- 连接探活**不要**用 `_dialect_specific_select_one`：它是 SQLAlchemy 内部供
+  DBAPI 层 `do_ping()` 使用的探活字符串（见 `engine/default.py` 的 `do_ping`），
+  并非可执行的完整 SELECT —— psycopg 方言对它就返回 `";"`，当成语句执行会报
+  “This result object does not return rows It has been closed automatically”。
+  要渲染探活语句，走正常编译路径 `str(select(1).compile(dialect=...))`，
+  它才会调用 `GBase8sCompiler.default_from` 并按模式补伪表
+  （`SELECT 1 FROM DUAL` / `SELECT 1 FROM sysmaster:sysdual`）。
 
 ## 5. 真机验证结论
 

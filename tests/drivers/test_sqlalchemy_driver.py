@@ -1,8 +1,42 @@
 import unittest
 from unittest.mock import MagicMock, patch
 
+from sqlalchemy.dialects.sqlite import pysqlite as sqlite_dialect
+
 from src.db_connector_tool.core.exceptions import DriverError, QueryError
 from src.db_connector_tool.drivers.sqlalchemy_driver import SQLAlchemyDriver
+
+
+def _dialect_stub(default_from: str = ""):
+    """构造一个**真实**方言对象，可指定编译时补出的伪表
+
+    ``select(1).compile(dialect=...)`` 必须走 SQLAlchemy 真实的编译路径，
+    因此这里刻意用真实方言/编译器子类而非 ``MagicMock``：用 mock 时任何字符串都
+    “编译成功”，真实方言之间的差异（如伪表补全、DBAPI 探活字符串）会被
+    整个吞掉 —— 这正是本文件此前漏掉 PostgreSQL 回归的原因。
+
+    注意 ``default_from()`` 定义在**编译器**上（见 ``sql/compiler.py`` 里
+    ``text += self.default_from()``），不是方言上；GBase 8s 方言也正是这么做的
+    （``GBase8sCompiler.default_from``），故这里照同一机制复刻。
+
+    Args:
+        default_from: 非空时，``select(1)`` 会编译成
+            ``SELECT 1 FROM <default_from>``（GBase/MySQL 补伪表的方式）。
+    """
+    sqlite = sqlite_dialect.SQLiteDialect_pysqlite
+
+    class _StubCompiler(sqlite.statement_compiler):  # type: ignore[misc]
+        def default_from(self) -> str:
+            return f" FROM {default_from}" if default_from else ""
+
+    class _StubDialect(sqlite):  # type: ignore[misc, valid-type]
+        statement_compiler = _StubCompiler
+
+        # 显式给出 DBAPI 探活字符串：真实方言都有该属性，这里保持它的存在，
+        # 以便用例能验证“实现里没有去读它”。
+        _dialect_specific_select_one = ";"
+
+    return _StubDialect()
 
 
 class TestSQLAlchemyDriver(unittest.TestCase):
@@ -463,8 +497,8 @@ class TestSQLAlchemyDriver(unittest.TestCase):
         """测试执行连接测试"""
         driver = SQLAlchemyDriver(self.base_config)
         driver.engine = MagicMock()
-        # 方言需提供真实的字符串（真实方言都有该属性）
-        driver.engine.dialect._dialect_specific_select_one = "SELECT 1"
+        # 方言需是可编译的真实方言对象（见下方 _dialect_stub）
+        driver.engine.dialect = _dialect_stub("SELECT 1")
         mock_connection = MagicMock()
         mock_result = MagicMock()
         mock_result.fetchone.return_value = (1,)
@@ -474,18 +508,15 @@ class TestSQLAlchemyDriver(unittest.TestCase):
         result = driver._perform_connection_test()
         self.assertTrue(result)
 
-    def test_connection_test_uses_dialect_select_one(self) -> None:
+    def test_connection_test_uses_dialect_rendered_select(self) -> None:
         """连接测试必须采用方言渲染的语句，而非硬编码的 ``SELECT 1``
 
         回归 GBase 8s：gbase/mysql 模式下不接受无 FROM 的 SELECT，
-        硬编码会让连接测试误报失败。方言会把伪表补进
-        ``_dialect_specific_select_one``，因此必须以它为准。
+        硬编码会让连接测试误报失败。方言在编译 ``select(1)`` 时会补上伪表。
         """
         driver = SQLAlchemyDriver(self.base_config)
         driver.engine = MagicMock()
-        driver.engine.dialect._dialect_specific_select_one = (
-            "SELECT 1 FROM sysmaster:sysdual"
-        )
+        driver.engine.dialect = _dialect_stub("sysmaster:sysdual")
         mock_connection = MagicMock()
         mock_connection.execute.return_value.fetchone.return_value = (1,)
         driver.engine.connect.return_value.__enter__.return_value = mock_connection
@@ -494,11 +525,37 @@ class TestSQLAlchemyDriver(unittest.TestCase):
         executed = mock_connection.execute.call_args[0][0]
         self.assertIn("sysmaster:sysdual", str(executed))
 
-    def test_connection_test_falls_back_without_dialect_hook(self) -> None:
-        """方言未实现该属性时回退到通用写法，不抛异常"""
+    def test_connection_test_ignores_dbapi_ping_string(self) -> None:
+        """必须**忽略** ``_dialect_specific_select_one``，改用正常编译
+
+        回归 PostgreSQL：psycopg 方言的 ``_dialect_specific_select_one`` 是
+        ``";"``（SQLAlchemy 内部给 DBAPI 层 ``do_ping()`` 用的探活字符串，
+        见 ``engine/default.py``），并非可执行的完整 SELECT。此前直接把它交给
+        ``conn.execute(text(...))``，psycopg 报
+        “This result object does not return rows”，导致连接测试**误报失败**。
+        """
         driver = SQLAlchemyDriver(self.base_config)
         driver.engine = MagicMock()
-        del driver.engine.dialect._dialect_specific_select_one
+        # 模拟 psycopg 方言：ping 字符串是 ";"，但编译结果必须是完整的 SELECT
+        dialect = _dialect_stub("")
+        dialect._dialect_specific_select_one = ";"
+        driver.engine.dialect = dialect
+        mock_connection = MagicMock()
+        mock_connection.execute.return_value.fetchone.return_value = (1,)
+        driver.engine.connect.return_value.__enter__.return_value = mock_connection
+
+        self.assertTrue(driver._perform_connection_test())
+        executed = str(mock_connection.execute.call_args[0][0])
+        self.assertNotEqual(executed.strip(), ";", "不能把 DBAPI 探活字符串当查询执行")
+        self.assertIn("SELECT 1", executed)
+
+    def test_connection_test_falls_back_when_compile_fails(self) -> None:
+        """方言编译失败时回退到通用写法，不抛异常"""
+        driver = SQLAlchemyDriver(self.base_config)
+        driver.engine = MagicMock()
+        dialect = _dialect_stub("SELECT 1")
+        dialect.statement_compiler.side_effect = TypeError("不支持的方言")
+        driver.engine.dialect = dialect
         mock_connection = MagicMock()
         mock_connection.execute.return_value.fetchone.return_value = (1,)
         driver.engine.connect.return_value.__enter__.return_value = mock_connection

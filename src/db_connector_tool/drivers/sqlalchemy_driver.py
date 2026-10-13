@@ -33,7 +33,7 @@ import re
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import quote_plus
 
-from sqlalchemy import create_engine, inspect, text
+from sqlalchemy import create_engine, inspect, select, text
 from sqlalchemy.dialects.postgresql.base import PGDialect
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
@@ -238,9 +238,11 @@ class SQLAlchemyDriver:
         },
     }
 
-    # 连接测试用 ``SELECT 1``，但**必须交给方言渲染**，不能硬编码成字符串：
+    # 连接测试的语句**必须交给方言渲染**，不能硬编码成字符串：
     # GBase 8s 在 gbase/mysql 模式下不接受无 FROM 的 SELECT（真机报“发生语法错误”），
-    # 其方言会按模式补上 ``FROM DUAL`` / ``FROM sysmaster:sysdual``。
+    # 其方言会按 sqlmode 补上 ``FROM DUAL`` / ``FROM sysmaster:sysdual``。
+    # 渲染入口是 ``expression.select(1).compile(dialect=...)`` —— 它走正常编译路径，
+    # 会调用方言的 ``default_from()``。见 ``_perform_connection_test``。
     TEST_QUERY_DEFAULT = "SELECT 1"
 
     def __init__(self, config: Dict[str, Any]) -> None:
@@ -669,10 +671,16 @@ class SQLAlchemyDriver:
 
         执行简单的 SQL 查询来验证数据库连接是否正常。
 
-        查询由**方言自己渲染**（``_dialect_specific_select_one``），而不是硬编码
-        字符串——这正是 GBase 8s 等方言按 ``sqlmode`` 补伪表的入口。此前用
-        ``text("SELECT 1")`` 原样下发，绕过了该逻辑，在 gbase/mysql 模式下会因
-        缺少 FROM 而报“发生语法错误”，连接测试因此误判为失败。
+        查询语句由**方言自己渲染**，而不是硬编码字符串——这正是 GBase 8s 等
+        方言按 ``sqlmode`` 补伪表的入口。此前用 ``text("SELECT 1")`` 原样下发，
+        绕过了该逻辑，在 gbase/mysql 模式下会因缺少 FROM 而报“发生语法错误”，
+        连接测试因此误判为失败。
+
+        渲染方式是 ``expression.select(1).compile(dialect=self.engine.dialect)``，
+        **不能**改用方言的 ``_dialect_specific_select_one``：那是 SQLAlchemy 内部
+        供 DBAPI 层 ``do_ping()`` 使用的探活字符串（见 ``engine/default.py``），
+        并非可执行的完整 SELECT —— psycopg 方言对它就返回 ``";"``，
+        当成语句执行会报 “This result object does not return rows”。
 
         Returns:
             bool: 连接测试是否成功
@@ -681,12 +689,11 @@ class SQLAlchemyDriver:
             logger.warning("连接测试失败: 数据库引擎未初始化")
             return False
 
-        # 方言未提供时回退到通用写法（自定义方言可能未实现该属性）
-        test_query = getattr(
-            self.engine.dialect,
-            "_dialect_specific_select_one",
-            self.TEST_QUERY_DEFAULT,
-        )
+        # 方言未提供编译器时回退到通用写法（自定义方言可能编译失败）
+        try:
+            test_query = str(select(1).compile(dialect=self.engine.dialect))
+        except Exception:  # pylint: disable=broad-except
+            test_query = self.TEST_QUERY_DEFAULT
 
         with self.engine.connect() as conn:
             result = conn.execute(text(test_query))
