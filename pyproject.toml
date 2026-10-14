@@ -30,7 +30,6 @@ dependencies = [
   "sqlalchemy>=2.0.0",
   "cryptography>=46.0.0",
   "tomli-w>=1.0.0",
-  "sqlparse>=0.5.0",
 ]
 
 [project.optional-dependencies]
@@ -113,7 +112,6 @@ platforms = ["win-64", "linux-64", "osx-64"]
 python = ">=3.14.3,<3.15"
 sqlalchemy = ">=2.0.47,<3"
 tomli-w = ">=1.2.0,<2"
-sqlparse = ">=0.5.5,<0.6"
 keyring = ">=25.7.0,<26"
 oracledb = ">=3.4.2,<4"
 psycopg = ">=3.3.3,<4"

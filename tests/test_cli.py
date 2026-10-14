@@ -389,7 +389,7 @@ class TestSqlFileExecution(CLITestCase):
         path.write_text("CREATE TABLE t (id INT);\nINSERT INTO t VALUES (1);\n", encoding="utf-8")
         statements = self.cli._parse_sql_file(str(path))  # pylint: disable=protected-access
         self.assertEqual(len(statements), 2)
-        self.assertTrue(statements[0].upper().startswith("CREATE TABLE"))
+        self.assertTrue(statements[0].text.upper().startswith("CREATE TABLE"))
 
     def test_parse_sql_file_gbk_fallback(self) -> None:
         """非 UTF-8 文件回退到 GBK，且不会被 UTF-16 误解码成乱码"""
@@ -397,7 +397,7 @@ class TestSqlFileExecution(CLITestCase):
         path.write_bytes("SELECT * FROM 用户表".encode("gbk"))
         statements = self.cli._parse_sql_file(str(path))  # pylint: disable=protected-access
         self.assertEqual(len(statements), 1)
-        self.assertIn("用户表", statements[0])
+        self.assertIn("用户表", statements[0].text)
 
     def test_parse_sql_file_utf8_bom(self) -> None:
         """带 UTF-8 BOM 的文件按 BOM 解码"""
@@ -405,7 +405,7 @@ class TestSqlFileExecution(CLITestCase):
         path.write_bytes("SELECT * FROM 订单".encode("utf-8-sig"))
         statements = self.cli._parse_sql_file(str(path))  # pylint: disable=protected-access
         self.assertEqual(len(statements), 1)
-        self.assertIn("订单", statements[0])
+        self.assertIn("订单", statements[0].text)
 
     def test_detect_encodings(self) -> None:
         """编码探测：BOM 优先，单字节文件不按 UTF-16 解码"""

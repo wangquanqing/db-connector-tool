@@ -20,7 +20,6 @@ import getpass
 import sys
 from typing import Any, Dict, List, Optional, Tuple, Union
 
-import sqlparse
 
 from .__about__ import __version__
 from .core.connections import DatabaseManager
@@ -30,6 +29,7 @@ from .core.exceptions import (
     DBConnectorError,
     FileSystemError,
 )
+from .core.sql_splitter import SplitStatement, split_sql
 from .drivers.sqlalchemy_driver import BASIC_PARAMS
 from .result_render import ResultRenderMixin
 from .utils.logging_utils import get_logger, setup_logging
@@ -440,18 +440,26 @@ class DBConnectorCLI(ResultRenderMixin):
             SystemExit: 初始化失败或遇错且不继续时退出
         """
         try:
-            statements = self._parse_sql_file(args.file_path)
+            statements = self._parse_sql_file(
+                args.file_path, dialect=self._dialect_of(args.connection)
+            )
             if not statements:
                 print("ℹ️  SQL文件中没有有效的SQL语句")
                 return
+            incomplete = [s for s in statements if not s.is_complete]
+            if incomplete:
+                print(
+                    f"⚠️  有 {len(incomplete)} 条语句似乎不完整"
+                    f"（字符串/注释或过程体未闭合），首条在第 {incomplete[0].line} 行"
+                )
             success = 0
             failed = 0
             for idx, statement in enumerate(statements, 1):
-                if not statement.strip():
+                if not statement.text.strip():
                     continue
                 print(f"执行语句 {idx}/{len(statements)}:", end=" ")
                 ok = self._run_single_sql(
-                    args.connection, statement, show_truncated=True
+                    args.connection, statement.text, show_truncated=True
                 )
                 if ok:
                     success += 1
@@ -469,17 +477,52 @@ class DBConnectorCLI(ResultRenderMixin):
             print(f"❌ 执行SQL文件失败: {error}")
             sys.exit(1)
 
-    def _parse_sql_file(self, file_path: str) -> List[str]:
-        """解析SQL文件（自动识别编码）
+    def _dialect_of(self, connection_name: str) -> Optional[str]:
+        """取连接对应的方言名，供 SQL 切分器选择特征
+
+        取不到配置时返回 ``None``（切分器会退到保守通用档），
+        不影响脚本执行。
+
+        Args:
+            connection_name: 连接名称
+
+        Returns:
+            Optional[str]: 方言名（如 ``gbase8s`` / ``postgresql``）；未知返回 ``None``
+
+        Example:
+            >>> cli._dialect_of("db_gb")          # doctest: +SKIP
+            'gbase8s'
+        """
+        try:
+            db_manager = self._ensure_db_manager()
+            config = db_manager.config_manager.get_config(connection_name)
+        except Exception as error:  # pylint: disable=broad-except
+            # 配置读不到不应阻断执行：切分器有保守默认档
+            logger.debug("获取连接方言失败，使用通用切分档: %s", error)
+            return None
+        if not isinstance(config, dict):
+            return None
+        return config.get("type")
+
+    def _parse_sql_file(
+        self, file_path: str, dialect: Optional[str] = None
+    ) -> List[SplitStatement]:
+        """解析SQL文件（自动识别编码 + 方言感知切分）
 
         编码判定顺序见 :meth:`_detect_encodings`：带 BOM 时以 BOM 为准，
         否则按 UTF-8 → GBK → CP1252 → Latin-1 依次尝试。
 
+        切分交给 :func:`db_connector_tool.core.sql_splitter.split_sql`：
+        它理解字符串/注释/引用体与**过程体边界**，因此 GBase SPL、
+        MySQL ``BEGIN...END``、SQL Server ``GO`` 等都能正确切分
+        （原先用的 sqlparse 会把过程体切碎）。
+
         Args:
             file_path: SQL文件路径
+            dialect: 方言名；``None`` 时用保守通用档
 
         Returns:
-            List[str]: 解析后的语句列表，失败返回空列表
+            List[SplitStatement]: 语句列表，失败返回空列表
 
         Raises:
             FileNotFoundError: 文件不存在
@@ -493,10 +536,14 @@ class DBConnectorCLI(ResultRenderMixin):
             except UnicodeDecodeError as error:
                 logger.debug("编码 %s 解析失败: %s", encoding, error)
                 continue
-            parsed = sqlparse.parse(sql_content)
-            statements = [str(stmt).strip() for stmt in parsed if str(stmt).strip()]
+            statements = split_sql(sql_content, dialect)
             if statements:
-                logger.debug("成功使用 %s 编码解析SQL文件", encoding)
+                logger.debug(
+                    "成功使用 %s 编码解析SQL文件（方言=%s，%d 条语句）",
+                    encoding,
+                    dialect or "generic",
+                    len(statements),
+                )
                 return statements
         logger.warning("所有编码尝试均失败，文件: %s", file_path)
         return []
