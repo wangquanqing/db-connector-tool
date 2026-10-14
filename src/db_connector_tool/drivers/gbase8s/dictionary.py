@@ -143,10 +143,12 @@ COLUMN_DEFAULTS_QUERY = (
     "WHERE t.tabname = ? AND t.owner = ?"
 )
 
-# 查询当前会话隔离级别（部分版本/模式不支持该 DBINFO 用法）
-ISOLATION_LEVEL_QUERY = (
-    "SELECT DBINFO('session', 'isolation') FROM systables WHERE tabid = 1"
-)
+# 注：曾在此定义 ``ISOLATION_LEVEL_QUERY``，用
+# ``SELECT DBINFO('session', 'isolation') FROM systables WHERE tabid = 1``
+# 读取会话隔离级别。真机（12.10.FC4G1TL）实测该 DBINFO 变元**不存在**，
+# 每次都报「未知的 dbinfo (session) 的第一个变元」。
+# 现改走 JDBC 标准 API ``getTransactionIsolation()``，见 base.py 的
+# ``JDBC_ISOLATION_CONSTANTS`` 说明；该查询已删除。
 
 
 def get_index_part_columns(row: Any) -> List[int]:

@@ -1019,12 +1019,32 @@ class TestDialectBehaviour(unittest.TestCase):
         connection.cursor.assert_not_called()
 
     def test_set_isolation_level_transaction(self) -> None:
-        """普通隔离级别映射为 SET ISOLATION TO 语句"""
+        """普通隔离级别映射为 JDBC setTransactionIsolation
+
+        不用 ``SET ISOLATION TO ...`` 语句：真机实测它虽然行为上生效，
+        但不会被 ``getTransactionIsolation()`` 反映，导致 set/get 不自洽。
+        """
         connection = MagicMock()
         self.dialect.set_isolation_level(connection, "REPEATABLE READ")
         connection.jconn.setAutoCommit.assert_called_once_with(False)
-        statement = connection.cursor.return_value.execute.call_args[0][0]
-        self.assertEqual(statement, "SET ISOLATION TO REPEATABLE READ")
+        connection.jconn.setTransactionIsolation.assert_called_once_with(4)
+        connection.cursor.assert_not_called()
+
+    def test_set_isolation_level_all_levels(self) -> None:
+        """四个级别映射到正确的 JDBC 常量（java.sql.Connection）"""
+        expected = {
+            "READ UNCOMMITTED": 1,
+            "READ COMMITTED": 2,
+            "REPEATABLE READ": 4,
+            "SERIALIZABLE": 8,
+        }
+        for level, constant in expected.items():
+            with self.subTest(level=level):
+                connection = MagicMock()
+                self.dialect.set_isolation_level(connection, level)
+                connection.jconn.setTransactionIsolation.assert_called_once_with(
+                    constant
+                )
 
     def test_set_isolation_level_invalid_raises_argument_error(self) -> None:
         """非白名单隔离级别抛出 ArgumentError 并提示可选值"""
@@ -1037,16 +1057,61 @@ class TestDialectBehaviour(unittest.TestCase):
             self.assertIn(level, str(ctx.exception))
 
     def test_get_isolation_level(self) -> None:
-        """会话隔离级别由 DBINFO 结果映射"""
+        """会话隔离级别由 JDBC getTransactionIsolation 读取"""
         connection = MagicMock()
-        connection.cursor.return_value.fetchone.return_value = ("COMMITTED READ",)
+        connection.jconn.getTransactionIsolation.return_value = 2
         self.assertEqual(self.dialect.get_isolation_level(connection), "READ COMMITTED")
+        # 不再查数据字典（DBINFO 变元在 12.10 上不存在）
+        connection.cursor.assert_not_called()
+
+    def test_get_isolation_level_all_constants(self) -> None:
+        """各 JDBC 常量映射到 SQLAlchemy 级别名"""
+        expected = {
+            1: "READ UNCOMMITTED",
+            2: "READ COMMITTED",
+            4: "REPEATABLE READ",
+            8: "SERIALIZABLE",
+        }
+        for constant, level in expected.items():
+            with self.subTest(constant=constant):
+                connection = MagicMock()
+                connection.jconn.getTransactionIsolation.return_value = constant
+                self.assertEqual(self.dialect.get_isolation_level(connection), level)
 
     def test_get_isolation_level_fallback(self) -> None:
-        """查询失败时回退为 READ COMMITTED"""
+        """读取失败时回退为 READ COMMITTED"""
         connection = MagicMock()
-        connection.cursor.return_value.execute.side_effect = RuntimeError("boom")
+        connection.jconn.getTransactionIsolation.side_effect = RuntimeError("boom")
         self.assertEqual(self.dialect.get_isolation_level(connection), "READ COMMITTED")
+
+    def test_get_isolation_level_unknown_constant_falls_back(self) -> None:
+        """未知常量（如 TRANSACTION_NONE=0）回退为 READ COMMITTED"""
+        connection = MagicMock()
+        connection.jconn.getTransactionIsolation.return_value = 0
+        self.assertEqual(self.dialect.get_isolation_level(connection), "READ COMMITTED")
+
+    def test_set_then_get_is_consistent(self) -> None:
+        """set 什么就该 get 到什么（读写自洽，这是本次修复的核心）"""
+        for level, constant in (
+            ("READ UNCOMMITTED", 1),
+            ("READ COMMITTED", 2),
+            ("REPEATABLE READ", 4),
+            ("SERIALIZABLE", 8),
+        ):
+            with self.subTest(level=level):
+                connection = MagicMock()
+                # 模拟真实 JDBC 行为：设置后 getter 反映设置值
+                state = {"value": 2}
+
+                def setter(value, _state=state):
+                    _state["value"] = value
+
+                connection.jconn.setTransactionIsolation.side_effect = setter
+                connection.jconn.getTransactionIsolation.side_effect = (
+                    lambda _state=state: _state["value"]
+                )
+                self.dialect.set_isolation_level(connection, level)
+                self.assertEqual(self.dialect.get_isolation_level(connection), level)
 
     def test_on_connect_disables_autocommit(self) -> None:
         """连接建立后关闭 JDBC 自动提交"""

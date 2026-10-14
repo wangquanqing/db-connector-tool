@@ -716,16 +716,29 @@ class _GBase8sIndexReflection:
         return indexes
 
 
-# DBINFO('session','isolation') 的可能返回值 -> SQLAlchemy 隔离级别名
-_ISOLATION_CODES: Dict[str, str] = {
-    "0": _READ_UNCOMMITTED,
-    "1": _READ_COMMITTED,
-    "2": _READ_COMMITTED,
-    "3": _REPEATABLE_READ,
-    "DIRTY READ": _READ_UNCOMMITTED,
-    "COMMITTED READ": _READ_COMMITTED,
-    "CURSOR STABILITY": _READ_COMMITTED,
-    _REPEATABLE_READ: _REPEATABLE_READ,
+# JDBC 标准常量（java.sql.Connection）与本项目隔离级别名的双向映射。
+#
+# 为什么走 JDBC API 而不是 SQL（真机 12.10.FC4G1TL 实测）：
+#
+# 1. ``DBINFO('session','isolation')`` 在该版本上**不存在**，报「未知的 dbinfo
+#    (session) 的第一个变元」—— 原先的读取方式每次连接都抛异常；
+# 2. ``SET ISOLATION TO ...`` 语句虽然**行为上**确实生效（实测 RR 下会持共享锁、
+#    阻塞其他连接的写入），但它**不会**被 ``getTransactionIsolation()`` 反映，
+#    于是 set 完再 get 会读到旧值，读写不自洽；
+# 3. JDBC 的 getter/setter 在 oracle / gbase / mysql 三种 sqlmode 下实测均可用，
+#    且互相自洽（set 什么就 get 到什么，行为判定也确认真正生效）。
+#
+# 注：``CURSOR STABILITY`` 在 GBase 中等价于读已提交，故不单列（SQLAlchemy 的
+# 级别集合里也没有该名字，见 ISOLATION_LEVELS）。
+JDBC_ISOLATION_CONSTANTS: Dict[str, int] = {
+    _READ_UNCOMMITTED: 1,  # java.sql.Connection.TRANSACTION_READ_UNCOMMITTED
+    _READ_COMMITTED: 2,  # TRANSACTION_READ_COMMITTED
+    _REPEATABLE_READ: 4,  # TRANSACTION_REPEATABLE_READ
+    "SERIALIZABLE": 8,  # TRANSACTION_SERIALIZABLE
+}
+
+JDBC_ISOLATION_NAMES: Dict[int, str] = {
+    value: key for key, value in JDBC_ISOLATION_CONSTANTS.items()
 }
 
 
@@ -790,7 +803,20 @@ class GBase8sDialect(  # type: ignore[override]
         return ["AUTOCOMMIT"] + list(ISOLATION_LEVELS)
 
     def set_isolation_level(self, dbapi_connection: Any, level: str) -> None:
-        """设置会话隔离级别，``AUTOCOMMIT`` 通过 JDBC 自动提交开关实现"""
+        """设置会话隔离级别，``AUTOCOMMIT`` 通过 JDBC 自动提交开关实现
+
+        普通级别走 **JDBC 标准 API** ``setTransactionIsolation``，而不是
+        ``SET ISOLATION TO ...`` 语句 —— 两者真机实测都能改变会话行为，但
+        ``SET ISOLATION`` **不会**被 ``getTransactionIsolation()`` 反映，
+        导致 set 之后 get 读回旧值（读写不自洽）。用 JDBC API 则两侧一致。
+
+        Args:
+            dbapi_connection: jaydebeapi 连接（需带 ``jconn``）
+            level: 隔离级别名；取值须在 :data:`ISOLATION_LEVELS` 或 ``AUTOCOMMIT`` 中
+
+        Raises:
+            exc.ArgumentError: 级别名不在支持范围内时
+        """
         normalized = level.upper()
         valid_levels = {"AUTOCOMMIT"} | set(ISOLATION_LEVELS)
         if normalized not in valid_levels:
@@ -802,6 +828,12 @@ class GBase8sDialect(  # type: ignore[override]
             dbapi_connection.jconn.setAutoCommit(True)
             return
         dbapi_connection.jconn.setAutoCommit(False)
+        jdbc_constant = JDBC_ISOLATION_CONSTANTS.get(normalized)
+        if jdbc_constant is not None:
+            dbapi_connection.jconn.setTransactionIsolation(jdbc_constant)
+            return
+        # 极少数未映射到 JDBC 常量的级别：退回 SQL（SERIALIZABLE 已覆盖，
+        # 此处仅为防御性兜底，保持行为明确而非静默忽略）
         statement = f"SET ISOLATION TO {ISOLATION_LEVELS[normalized]}"
         cursor = dbapi_connection.cursor()
         try:
@@ -810,16 +842,32 @@ class GBase8sDialect(  # type: ignore[override]
             cursor.close()
 
     def get_isolation_level(self, dbapi_connection: Any) -> str:  # type: ignore[override]
-        """返回当前会话隔离级别；部分版本/模式不支持查询时回退为 READ COMMITTED"""
+        """返回当前会话隔离级别
+
+        走 **JDBC 标准 API** ``getTransactionIsolation()``，不查数据字典：
+
+        - GBase 8s 的 ``DBINFO('session','isolation')`` 在
+          ``12.10.FC4G1TL`` 上**不存在**（实测报「未知的 dbinfo (session) 的
+          第一个变元」），此前的实现因此每次连接都抛异常并回退；
+        - JDBC getter 在 oracle / gbase / mysql 三种 sqlmode 下均可用，
+          取值与 :meth:`set_isolation_level` 自洽。
+
+        Args:
+            dbapi_connection: jaydebeapi 连接（需带 ``jconn``）
+
+        Returns:
+            str: SQLAlchemy 风格的隔离级别名；无法读取时回退 ``READ COMMITTED``
+        """
         try:
-            cursor = dbapi_connection.cursor()
-            try:
-                cursor.execute(dictionary.ISOLATION_LEVEL_QUERY)
-                row = cursor.fetchone()
-            finally:
-                cursor.close()
+            constant = dbapi_connection.jconn.getTransactionIsolation()
         except Exception as error:  # pylint: disable=broad-except
-            logger.debug("查询会话隔离级别失败，回退为 READ COMMITTED: %s", error)
+            logger.debug("读取 JDBC 事务隔离级别失败，回退为 READ COMMITTED: %s", error)
             return _READ_COMMITTED
-        value = str(row[0]).strip().upper() if row else ""
-        return _ISOLATION_CODES.get(value, _READ_COMMITTED)
+
+        # JDBC 的 TRANSACTION_NONE(0) 表示不支持事务；连接池会在 AUTOCOMMIT
+        # 之外再经 set_isolation_level 显式设置，这里按只读语义回退为默认值。
+        level = JDBC_ISOLATION_NAMES.get(constant)
+        if level is None:
+            logger.debug("未知的 JDBC 事务隔离级别取值 %r，回退为 READ COMMITTED", constant)
+            return _READ_COMMITTED
+        return level
