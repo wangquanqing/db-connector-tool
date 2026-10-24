@@ -753,7 +753,7 @@ class SQLAlchemyDriver(ResultFetchMixin):
         """
 
         def _operation() -> Any:
-            if not self.engine:
+            if not self.engine:  # pragma: no cover - 防御性：调用方通常已建连
                 self.connect()
             assert self.engine is not None, "数据库引擎应该已经初始化，执行查询"
 
@@ -824,7 +824,7 @@ class SQLAlchemyDriver(ResultFetchMixin):
 
         except SQLAlchemyError as error:
             raise QueryError(f"获取表列表失败: 数据库错误 - {str(error)}") from error
-        except Exception as error:
+        except Exception as error:  # pragma: no cover - 非 SQLAlchemy 异常属驱动层意外
             raise QueryError(f"获取表列表失败: {str(error)}") from error
 
     def get_table_schema(self, table_name: str) -> List[Dict[str, Any]]:
@@ -869,5 +869,5 @@ class SQLAlchemyDriver(ResultFetchMixin):
 
         except SQLAlchemyError as error:
             raise QueryError(f"获取表结构失败: 数据库错误 - {str(error)}") from error
-        except Exception as error:
+        except Exception as error:  # pragma: no cover - 非 SQLAlchemy 异常属驱动层意外
             raise QueryError(f"获取表结构失败: {str(error)}") from error

@@ -15,6 +15,10 @@
    - [LogManager](#logmanager)
 3. [异常处理](#异常处理)
 4. [工具函数](#工具函数)
+   - [SQL 切分器（方言感知）](#sql-切分器方言感知)
+   - [查询结果（保真）](#查询结果保真)
+   - [路径工具](#路径工具)
+   - [日志工具](#日志工具)
 5. [命令行工具](#命令行工具)
 6. [最佳实践](#最佳实践)
 7. [故障排除](#故障排除)
@@ -654,6 +658,95 @@ except CryptoError as error:
 ```
 
 ## 🛠️ 工具函数
+
+### SQL 切分器（方言感知）
+
+把一段脚本切成可逐条执行的语句。**不是简单的 `split(";")`** ——
+它理解字符串、注释、引用体与**过程体边界**，因此 GBase SPL、
+MySQL `BEGIN...END`、SQL Server `GO` 都能正确切分。
+
+```python
+from db_connector_tool.core.sql_splitter import split_sql
+
+# 基础用法（不传方言 = 保守通用档）
+for stmt in split_sql("SELECT 1; SELECT 2;"):
+    print(stmt.text)        # 'SELECT 1' / 'SELECT 2'
+    print(stmt.line)        # 行号，便于报错定位
+
+# 指定方言，启用该方言的边界识别
+sql = """
+CREATE PROCEDURE p()
+    DEFINE i INT;
+    LET i = 1;
+END PROCEDURE;
+SELECT FIRST 10 * FROM t;
+"""
+stmts = split_sql(sql, "gbase8s")
+assert len(stmts) == 2        # 过程体整体一条，不会按内部分号切碎
+```
+
+支持的方言（含别名）：
+
+| 方言 | 传入值 | 特有能力 |
+|---|---|---|
+| GBase 8s | `gbase8s` / `gbase` / `informix` | `END PROCEDURE` 整句终结 |
+| Oracle | `oracle` / `ora` | `q'[...]'` 引用、独占一行的 `/` 终结符 |
+| MySQL | `mysql` / `mariadb` | `#` 行注释、反斜杠转义 |
+| PostgreSQL | `postgresql` / `postgres` / `pg` | `$$..$$` / `$tag$..$tag$`、嵌套块注释 |
+| SQL Server | `sqlserver` / `mssql` / `tsql` | `[...]` 标识符、独占一行的 `GO` |
+| SQLite | `sqlite` / `sqlite3` | — |
+| 通用 | `None` / 未知值 | 只认标准 SQL 形态 |
+
+**设计原则：宁可少切，绝不多切。** 多切会执行半条语句（可能造成破坏），
+少切只会让数据库报语法错误。因此未闭合时会标记：
+
+```python
+stmt = split_sql("SELECT 'unclosed", None)[0]
+print(stmt.is_complete)     # False —— 脚本似乎不完整
+```
+
+> 为什么不直接用 `sqlparse` / `sqlglot`：实测 sqlparse 会把 GBase SPL 切成 5 条，
+> sqlglot 对 MySQL 过程体只切出 1 条、对 `GO` 直接报错。
+> 对比数据见仓库外 `ANALYSIS-sqlglot-evaluation.md`。
+
+### 查询结果（保真）
+
+查询结果默认按**位置**存放，避免重名列互相覆盖
+（`SELECT * FROM a JOIN b` 的常态）。
+
+```python
+from db_connector_tool import DatabaseManager
+
+db = DatabaseManager("my_app")
+result = db.execute_query_result("mysql_db", "SELECT * FROM emp JOIN dept USING (id)")
+
+# 列元数据：ordinal 是列身份，display_name 是去重后的显示名
+for col in result.columns:
+    print(col.ordinal, col.name, col.display_name, col.python_type)
+
+# 按位置取值 —— 重名列也安全
+first_row = result.rows[0]
+print(first_row[0], first_row[1])
+
+# 转字典（键为唯一显示名，不丢列）
+print(result.as_dicts())
+# [{'id': 1, 'name': '张三', 'id (1)': 10, 'name (1)': '研发部'}]
+```
+
+流式取数（大表不爆内存）：
+
+```python
+for chunk in db.execute_query_stream("mysql_db", "SELECT * FROM big_table",
+                                     fetch_size=1000):
+    for row in chunk.rows:
+        process(row)
+    if chunk.is_last:
+        break
+```
+
+> **为什么不能直接 `dict(row)`**：`RowMapping` 内部按位置保真，
+> 但 `dict()` 会让同名列互相覆盖 —— 实测曾把员工姓名「张三」
+> 覆盖成部门名「研发部」。
 
 ### 路径工具
 

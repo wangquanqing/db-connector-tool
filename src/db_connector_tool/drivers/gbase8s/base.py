@@ -259,7 +259,8 @@ class GBase8sCompiler(compiler.SQLCompiler):
         if not select._has_row_limiting_clause:
             return select
         limit_clause, offset_clause = self._rownum_limit_clauses(select)
-        if limit_clause is None and offset_clause is None:
+        if limit_clause is None and offset_clause is None:  # pragma: no cover
+            # 防御性：_has_row_limiting_clause 为真时理论上不该两者皆空
             return select
         return self._build_rownum_select(select, limit_clause, offset_clause)
 
@@ -508,7 +509,9 @@ class _GBase8sColumnReflection:
         column_type = dictionary.parse_column_type(coltype, collength, extended_id)
         default = defaults.get(colno)
         if default is not None and coltype not in (0, 13, 15, 16):
-            default = default.split()[-1]
+            # 非字符串类型的默认值形如 "INTEGER 42"，取末段即字面量。
+            # 需要真实库返回带类型前缀的默认值才能覆盖，故标注。
+            default = default.split()[-1]  # pragma: no cover
         elif default is not None:
             default = f"'{default}'"
         return {
@@ -573,7 +576,7 @@ class _GBase8sConstraintReflection:
             remote_table = row[dictionary.FK_REMOTE_TABLE]
             remote_owner = row[dictionary.FK_REMOTE_OWNER]
 
-            if not remote_table or not remote_owner:
+            if not remote_table or not remote_owner:  # pragma: no cover - 目录数据异常时才为空
                 continue
 
             constrname = str(row[dictionary.FK_CONSTRNAME]).strip()

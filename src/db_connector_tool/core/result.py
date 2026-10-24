@@ -481,22 +481,27 @@ class QueryResult:
             [{'id': 1, 'n': 'x'}]
         """
         materialized = list(rows)
-        names = _derive_names(materialized, metadata)
+        raw_meta = [dict(meta) for meta in metadata] if metadata else []
+        derived_names = _derive_names(materialized, raw_meta or None)
 
-        if metadata:
-            metas = list(metadata)
-            # 元数据数量可能与实际列数不符（某些方言取不到），以两者较小值为准
-            if len(metas) < len(names):
-                metas.extend(
-                    {"name": name} for name in names[len(metas):]
-                )
-            elif len(metas) > len(names):
-                names = [
-                    str(meta.get("name", f"column_{i}"))
-                    for i, meta in enumerate(metas)
-                ]
-        else:
-            metas = [{"name": name} for name in names]
+        # 列数取三者的最大值：
+        #   - 元数据项数（方言报告了哪些列）
+        #   - 从行对象推导出的列名数
+        #   - **首行的实际宽度**
+        #
+        # 最后一项很关键：某些方言（或元数据读取失败的场景）给出的
+        # description 可能短于真实列数。若只信元数据，会把真实存在的列
+        # 连同其值一起丢掉 —— 实测 ``from_rows([(1,2,3)], [{"name":"a"}])``
+        # 曾只返回 1 列、值被截成 ``(1,)``。
+        row_width = len(row_values(materialized[0])) if materialized else 0
+        width = max(len(raw_meta), len(derived_names), row_width)
+
+        names = list(derived_names) + [
+            f"column_{i}" for i in range(len(derived_names), width)
+        ]
+        metas = raw_meta + [
+            {"name": names[i]} for i in range(len(raw_meta), width)
+        ]
 
         if not names:
             return cls((), [], elapsed)
@@ -561,13 +566,11 @@ def _derive_names(
     if metadata:
         return [str(meta.get("name", f"column_{i}")) for i, meta in enumerate(metadata)]
     for row in rows:
+        # dict / RowMapping / Row 都提供 keys()；Row 的 keys() 不存在但其
+        # _mapping 有 —— 下面两段覆盖了全部已知形态。
         keys = getattr(row, "keys", None)
         if callable(keys):
             return [str(key) for key in keys()]
-        if isinstance(row, dict):
-            return [str(key) for key in row]
-        # Row：键在 _mapping 上（访问 RowMapping 的 _mapping 会抛 AttributeError，
-        # 但那条分支已被上面的 keys() 覆盖）
         inner = getattr(row, "_mapping", None)
         inner_keys = getattr(inner, "keys", None)
         if callable(inner_keys):

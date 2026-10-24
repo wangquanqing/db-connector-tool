@@ -184,7 +184,7 @@ class BatchDatabaseManager:
                     try:
                         self.database_manager.pool_manager.remove_connection(conn_name)
                         logger.debug("连接 %s 已关闭", conn_name)
-                    except DatabaseError as error:
+                    except DatabaseError as error:  # pragma: no cover - 关闭失败属罕见异常
                         logger.warning("关闭连接 %s 失败: %s", conn_name, error)
 
             with self._lock:

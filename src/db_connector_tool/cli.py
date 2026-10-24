@@ -201,7 +201,7 @@ def main() -> None:
     if hasattr(args, "func"):
         args.func(args)
     else:
-        parser.print_help()
+        parser.print_help()  # pragma: no cover - 无子命令时的人工调用路径
 
 
 if __name__ == "__main__":

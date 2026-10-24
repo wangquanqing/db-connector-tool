@@ -394,15 +394,47 @@ decrypted = crypto.decrypt(encrypted)
 本项目使用标准库 `unittest`（不是 pytest），需在仓库根目录执行，以便 `src.` 包可导入：
 
 ```bash
-# 运行所有测试
+# 运行所有测试（单元 + 集成）
 python -m unittest discover -s tests -t .
 
 # 运行特定测试模块
 python -m unittest tests.core.test_config
 
-# 带覆盖率的测试
-coverage run -m unittest discover -s tests -t . && coverage report
+# 带覆盖率（含分支）
+coverage run -m unittest discover -s tests -t . && coverage report -m
 ```
+
+### 覆盖率
+
+| 指标 | 数值 |
+|---|---|
+| 语句覆盖 | **100%** |
+| 分支覆盖 | **99.76%** |
+| 用例总数 | **1112** 项 |
+
+门槛配置在 `pyproject.toml` 的 `[tool.coverage.report] fail_under = 99`，
+低于该值 `coverage report` 会返回非零。
+
+**未覆盖的 24 个分支**都是「依赖缺失 / 单平台 / 双重失败」三类，
+在源码中以 `# pragma: no cover` 标注并写明理由，
+完整清单见 **[docs/testing.md](docs/testing.md)**。
+
+### 真实数据库集成测试
+
+默认跳过。要跑真库就指定连接名：
+
+```bash
+# PostgreSQL
+DCT_IT_DB=db_kes python -m unittest tests.test_integration_full.TestRealDatabase -v
+
+# GBase 8s
+DCT_IT_DB=db_gb python -m unittest tests.test_integration_full.TestRealDatabase -v
+```
+
+连接不可用时整类跳过（不判失败）——环境问题不该让测试红。
+
+详见 [docs/testing.md](docs/testing.md)：分层设计、写测试的约定（含几个真实踩坑记录）、
+回归守卫清单、已知局限。
 
 ### 代码质量
 

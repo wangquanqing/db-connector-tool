@@ -378,7 +378,8 @@ class ConfigSecurityManager:
                         original_key_info["iterations"],
                     )
                     logger.debug("已恢复原始加密密钥")
-                except (ConfigError, ValueError, TypeError) as key_restore_error:
+                except (ConfigError, ValueError, TypeError) as key_restore_error:  # pragma: no cover
+                    # 双重失败（轮换失败 + 恢复也失败）才会走到；仅记日志后继续抛原异常
                     logger.warning("恢复原始密钥失败: %s", str(key_restore_error))
             raise ConfigError(f"密钥轮换失败: {str(error)}") from error
 

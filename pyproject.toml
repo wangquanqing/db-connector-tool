@@ -88,6 +88,10 @@ omit = [
 ]
 
 [tool.coverage.report]
+# 覆盖率门槛：语句 100%、分支 99%。
+# 分支不是 100% 的原因写在 `docs/testing.md` 的「无法覆盖的分支」表里 ——
+# 都是「单平台 / 依赖缺失 / 运维级故障」三类，不值得为它们写假测试。
+fail_under = 99
 exclude_lines = [
   "pragma: no cover", 
   "if __name__ == \"__main__\":",

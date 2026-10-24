@@ -6,6 +6,15 @@
 从 ``cli_core`` 拆出来的原因：该模块本已接近 pylint 的 1000 行上限，而
 「结果怎么显示/怎么落盘」与「命令行参数怎么处理」是两件独立的事。
 
+**为什么放在 ``core/`` 而不是 ``utils/`` 或包根**：
+
+- 它依赖 :mod:`~db_connector_tool.core.result` 与
+  :mod:`~db_connector_tool.core.exceptions`，放 ``utils`` 会形成
+  ``utils -> core`` 的反向依赖（原先放包根时也只能 ``.core.xxx`` 往上够）；
+- 它不是一个横切工具，而是**表达结果模型如何呈现**的领域逻辑，
+  与 ``core/result.py`` 同属「查询结果」这一块，放在一起依赖方向最顺；
+- ``utils`` 的定位是「零业务依赖的横切工具」（日志、路径），本模块不符合。
+
 **保真的关键**：本模块**一律按位置取值**（``row_values`` / ``QueryResult.rows``），
 绝不用 ``row.get(列名)`` / ``dict(row)``。原因见
 :mod:`db_connector_tool.core.result`：列名重复时按名取值会互相覆盖，而列名重复
@@ -34,10 +43,10 @@ import sys
 from decimal import Decimal
 from typing import Any, Dict, List, Optional, Tuple, Union
 
-from .core.exceptions import ConfigError, DatabaseError, FileSystemError
-from .core.result import QueryResult, row_values
-from .utils.logging_utils import get_logger
-from .utils.path_utils import PathHelper
+from .exceptions import ConfigError, DatabaseError, FileSystemError
+from .result import QueryResult, row_values
+from ..utils.logging_utils import get_logger
+from ..utils.path_utils import PathHelper
 
 logger = get_logger(__name__)
 

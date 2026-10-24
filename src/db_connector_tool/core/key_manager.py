@@ -40,7 +40,7 @@ try:
 
     keyring_available = True  # pylint: disable=invalid-name
     keyring_module = keyring
-except ImportError:
+except ImportError:  # pragma: no cover - 仅在未安装可选依赖 keyring 时触发
     pass
 
 logger = get_logger(__name__)

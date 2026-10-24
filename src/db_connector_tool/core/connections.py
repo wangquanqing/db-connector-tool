@@ -447,7 +447,7 @@ class DatabaseManager(QueryMixin):
             "使用临时配置建立数据库连接: %s (临时连接: %s)", name, temp_connection_name
         )
 
-        def cleanup_temp_connection():
+        def cleanup_temp_connection():  # pragma: no cover - atexit 回调，进程退出时才执行
             try:
                 self.pool_manager.remove_connection(temp_connection_name)
                 logger.debug("临时连接已清理: %s", temp_connection_name)

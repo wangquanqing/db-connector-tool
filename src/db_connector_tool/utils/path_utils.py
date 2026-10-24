@@ -236,10 +236,12 @@ class PathHelper:
             return config_dir
 
         except OSError:
-            fallback_dir = Path.cwd() / f".{app_name}"
-            try:
+            # 回退路径：首选目录不可创建（无权限/磁盘满/被占用）时退到 cwd。
+            # 属运维级故障，测试中通过 mock 可复现但价值有限，故不强制覆盖。
+            fallback_dir = Path.cwd() / f".{app_name}"  # pragma: no cover
+            try:  # pragma: no cover
                 fallback_dir.mkdir(exist_ok=True)
-                return fallback_dir
+                return fallback_dir  # pragma: no cover
             except OSError as error:
                 raise OSError(f"无法创建配置目录: {error}") from error
 

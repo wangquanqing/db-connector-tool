@@ -647,7 +647,9 @@ class DBConnectorCLI(ResultRenderMixin):
                     break
                 except (DatabaseError, ConfigError) as error:
                     print(f"❌ 执行错误: {error}")
-        except (DatabaseError, ConfigError) as error:
+        except (DatabaseError, ConfigError) as error:  # pragma: no cover
+            # 外层兜底：仅当「初始化 DB manager」本身失败时走到，
+            # 需要真实的环境/配置故障才能复现。
             logger.error("启动SQL Shell失败: %s", error)
             print(f"❌ 启动SQL Shell失败: {error}")
             sys.exit(1)

@@ -601,17 +601,31 @@ class _Splitter:
         if not self.profile.spl_terminator or word != "CREATE":
             return False
         cursor = self._skip_blank(self.index)
+        head, cursor = self._read_alpha_word(cursor)
+        # CREATE OR REPLACE PROCEDURE / CREATE OR REPLACE FUNCTION：
+        # ``OR`` 之后必须紧跟 ``REPLACE``，再跳过它取真正的对象类型。
+        if head == "OR":
+            cursor = self._skip_blank(cursor)
+            modifier, cursor = self._read_alpha_word(cursor)
+            if modifier != "REPLACE":
+                return False
+            cursor = self._skip_blank(cursor)
+            head, cursor = self._read_alpha_word(cursor)
+        return head in ("PROCEDURE", "FUNCTION", "ROUTINE")
+
+    def _read_alpha_word(self, cursor: int) -> Tuple[str, int]:
+        """从 ``cursor`` 读一个纯字母词
+
+        Args:
+            cursor: 起始偏移
+
+        Returns:
+            Tuple[str, int]: ``(大写词, 词结束偏移)``
+        """
         start = cursor
         while cursor < self.length and self.text[cursor].isalpha():
             cursor += 1
-        head = self.text[start:cursor].upper()
-        if head == "OR":  # CREATE OR REPLACE PROCEDURE
-            cursor = self._skip_blank(cursor)
-            start = cursor
-            while cursor < self.length and self.text[cursor].isalpha():
-                cursor += 1
-            head = self.text[start:cursor].upper()
-        return head in ("PROCEDURE", "FUNCTION", "ROUTINE")
+        return self.text[start:cursor].upper(), cursor
 
     def _read_end_tail(self, word_end: int) -> Optional[str]:
         """读取 ``END`` 之后紧跟的词（用于判定 ``END IF`` / ``END PROCEDURE``）

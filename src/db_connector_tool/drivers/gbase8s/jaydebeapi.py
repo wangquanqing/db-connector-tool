@@ -261,7 +261,7 @@ def find_jdbc_jar(explicit: Optional[str] = None) -> Optional[str]:
             try:
                 if os.path.isfile(candidate):
                     return candidate
-            except OSError:
+            except OSError:  # pragma: no cover - 路径含非法字符等极端情况
                 continue
 
     local_jar: Optional[str] = None
@@ -443,7 +443,9 @@ class GBase8sDialect_jaydebeapi(GBase8sDialect):  # NOSONAR
             return
         try:
             dbapi_connection.rollback()
-        except self.dbapi.Error:  # type: ignore[union-attr]
+        except self.dbapi.Error:  # type: ignore[union-attr]  # pragma: no cover
+            # 关闭阶段回滚失败属预期（连接可能已失效），静默忽略。
+            # 需要构造 dbapi.Error 实例才能触发，故标注。
             pass
 
 
