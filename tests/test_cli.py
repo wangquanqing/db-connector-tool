@@ -333,7 +333,7 @@ class TestOutputHelpers(CLITestCase):
 
         # 宽度 60：只能放下第一列
         with mock.patch(
-            "src.db_connector_tool.result_render.shutil.get_terminal_size"
+            "src.db_connector_tool.core.result_render.shutil.get_terminal_size"
         ) as mock_size:
             mock_size.return_value = os.terminal_size((60, 24))
             _, output = self.capture(self.cli._show_results, rows)  # pylint: disable=protected-access
@@ -342,7 +342,7 @@ class TestOutputHelpers(CLITestCase):
 
         # 宽度 20：一列都放不下
         with mock.patch(
-            "src.db_connector_tool.result_render.shutil.get_terminal_size"
+            "src.db_connector_tool.core.result_render.shutil.get_terminal_size"
         ) as mock_size:
             mock_size.return_value = os.terminal_size((20, 24))
             _, output = self.capture(self.cli._show_results, rows)  # pylint: disable=protected-access

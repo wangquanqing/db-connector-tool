@@ -31,7 +31,7 @@ from .core.exceptions import (
 )
 from .core.sql_splitter import SplitStatement, split_sql
 from .drivers.sqlalchemy_driver import BASIC_PARAMS
-from .result_render import ResultRenderMixin
+from .core.result_render import ResultRenderMixin
 from .utils.logging_utils import get_logger, setup_logging
 
 # 注意：日志在 DBConnectorCLI 实例化时才初始化（见 __init__），
