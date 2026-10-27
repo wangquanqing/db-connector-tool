@@ -167,6 +167,33 @@ class TestSomething(IsolatedTestCase):
 SQLite 文件库在 Windows 上被连接占用时，`TemporaryDirectory` 清理会失败。
 用完记得 `engine.dispose()` 或 `close_all_connections()`。
 
+### 5.5 超时测试要用「真在算」的查询
+
+测查询超时时，**不要用 `SLEEP()` 一类函数**：
+
+| 库 | 踩的坑 |
+|---|---|
+| MySQL | `max_execution_time` **明确不覆盖** `SLEEP()`（文档写明），实测不会被打断 → 改用笛卡尔积 |
+| PostgreSQL | `pg_sleep()` 会被 `statement_timeout` 打断，可以用 |
+| SQL Server | `WAITFOR DELAY` 可以模拟，但该方言不支持查询级超时 |
+
+### 5.6 绝不要在 GBase 8s 上测「看门狗打断」
+
+实测：用另一线程对 JDBC 连接调 `invalidate()` 会让**整个进程挂死**
+（JVM 调用不可重入）。这类测试请加方言判断跳过，或放到子进程里设硬超时：
+
+```python
+proc = multiprocessing.Process(target=worker)
+proc.start()
+proc.join(timeout=25)
+if proc.is_alive():
+    proc.terminate()      # 挂死时强制清理
+    proc.join(timeout=3)
+```
+
+`drivers/timeout_control.py` 已用 `WATCHDOG_SAFE_DIALECTS` 白名单把这类方言
+挡在门外，测试只需验证「它确实被拒绝」。
+
 ---
 
 ## 6. 测试覆盖了哪些关键行为
@@ -181,6 +208,8 @@ SQLite 文件库在 Windows 上被连接占用时，`TemporaryDirectory` 清理�
 | `test_connection_test_ignores_dbapi_ping_string` | `test_sqlalchemy_driver.py` | 误用 `_dialect_specific_select_one`（psycopg 返回 `";"`），PG 连接测试误报 |
 | `test_docstring_promised_root_names` | `test_public_api.py` | docstring 承诺的导入实际导不通 |
 | `test_set_then_get_is_consistent` | `test_gbase8s.py` | GBase 隔离级别 set/get 不自洽 |
+| `test_timeout_does_not_leak_to_next_query` | `test_integration_full.py` | MySQL 的 SESSION 级超时未复位，**后续查询被莫名打断** |
+| `TestWatchdogSafety` | `test_query_timeout.py` | 在不安全方言上启动看门狗 → **进程挂死** |
 
 ---
 
@@ -192,3 +221,4 @@ SQLite 文件库在 Windows 上被连接占用时，`TemporaryDirectory` 清理�
 | 无跨平台 CI | Unix-only 分支未验证 | 建议后续在 GitHub Actions 加 Linux/macOS job |
 | 无性能/压力测试 | 大表流式取数只用小数据验证 | `execute_query_stream` 的分批逻辑有单测，但未压测 |
 | 无并发竞态测试 | 连接池的线程安全靠代码审查 | 池操作有锁，但未做多线程压力验证 |
+| GBase 8s / SQL Server 不支持查询级超时 | 这两类库无法限制单条查询的时长 | 实测受驱动限制（JDBC 不可重入 / pymssql 无语句级机制），已明确报错而非静默忽略；SQL Server 可在**连接级**配 `connect_args.timeout` |

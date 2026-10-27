@@ -50,6 +50,14 @@ class ChineseHelpFormatter(argparse.RawDescriptionHelpFormatter):
         super().start_section(heading)
 
 
+#: ``--timeout`` 的帮助文案（多个子命令共用，避免重复且便于统一修改）
+_TIMEOUT_HELP = (
+    "查询超时秒数（如 30）；不指定表示不限。"
+    "支持 PostgreSQL / MySQL / MariaDB / SQLite / Oracle；"
+    "GBase 8s 与 SQL Server 不支持查询级超时，指定时会明确报错。"
+)
+
+
 def create_argument_parser(cli_instance: "DBConnectorCLI") -> argparse.ArgumentParser:
     """创建命令行参数解析器
 
@@ -116,11 +124,17 @@ def create_argument_parser(cli_instance: "DBConnectorCLI") -> argparse.ArgumentP
     query_parser.add_argument("connection", help="连接名称")
     query_parser.add_argument("sql_content", help="SQL查询语句")
     query_parser.add_argument("-o", "--output", help="输出文件路径")
+    query_parser.add_argument(
+        "-t", "--timeout", type=float, help=_TIMEOUT_HELP
+    )
     query_parser.set_defaults(func=cli_instance.execute_query)
 
     command_parser = subparsers.add_parser("command", help="执行增删改操作")
     command_parser.add_argument("connection", help="连接名称")
     command_parser.add_argument("sql_content", help="SQL命令语句")
+    command_parser.add_argument(
+        "-t", "--timeout", type=float, help=_TIMEOUT_HELP
+    )
     command_parser.set_defaults(func=cli_instance.execute_command)
 
     file_parser = subparsers.add_parser("file", help="执行SQL文件")
@@ -130,10 +144,16 @@ def create_argument_parser(cli_instance: "DBConnectorCLI") -> argparse.ArgumentP
     file_parser.add_argument(
         "-c", "--continue-on-error", action="store_true", help="遇到错误时继续执行"
     )
+    file_parser.add_argument(
+        "-t", "--timeout", type=float, help=_TIMEOUT_HELP
+    )
     file_parser.set_defaults(func=cli_instance.execute_file)
 
     shell_parser = subparsers.add_parser("shell", help="启动交互式SQL Shell")
     shell_parser.add_argument("connection", help="连接名称")
+    shell_parser.add_argument(
+        "-t", "--timeout", type=float, help=_TIMEOUT_HELP
+    )
     shell_parser.set_defaults(func=cli_instance.interactive_shell)
 
     return parser

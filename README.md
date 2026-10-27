@@ -33,6 +33,7 @@
 ### 📊 运维特性
 
 - **配置管理**: 基于 TOML 的配置文件，支持自动备份和版本控制
+- **查询超时**: 单条查询可设时间上限，超时自动中断并抛 `DBTimeoutError`
 - **完整日志**: 多级别日志输出，支持文件轮转和格式化
 - **CLI工具**: 完整的命令行界面，支持交互式SQL Shell
 - **跨平台**: 支持 Windows、Linux、macOS，路径自动适配
@@ -241,6 +242,57 @@ upgrade_results = batch.upgrade_table_structure(
 # 清理临时配置
 batch.cleanup()
 ```
+
+
+### 查询超时与取消
+
+给单条查询加时间上限，超时立刻中断并抛 `DBTimeoutError`：
+
+```python
+from db_connector_tool import DatabaseManager, DBTimeoutError
+
+db = DatabaseManager("my_app")
+try:
+    result = db.execute_query_result(
+        "db_kes", "SELECT * FROM huge_table", timeout=30
+    )
+except DBTimeoutError as error:
+    print(f"超时 {error.timeout_seconds} 秒，操作: {error.operation}")
+```
+
+命令行：
+
+```bash
+# 30 秒还没返回就中断
+db-connector query db_kes "SELECT * FROM huge_table" --timeout 30
+
+# 脚本执行时对每条语句生效
+db-connector file db_kes ./big_script.sql --timeout 60
+```
+
+**各方言的支持情况**（均为实测）：
+
+| 方言 | 机制 | 查询级超时 |
+|---|---|---|
+| PostgreSQL | `SET LOCAL statement_timeout` | ✅ |
+| MySQL | `SET SESSION max_execution_time` | ✅（用完自动复位） |
+| MariaDB | `SET SESSION max_statement_time` | ✅ |
+| SQLite | `set_progress_handler` | ✅ |
+| Oracle | `connection.call_timeout` | ✅ |
+| GBase 8s | JDBC 不支持安全中断 | ❌ 明确报错 |
+| SQL Server | 无语句级机制 | ❌ 明确报错 |
+
+不支持的方言会抛 `TimeoutNotSupportedError` 并说明原因 ——
+**不会静默忽略，也不会冒挂死的风险**。
+
+> **为什么 GBase 8s / SQL Server 不支持**：实测 GBase 的 JDBC 驱动在
+> 另一线程调 `invalidate()` 会让整个进程挂死（JVM 调用不可重入）；
+> SQL Server 的 pymssql 只有连接级 `timeout`，没有语句级机制。
+> 这两点都是驱动本身的限制，不是实现偷懒。
+> SQL Server 可在连接配置里设 `connect_args={"timeout": N}`。
+
+> **MySQL 的已知限制**：`max_execution_time` 不覆盖 `SLEEP()` 一类函数
+> （MySQL 文档明示），这类语句无法被超时打断。
 
 ## 🔧 命令行工具
 

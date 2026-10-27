@@ -22,12 +22,13 @@ Example:
     ['a', 'a (1)']
 """
 
+from contextlib import contextmanager
 from typing import Any, Callable, Dict, Iterator, List, Optional, Sequence, Tuple
 
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
-from ..core.exceptions import QueryError
+from ..core.exceptions import DBTimeoutError, QueryError
 from ..core.result import (
     ColumnInfo,
     QueryChunk,
@@ -36,6 +37,14 @@ from ..core.result import (
     row_values,
 )
 from ..utils.logging_utils import get_logger
+from .timeout_control import (
+    apply_server_timeout,
+    is_timeout_error,
+    normalize_timeout,
+    restore_server_timeout,
+    to_timeout_error,
+    watchdog,
+)
 
 logger = get_logger(__name__)
 
@@ -147,6 +156,9 @@ def run_sql(operation: Callable[[], Any]) -> Any:
     - ``ValueError``      → 「验证错误」
     - 其它                → 原样带出（保留驱动细节）
 
+    ``DBTimeoutError`` 与 ``QueryError`` **原样透传**：它们已带明确语义
+    （超时 / 查询失败），再包一层会丢失 ``timeout_seconds`` 等字段。
+
     Args:
         operation: 无参可调用对象，内部完成建连与执行
 
@@ -155,6 +167,7 @@ def run_sql(operation: Callable[[], Any]) -> Any:
 
     Raises:
         QueryError: 执行失败时
+        DBTimeoutError: 查询超时时（原样透传）
 
     Example:
         >>> run_sql(lambda: "ok")
@@ -162,6 +175,9 @@ def run_sql(operation: Callable[[], Any]) -> Any:
     """
     try:
         return operation()
+    except (QueryError, DBTimeoutError):
+        # 已是有意义的异常，保留其类型与字段，不要二次包裹
+        raise
     except SQLAlchemyError as error:
         raise QueryError(f"SQL执行失败: 数据库错误 - {str(error)}") from error
     except ValueError as error:
@@ -259,9 +275,65 @@ class ResultFetchMixin:
 
         return _execute
 
+    @contextmanager
+    def _with_timeout(
+        self, connection: Any, timeout: Optional[float], operation: str = "query"
+    ) -> Iterator[None]:
+        """给一段执行过程套上超时保护（双轨：服务端优先 + 看门狗兜底）
+
+        - **服务端超时**：让数据库自己杀掉语句，客户端一定能返回；
+          会话级设置会在结束后复位，避免泄漏到后续查询。
+        - **客户端看门狗**：仅服务端无机制、**且该方言实测安全**时启用。
+        - **两者都不可用**：明确抛 ``ValueError``，绝不静默忽略、更不冒挂死风险。
+
+        超时异常统一转成 :class:`~db_connector_tool.core.exceptions.DBTimeoutError`。
+
+        Args:
+            connection: SQLAlchemy 连接
+            timeout: 超时秒数；``None``/``<=0`` 表示不限制
+            operation: 操作名，写进异常便于排查
+
+        Yields:
+            None
+
+        Raises:
+            DBTimeoutError: 查询超时
+            ValueError: 该方言完全不支持查询级超时
+        """
+        seconds = normalize_timeout(timeout)
+        if seconds is None:
+            yield
+            return
+
+        server_mode = apply_server_timeout(connection, seconds)
+        try:
+            if server_mode is not None:
+                # 服务端负责超时：不加看门狗，避免"作废连接"这种重手段
+                try:
+                    yield
+                except Exception as error:
+                    if is_timeout_error(error):
+                        raise to_timeout_error(error, seconds, operation) from error
+                    raise
+            else:
+                # 服务端无机制：看门狗兜底（watchdog 内部会拒绝不安全方言）
+                with watchdog(connection, seconds) as state:
+                    try:
+                        yield
+                    except Exception as error:
+                        # 看门狗已动手 → 一定是超时；否则再看异常文案
+                        if state.timed_out or is_timeout_error(error):
+                            raise to_timeout_error(error, seconds, operation) from error
+                        raise
+        finally:
+            restore_server_timeout(connection, server_mode)
+
     # ------------------------------------------------------------ 查询
     def execute_query_result(
-        self, query: str, parameters: Dict[str, Any] | None = None
+        self,
+        query: str,
+        parameters: Dict[str, Any] | None = None,
+        timeout: Optional[float] = None,
     ) -> QueryResult:
         """执行查询并返回**保真**的结构化结果（推荐入口）
 
@@ -283,12 +355,15 @@ class ResultFetchMixin:
         Args:
             query: SQL查询语句
             parameters: 查询参数字典，用于参数化查询
+            timeout: 超时秒数；``None``/``<=0`` 表示不限制
+                （见 :mod:`db_connector_tool.drivers.timeout_control`）
 
         Returns:
             QueryResult: 列元数据 + 按位置的行数据
 
         Raises:
             QueryError: 当查询执行失败时
+            DBTimeoutError: 超过 ``timeout`` 秒仍未返回
 
         Example:
             >>> result = driver.execute_query_result("SELECT 1 AS a, 2 AS a")
@@ -305,12 +380,13 @@ class ResultFetchMixin:
 
         def _operation() -> QueryResult:
             with self.engine.connect() as connection:
-                sql_result = execute(connection)
-                # 列元数据必须先读（取完最后一行后 cursor.description 失效）
-                metadata = self._read_column_metadata(sql_result.cursor)
-                # 用 Row（非 mappings）取行：按位置保真
-                raw_rows = sql_result.all()
-                return QueryResult.from_rows(raw_rows, metadata)
+                with self._with_timeout(connection, timeout, "query"):
+                    sql_result = execute(connection)
+                    # 列元数据必须先读（取完最后一行后 cursor.description 失效）
+                    metadata = self._read_column_metadata(sql_result.cursor)
+                    # 用 Row（非 mappings）取行：按位置保真
+                    raw_rows = sql_result.all()
+                    return QueryResult.from_rows(raw_rows, metadata)
 
         return run_sql(_operation)
 
@@ -319,6 +395,7 @@ class ResultFetchMixin:
         query: str,
         parameters: Dict[str, Any] | None = None,
         fetch_size: int = 1000,
+        timeout: Optional[float] = None,
     ) -> Iterator[QueryChunk]:
         """流式执行查询，按批返回结果（大表不爆内存）
 
@@ -335,6 +412,7 @@ class ResultFetchMixin:
             query: SQL查询语句
             parameters: 查询参数字典
             fetch_size: 每批行数（须为正整数）
+            timeout: 超时秒数；``None``/``<=0`` 表示不限制
 
         Yields:
             QueryChunk: 每批数据；末批 ``is_last=True``
@@ -342,6 +420,7 @@ class ResultFetchMixin:
         Raises:
             QueryError: 当查询执行失败时
             ValueError: ``fetch_size`` 非正数时
+            DBTimeoutError: 超过 ``timeout`` 秒仍未返回
 
         Example:
             >>> for chunk in driver.execute_query_stream("SELECT * FROM big_table"):
@@ -356,36 +435,40 @@ class ResultFetchMixin:
 
         def _batches() -> Iterator[QueryChunk]:
             with self.engine.connect() as connection:
-                sql_result = execute(connection)
-                metadata = self._read_column_metadata(sql_result.cursor)
-                columns = columns_from_metadata(metadata)
-                stream = sql_result.mappings()
+                with self._with_timeout(connection, timeout, "stream"):
+                    sql_result = execute(connection)
+                    metadata = self._read_column_metadata(sql_result.cursor)
+                    columns = columns_from_metadata(metadata)
+                    stream = sql_result.mappings()
 
-                batch = stream.fetchmany(fetch_size)
-                if not batch:
-                    # 空结果也交出一批空的（携带列元数据），便于渲染表头
-                    yield QueryChunk(columns=columns, rows=[], is_last=True)
-                    return
+                    batch = stream.fetchmany(fetch_size)
+                    if not batch:
+                        # 空结果也交出一批空的（携带列元数据），便于渲染表头
+                        yield QueryChunk(columns=columns, rows=[], is_last=True)
+                        return
 
-                index = 0
-                while batch:
-                    rows = [row_values(row) for row in batch]
-                    # 预读下一批：这样当前批是否为末批是确定的
-                    next_batch = stream.fetchmany(fetch_size)
-                    yield QueryChunk(
-                        columns=columns,
-                        rows=rows,
-                        is_last=not next_batch,
-                        chunk_index=index,
-                    )
-                    batch = next_batch
-                    index += 1
+                    index = 0
+                    while batch:
+                        rows = [row_values(row) for row in batch]
+                        # 预读下一批：这样当前批是否为末批是确定的
+                        next_batch = stream.fetchmany(fetch_size)
+                        yield QueryChunk(
+                            columns=columns,
+                            rows=rows,
+                            is_last=not next_batch,
+                            chunk_index=index,
+                        )
+                        batch = next_batch
+                        index += 1
 
         # 生成器内部的异常也要翻译成 QueryError
         yield from run_sql(_batches)
 
     def execute_query_with_metadata(
-        self, query: str, parameters: Dict[str, Any] | None = None
+        self,
+        query: str,
+        parameters: Dict[str, Any] | None = None,
+        timeout: Optional[float] = None,
     ) -> Tuple[List[Any], List[Dict[str, Any]]]:
         """执行查询并同时返回列元数据
 
@@ -401,6 +484,7 @@ class ResultFetchMixin:
         Args:
             query: SQL查询语句
             parameters: 查询参数字典，用于参数化查询
+            timeout: 超时秒数；``None``/``<=0`` 表示不限制
 
         Returns:
             Tuple[List[Any], List[Dict[str, Any]]]:
@@ -410,6 +494,7 @@ class ResultFetchMixin:
 
         Raises:
             QueryError: 当SQL执行失败时
+            DBTimeoutError: 超过 ``timeout`` 秒仍未返回
 
         Example:
             >>> rows, columns = driver.execute_query_with_metadata("SELECT id FROM t")
@@ -424,10 +509,11 @@ class ResultFetchMixin:
 
         def _operation() -> Tuple[List[Any], List[Dict[str, Any]]]:
             with self.engine.connect() as connection:
-                sql_result = execute(connection)
-                # 元数据必须先于取值读取（取完即失效）
-                columns = self._read_column_metadata(sql_result.cursor)
-                rows = sql_result.mappings().all()
-                return rows, enrich_metadata(columns, rows)
+                with self._with_timeout(connection, timeout, "query_with_metadata"):
+                    sql_result = execute(connection)
+                    # 元数据必须先于取值读取（取完即失效）
+                    columns = self._read_column_metadata(sql_result.cursor)
+                    rows = sql_result.mappings().all()
+                    return rows, enrich_metadata(columns, rows)
 
         return run_sql(_operation)

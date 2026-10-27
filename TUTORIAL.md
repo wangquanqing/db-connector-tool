@@ -15,6 +15,7 @@
    - [LogManager](#logmanager)
 3. [异常处理](#异常处理)
 4. [工具函数](#工具函数)
+   - [查询超时](#查询超时)
    - [SQL 切分器（方言感知）](#sql-切分器方言感知)
    - [查询结果（保真）](#查询结果保真)
    - [路径工具](#路径工具)
@@ -659,7 +660,87 @@ except CryptoError as error:
 
 ## 🛠️ 工具函数
 
+### 查询超时
+
+给一次查询加**时间上限**，超时立刻中断。适用于「报表跑太久」「锁等待卡死」
+这类场景 —— 没有超时的话，查询会一直挂着直到数据库自己算完。
+
+```python
+from db_connector_tool import DatabaseManager, DBTimeoutError
+
+db = DatabaseManager("my_app")
+
+try:
+    result = db.execute_query_result(
+        "db_kes", "SELECT * FROM huge_table", timeout=30
+    )
+except DBTimeoutError as error:
+    print(f"超时 {error.timeout_seconds} 秒")
+    print(f"操作: {error.operation}")
+    print(f"错误码: {error.error_code}")     # TIMEOUT_001
+```
+
+除 `execute_query_result` 外，`execute_query` / `execute_command` /
+`execute_query_stream` / `execute_query_with_metadata` 都支持 `timeout`。
+
+#### 各方言的支持情况
+
+| 方言 | 实现机制 | 查询级超时 |
+|---|---|---|
+| PostgreSQL | `SET LOCAL statement_timeout` | ✅ 事务内有效，自动失效 |
+| MySQL | `SET SESSION max_execution_time` | ✅ 用完自动复位 |
+| MariaDB | `SET SESSION max_statement_time` | ✅ |
+| SQLite | `set_progress_handler` | ✅ 按指令数回调 |
+| Oracle | `connection.call_timeout` | ✅ 客户端 OCI 层 |
+| GBase 8s | —（JDBC 无法安全中断） | ❌ 明确报错 |
+| SQL Server | —（无语句级机制） | ❌ 明确报错 |
+
+不支持的方言会抛 `TimeoutNotSupportedError`（继承 `QueryError`），
+文案里说明原因和替代方案：
+
+```python
+from db_connector_tool.drivers.timeout_control import (
+    TimeoutNotSupportedError, supports_query_timeout,
+)
+
+supports_query_timeout("postgresql")   # True
+supports_query_timeout("gbase8s")      # False
+
+try:
+    db.execute_query_result("db_gb", "SELECT ...", timeout=5)
+except TimeoutNotSupportedError as error:
+    print(error)   # 该连接（gbase8s）不支持查询级超时：...
+```
+
+#### 为什么 GBase 8s / SQL Server 做不到
+
+这不是实现偷懒，而是**驱动的硬限制**，实测确认：
+
+- **GBase 8s**：JDBC 调用不可重入。从另一个线程调 `invalidate()` 会让
+  **整个进程挂死**（连 `thread.join()` 都返回不了）。
+- **SQL Server**：pymssql 只有**连接级** `timeout`，没有语句级机制；
+  `invalidate()` 行为不确定，不敢用。
+
+SQL Server 可在连接配置里设统一上限：
+
+```python
+{
+    "type": "sqlserver",
+    "pool_config": {"connect_args": {"timeout": 30}},   # 所有查询统一 30 秒
+}
+```
+
+#### 已知限制
+
+- **MySQL 的 `max_execution_time` 不覆盖 `SLEEP()`**
+  （MySQL 文档明示），`SELECT SLEEP(100)` 不会被超时打断。
+- 超时靠**服务端**杀语句时，客户端一定能返回；若退回客户端看门狗，
+  连接会被作废（这是必要代价，也比卡死好）。
+- 超时后连接状态：服务端机制下连接可继续用（`SET LOCAL` 自动失效、
+  会话级设置会被复位）；看门狗机制下连接已作废，会从池中重建。
+
 ### SQL 切分器（方言感知）
+
 
 把一段脚本切成可逐条执行的语句。**不是简单的 `split(";")`** ——
 它理解字符串、注释、引用体与**过程体边界**，因此 GBase SPL、

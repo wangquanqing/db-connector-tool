@@ -29,6 +29,7 @@ import json
 import os
 import sqlite3
 import tempfile
+import time
 import unittest
 from contextlib import closing, redirect_stdout
 from pathlib import Path
@@ -657,6 +658,100 @@ class TestRealDatabase(unittest.TestCase):
         result = self.manager.execute_query_result(REAL_DB, sql)
         self.assertEqual(result.rows[0], (1, 2, 3))
         self.assertEqual(result.column_names(), ["a", "a (1)", "b"])
+
+    # ------------------------------------------------------------ 查询超时
+
+    @classmethod
+    def _sleep_sql(cls) -> str | None:
+        """返回该方言的「长时间查询」语句；无法构造时返回 None
+
+        .. note::
+            MySQL **不能**用 ``SELECT SLEEP(10)`` —— 其
+            ``max_execution_time`` 明确不覆盖 ``SLEEP()``（MySQL 文档），
+            实测确实不会被打断。改用笛卡尔积这类"真正在算"的查询。
+        """
+        dialect = cls.manager.get_connection(REAL_DB).engine.dialect
+        name = dialect.name.lower()
+        return {
+            "postgresql": "SELECT pg_sleep(10)",
+            # MySQL 的 max_execution_time 不覆盖 SLEEP()，必须用真实计算
+            "mysql": (
+                "SELECT COUNT(*) FROM information_schema.columns a, "
+                "information_schema.columns b, information_schema.columns c"
+            ),
+            "mariadb": (
+                "SELECT COUNT(*) FROM information_schema.columns a, "
+                "information_schema.columns b, information_schema.columns c"
+            ),
+            "sqlserver": "WAITFOR DELAY '00:00:10'",
+        }.get(name)
+
+    def test_timeout_interrupts_long_query(self) -> None:
+        """查询超时能在 1.5 秒左右中断长查询"""
+        from src.db_connector_tool.core.exceptions import DBTimeoutError
+        from src.db_connector_tool.drivers.timeout_control import (
+            supports_query_timeout,
+        )
+
+        dialect_name = self.manager.get_connection(REAL_DB).engine.dialect.name.lower()
+        if not supports_query_timeout(dialect_name):
+            self.skipTest(f"{dialect_name} 不支持查询级超时")
+
+        sql = self._sleep_sql()
+        if sql is None:
+            self.skipTest(f"{dialect_name} 无法构造长查询")
+
+        start = time.time()
+        with self.assertRaises(DBTimeoutError):
+            self.manager.execute_query_result(REAL_DB, sql, timeout=1.5)
+        elapsed = time.time() - start
+        self.assertLess(elapsed, 6, msg=f"超时未及时生效，耗时 {elapsed:.1f}s")
+        self.assertGreater(elapsed, 1.0)
+
+    def test_timeout_does_not_leak_to_next_query(self) -> None:
+        """超时设置不能泄漏到后续查询（MySQL 的 SESSION 级尤其要紧）"""
+        from src.db_connector_tool.drivers.timeout_control import (
+            supports_query_timeout,
+        )
+
+        dialect_name = self.manager.get_connection(REAL_DB).engine.dialect.name.lower()
+        if not supports_query_timeout(dialect_name):
+            self.skipTest(f"{dialect_name} 不支持查询级超时")
+
+        sql = self._sleep_sql()
+        if sql is not None:
+            try:
+                self.manager.execute_query_result(REAL_DB, sql, timeout=1.0)
+            except Exception:  # pylint: disable=broad-except
+                pass  # 超时或其它错误都无妨，重点是后续查询
+
+        # 后续查询必须正常且很快返回
+        start = time.time()
+        result = self.manager.execute_query_result(
+            REAL_DB, f"SELECT 7 AS v{self._one_from()}"
+        )
+        self.assertEqual(result.rows[0][0], 7)
+        self.assertLess(time.time() - start, 3)
+
+    def test_unsupported_dialect_gives_clear_error(self) -> None:
+        """不支持的方言必须给出明确说明，而不是静默忽略或挂死"""
+        from src.db_connector_tool.drivers.timeout_control import (
+            TimeoutNotSupportedError,
+            supports_query_timeout,
+        )
+
+        dialect_name = self.manager.get_connection(REAL_DB).engine.dialect.name.lower()
+        if supports_query_timeout(dialect_name):
+            self.skipTest(f"{dialect_name} 支持查询级超时，本用例不适用")
+
+        start = time.time()
+        with self.assertRaises((TimeoutNotSupportedError, Exception)) as ctx:  # noqa: B017
+            self.manager.execute_query_result(
+                REAL_DB, f"SELECT 1 AS a{self._one_from()}", timeout=5
+            )
+        # 关键：必须**快速**失败，不能挂住
+        self.assertLess(time.time() - start, 5)
+        self.assertIn("不支持查询级超时", str(ctx.exception))
 
 
 if __name__ == "__main__":

@@ -43,7 +43,9 @@ class TestDatabaseManager(unittest.TestCase):
 
         result = db_manager.execute_query_result("test_db", "SELECT 1")
         self.assertIs(result, expected)
-        mock_driver.execute_query_result.assert_called_once_with("SELECT 1", None)
+        mock_driver.execute_query_result.assert_called_once_with(
+            "SELECT 1", None, timeout=None
+        )
         # 管理器负责把真实耗时写回结果对象
         self.assertGreaterEqual(result.elapsed, 0.0)
         self.assertIsInstance(result.elapsed, float)
@@ -331,7 +333,9 @@ class TestDatabaseManager(unittest.TestCase):
         # 验证 get_connection 方法被调用
         db_manager.get_connection.assert_called_once_with("test_db")
         # 验证驱动的 execute_query 方法被调用
-        mock_driver.execute_query.assert_called_once_with("SELECT * FROM users", None)
+        mock_driver.execute_query.assert_called_once_with(
+            "SELECT * FROM users", None, timeout=None
+        )
         # 验证返回的结果
         self.assertEqual(result, [{"id": 1, "name": "test"}])
         self.assertIsInstance(elapsed, float)
@@ -363,9 +367,9 @@ class TestDatabaseManager(unittest.TestCase):
 
         # 验证 get_connection 方法被调用
         db_manager.get_connection.assert_called_once_with("test_db")
-        # 验证驱动的 execute_command 方法被调用
+        # 验证驱动的 execute_command 方法被调用（timeout 默认 None）
         mock_driver.execute_command.assert_called_once_with(
-            "UPDATE users SET name = 'test' WHERE id = 1", None
+            "UPDATE users SET name = 'test' WHERE id = 1", None, timeout=None
         )
         # 验证返回的结果
         self.assertEqual(affected_rows, 1)

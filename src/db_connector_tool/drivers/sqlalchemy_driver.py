@@ -658,7 +658,10 @@ class SQLAlchemyDriver(ResultFetchMixin):
             return True
 
     def execute_query(
-        self, query: str, parameters: Dict[str, Any] | None = None
+        self,
+        query: str,
+        parameters: Dict[str, Any] | None = None,
+        timeout: Optional[float] = None,
     ) -> List[Any]:
         """执行SQL查询语句并返回结果
 
@@ -678,12 +681,14 @@ class SQLAlchemyDriver(ResultFetchMixin):
         Args:
             query: SQL查询语句
             parameters: 查询参数字典，用于参数化查询
+            timeout: 超时秒数；``None``/``<=0`` 表示不限制
 
         Returns:
             List[Any]: 查询结果列表，每行为 ``RowMapping``（Mapping 接口）
 
         Raises:
             QueryError: 当查询执行失败时
+            DBTimeoutError: 超过 ``timeout`` 秒仍未返回
 
         Example:
             >>> results = driver.execute_query("SELECT * FROM users")
@@ -695,10 +700,13 @@ class SQLAlchemyDriver(ResultFetchMixin):
             ...     {"age": 18}
             ... )
         """
-        return self._execute_sql(query, parameters)
+        return self._execute_sql(query, parameters, timeout=timeout)
 
     def execute_command(
-        self, command: str, parameters: Dict[str, Any] | None = None
+        self,
+        command: str,
+        parameters: Dict[str, Any] | None = None,
+        timeout: Optional[float] = None,
     ) -> int:
         """执行SQL命令（INSERT/UPDATE/DELETE等）
 
@@ -708,12 +716,14 @@ class SQLAlchemyDriver(ResultFetchMixin):
         Args:
             command: SQL命令语句
             parameters: SQL参数字典，用于参数化查询，防止SQL注入
+            timeout: 超时秒数；``None``/``<=0`` 表示不限制
 
         Returns:
             int: 受影响的行数
 
         Raises:
             QueryError: 当命令执行失败时
+            DBTimeoutError: 超过 ``timeout`` 秒仍未返回
 
         Example:
             >>> affected = driver.execute_command(
@@ -728,10 +738,14 @@ class SQLAlchemyDriver(ResultFetchMixin):
             ... )
             >>> print(f"插入了 {affected} 行")
         """
-        return self._execute_sql(command, parameters, commit=True)
+        return self._execute_sql(command, parameters, commit=True, timeout=timeout)
 
     def _execute_sql(
-        self, sql: str, parameters: Dict[str, Any] | None = None, commit: bool = False
+        self,
+        sql: str,
+        parameters: Dict[str, Any] | None = None,
+        commit: bool = False,
+        timeout: Optional[float] = None,
     ) -> Any:
         """执行SQL语句（内部方法）
 
@@ -742,6 +756,7 @@ class SQLAlchemyDriver(ResultFetchMixin):
             sql: SQL语句字符串
             parameters: SQL参数字典，用于参数化查询，防止SQL注入
             commit: 是否提交事务，True用于INSERT/UPDATE/DELETE等命令
+            timeout: 超时秒数；``None``/``<=0`` 表示不限制
 
         Returns:
             Any: 执行结果
@@ -760,15 +775,16 @@ class SQLAlchemyDriver(ResultFetchMixin):
             self._validate_sql_query(sql)
 
             with self.engine.connect() as connection:  # type: ignore[union-attr]
-                if parameters:
-                    sql_result = connection.execute(text(sql), parameters)
-                else:
-                    sql_result = connection.execute(text(sql))
+                with self._with_timeout(connection, timeout, "command" if commit else "query"):
+                    if parameters:
+                        sql_result = connection.execute(text(sql), parameters)
+                    else:
+                        sql_result = connection.execute(text(sql))
 
-                if commit:
-                    connection.commit()
-                    return sql_result.rowcount
-                return sql_result.mappings().all()
+                    if commit:
+                        connection.commit()
+                        return sql_result.rowcount
+                    return sql_result.mappings().all()
 
         # 异常映射与其它查询入口保持一致（见 result_fetch.run_sql）
         return run_sql(_operation)

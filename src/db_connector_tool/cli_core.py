@@ -24,6 +24,8 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 from .__about__ import __version__
 from .core.connections import DatabaseManager
 from .core.exceptions import (
+    QueryError,
+    DBTimeoutError,
     ConfigError,
     DatabaseError,
     DBConnectorError,
@@ -387,7 +389,7 @@ class DBConnectorCLI(ResultRenderMixin):
         支持终端表格显示或 JSON/CSV 文件导出。
 
         Args:
-            args: 命令行参数，包含 connection/sql_content/output
+            args: 命令行参数，包含 connection/sql_content/output/timeout
 
         Raises:
             SystemExit: 初始化失败或SQL执行失败时退出
@@ -396,14 +398,20 @@ class DBConnectorCLI(ResultRenderMixin):
         try:
             # 用保真接口：行按位置存放，重名列（SELECT * JOIN）不会互相覆盖
             result = db_manager.execute_query_result(
-                args.connection, args.sql_content
+                args.connection,
+                args.sql_content,
+                timeout=getattr(args, "timeout", None),
             )
             if args.output:
                 self._save_output(result, args.output)
             else:
                 self._show_results(result)
             print(f"✅ 总计: {len(result)} 行 ({result.elapsed:.3f} 秒)")
-        except (DatabaseError, ConfigError, FileSystemError) as error:
+        except DBTimeoutError as error:
+            logger.warning("查询超时: %s", error)
+            print(f"⏱️  {error.message}")
+            sys.exit(1)
+        except (DatabaseError, QueryError, ConfigError, FileSystemError) as error:
             logger.error("执行SQL失败: %s", error)
             print(f"❌ 执行SQL失败: {error}")
             sys.exit(1)
@@ -412,7 +420,7 @@ class DBConnectorCLI(ResultRenderMixin):
         """执行 SQL 增删改操作
 
         Args:
-            args: 命令行参数，包含 connection/sql_content
+            args: 命令行参数，包含 connection/sql_content/timeout
 
         Raises:
             SystemExit: 初始化失败或执行失败时退出
@@ -420,10 +428,16 @@ class DBConnectorCLI(ResultRenderMixin):
         db_manager = self._ensure_db_manager()
         try:
             affected, elapsed = db_manager.execute_command(
-                args.connection, args.sql_content
+                args.connection,
+                args.sql_content,
+                timeout=getattr(args, "timeout", None),
             )
             print(f"✅ 影响: {affected} 行 ({elapsed:.3f} 秒)")
-        except (DatabaseError, ConfigError, FileSystemError) as error:
+        except DBTimeoutError as error:
+            logger.warning("命令执行超时: %s", error)
+            print(f"⏱️  {error.message}")
+            sys.exit(1)
+        except (DatabaseError, QueryError, ConfigError, FileSystemError) as error:
             logger.error("执行命令失败: %s", error)
             print(f"❌ 执行命令失败: {error}")
             sys.exit(1)
@@ -434,7 +448,7 @@ class DBConnectorCLI(ResultRenderMixin):
         逐条解析执行，自动识别SELECT/命令类型，统计成功率。
 
         Args:
-            args: 命令行参数，包含 connection/file_path/continue_on_error
+            args: 命令行参数，包含 connection/file_path/continue_on_error/timeout
 
         Raises:
             SystemExit: 初始化失败或遇错且不继续时退出
@@ -459,7 +473,10 @@ class DBConnectorCLI(ResultRenderMixin):
                     continue
                 print(f"执行语句 {idx}/{len(statements)}:", end=" ")
                 ok = self._run_single_sql(
-                    args.connection, statement.text, show_truncated=True
+                    args.connection,
+                    statement.text,
+                    show_truncated=True,
+                    timeout=getattr(args, "timeout", None),
                 )
                 if ok:
                     success += 1
@@ -573,7 +590,11 @@ class DBConnectorCLI(ResultRenderMixin):
         return ("utf-8", "gbk", "cp1252", "latin-1")
 
     def _run_single_sql(
-        self, conn_name: str, sql: str, show_truncated: bool = False
+        self,
+        conn_name: str,
+        sql: str,
+        show_truncated: bool = False,
+        timeout: float | None = None,
     ) -> bool:
         """执行单条SQL（SELECT走查询，其余走命令）
 
@@ -581,6 +602,7 @@ class DBConnectorCLI(ResultRenderMixin):
             conn_name: 数据库连接名称
             sql: SQL语句
             show_truncated: 是否预览截断语句
+            timeout: 超时秒数；``None`` 表示不限制
 
         Returns:
             bool: 成功返回True
@@ -590,13 +612,20 @@ class DBConnectorCLI(ResultRenderMixin):
             print(f"执行: {self._shorten_sql(sql)}")
         try:
             if sql.lower().strip().startswith("select"):
-                result = db_manager.execute_query_result(conn_name, sql)
+                result = db_manager.execute_query_result(conn_name, sql, timeout=timeout)
                 self._show_results(result)
                 print(f"✅ 总计: {len(result)} 行 ({result.elapsed:.3f} 秒)")
             else:
-                affected, elapsed = db_manager.execute_command(conn_name, sql)
+                affected, elapsed = db_manager.execute_command(
+                    conn_name, sql, timeout=timeout
+                )
                 print(f"✅ 影响: {affected} 行 ({elapsed:.3f} 秒)")
             return True
+        except DBTimeoutError as error:
+            # 超时是「预期的可控失败」，文案要与普通错误区分开
+            logger.warning("语句执行超时: %s", error)
+            print(f"⏱️  {error.message}")
+            return False
         except (DatabaseError, ConfigError) as error:
             logger.error("执行语句失败: %s", error)
             print(f"❌ 执行语句失败: {error}")
@@ -641,7 +670,9 @@ class DBConnectorCLI(ResultRenderMixin):
                         continue
                     if not sql:
                         continue
-                    self._run_single_sql(args.connection, sql)
+                    self._run_single_sql(
+                        args.connection, sql, timeout=getattr(args, "timeout", None)
+                    )
                 except KeyboardInterrupt:
                     print("\n👋 再见!")
                     break

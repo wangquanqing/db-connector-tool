@@ -372,13 +372,12 @@ class TestResultFetchBranches(IsolatedTestCase):
         self.assertEqual(meta[0]["name"], "c")
 
     def test_run_sql_translates_value_error(self) -> None:
-        """ValueError 翻译为「验证错误」"""
-
-        def boom():
-            raise ValueError("bad")
+        """ValueError 被包装为 QueryError（验证错误）"""
+        def _boom():
+            raise ValueError("坏参数")
 
         with self.assertRaises(QueryError) as ctx:
-            run_sql(boom)
+            run_sql(_boom)
         self.assertIn("验证错误", str(ctx.exception))
 
     def test_run_sql_translates_generic_error(self) -> None:

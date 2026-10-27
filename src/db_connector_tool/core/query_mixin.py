@@ -26,7 +26,7 @@ Example:
 """
 
 import time
-from typing import Any, Dict, Iterator, List, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 from ..utils.logging_utils import get_logger
 from .exceptions import DatabaseError
@@ -75,7 +75,11 @@ class QueryMixin:
             raise DatabaseError(f"查询执行失败: {str(error)}") from error
 
     def execute_query(
-        self, connection_name: str, query: str, params: Dict[str, Any] | None = None
+        self,
+        connection_name: str,
+        query: str,
+        params: Dict[str, Any] | None = None,
+        timeout: Optional[float] = None,
     ) -> Tuple[List[Any], float]:
         """执行SQL查询语句
 
@@ -88,6 +92,7 @@ class QueryMixin:
             connection_name: 连接名称
             query: SQL查询语句
             params: 查询参数字典，可选
+            timeout: 超时秒数；``None``/``<=0`` 表示不限制
 
         Returns:
             Tuple[List[Any], float]: 查询结果列表（每行 ``RowMapping``）和执行时间
@@ -95,6 +100,7 @@ class QueryMixin:
         Raises:
             DatabaseError: 当查询执行失败时
             ConfigError: 当连接配置不存在时
+            DBTimeoutError: 超过 ``timeout`` 秒仍未返回
 
         Example:
             >>> results, elapsed = db_manager.execute_query(
@@ -104,11 +110,16 @@ class QueryMixin:
             ...     print(row["name"])
         """
         return self._run_query(
-            connection_name, lambda driver: driver.execute_query(query, params)
+            connection_name,
+            lambda driver: driver.execute_query(query, params, timeout=timeout),
         )
 
     def execute_query_result(
-        self, connection_name: str, query: str, params: Dict[str, Any] | None = None
+        self,
+        connection_name: str,
+        query: str,
+        params: Dict[str, Any] | None = None,
+        timeout: Optional[float] = None,
     ) -> QueryResult:
         """执行查询并返回**保真**的结构化结果（推荐入口）
 
@@ -121,6 +132,7 @@ class QueryMixin:
             connection_name: 连接名称
             query: SQL查询语句
             params: 查询参数字典，可选
+            timeout: 超时秒数；``None``/``<=0`` 表示不限制
 
         Returns:
             QueryResult: 列元数据 + 按位置的行数据 + 耗时
@@ -128,6 +140,7 @@ class QueryMixin:
         Raises:
             DatabaseError: 当查询执行失败时
             ConfigError: 当连接配置不存在时
+            DBTimeoutError: 超过 ``timeout`` 秒仍未返回
 
         Example:
             >>> result = db_manager.execute_query_result("mysql_db", "SELECT 1 AS a")
@@ -137,7 +150,8 @@ class QueryMixin:
             'a'
         """
         result, response_time = self._run_query(
-            connection_name, lambda driver: driver.execute_query_result(query, params)
+            connection_name,
+            lambda driver: driver.execute_query_result(query, params, timeout=timeout),
         )
         result.elapsed = response_time
         return result
@@ -230,6 +244,7 @@ class QueryMixin:
         connection_name: str,
         command: str,
         params: Dict[str, Any] | None = None,
+        timeout: Optional[float] = None,
     ) -> Tuple[int, float]:
         """执行非查询SQL命令（INSERT/UPDATE/DELETE等）
 
@@ -237,6 +252,7 @@ class QueryMixin:
             connection_name: 连接名称
             command: SQL命令语句
             params: 命令参数字典，可选
+            timeout: 超时秒数；``None``/``<=0`` 表示不限制
 
         Returns:
             Tuple[int, float]: 受影响的行数和执行时间
@@ -244,6 +260,7 @@ class QueryMixin:
         Raises:
             DatabaseError: 当命令执行失败时
             ConfigError: 当连接配置不存在时
+            DBTimeoutError: 超过 ``timeout`` 秒仍未返回
 
         Example:
             >>> affected, elapsed = db_manager.execute_command(
@@ -253,6 +270,7 @@ class QueryMixin:
             >>> print(f"更新了 {affected} 行")
         """
         affected, response_time = self._run_query(
-            connection_name, lambda driver: driver.execute_command(command, params)
+            connection_name,
+            lambda driver: driver.execute_command(command, params, timeout=timeout),
         )
         return affected, response_time
