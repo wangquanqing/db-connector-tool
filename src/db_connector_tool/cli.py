@@ -12,6 +12,7 @@ import argparse
 import sys
 
 from .cli_core import DBConnectorCLI
+from .utils.console import enable_safe_output
 from .drivers.sqlalchemy_driver import SQLAlchemyDriver
 
 SUPPORTED_DATABASE_TYPES = list(SQLAlchemyDriver.DB_CONFIGS.keys())
@@ -215,10 +216,17 @@ def _setup_connection_arguments(parser: argparse.ArgumentParser) -> None:
 def main() -> None:
     """命令行入口函数
 
+    入口处先启用「控制台输出编码降级」：Windows 中文版控制台默认 GBK，
+    打印 emoji 会抛 UnicodeEncodeError 导致命令直接崩溃。
+    见 :func:。
+
     Example:
     >>> if __name__ == "__main__":
     ...     main()
     """
+    # 必须在任何输出之前：GBK 控制台下 list/query/test 原本会崩
+    enable_safe_output()
+
     cli = DBConnectorCLI()
     parser = create_argument_parser(cli)
 
