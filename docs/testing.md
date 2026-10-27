@@ -62,12 +62,13 @@ DCT_IT_DB=my_conn DCT_IT_APP=my_app python -m unittest ...
 ---
 ## 3. 当前覆盖率
 
-
 | 指标 | 数值 |
 |---|---|
-| 语句覆盖 | **100%**（4135 / 4135） |
-| 分支覆盖 | **99.76%**（978 / 1002） |
-| 用例总数 | **1112** 项（3 项真库默认跳过） |
+| 语句覆盖 | **99%**（4513 行，缺 33） |
+| 分支覆盖 | **97%**（1074 分支，缺 27） |
+| 用例总数 | **1251** 项（其中 24 项真实库默认跳过） |
+
+> 另有 **18 项 5 库集成测试**（`DCT_IT_ALL=1` 时运行），见第 8 节。
 
 门槛写在 `pyproject.toml`：
 
@@ -79,8 +80,8 @@ fail_under = 99
 即低于 99% 会让 `coverage report` 返回非零，防止退化。
 
 ---
-## 4. 刻意不覆盖的分支（24 个）
 
+## 4. 刻意不覆盖的分支
 
 这些分支**不是测不了，而是测它们的成本 > 收益**。分三类：
 
@@ -194,7 +195,50 @@ if proc.is_alive():
 `drivers/timeout_control.py` 已用 `WATCHDOG_SAFE_DIALECTS` 白名单把这类方言
 挡在门外，测试只需验证「它确实被拒绝」。
 
+### 5.7 验证编码问题**不能**用文件重定向
+
+排查「GBK 控制台下 emoji 崩溃」时踩的坑：
+
+```bash
+# ❌ 错：这会掩盖问题
+python -m db_connector_tool.cli list > out.txt
+```
+
+`> file` 会让 Python 认为输出到文件，**把 `sys.stdout.encoding` 变成 utf-8**，
+于是 emoji 能正常写出、看起来"没问题"；而真实控制台/管道是 **gbk**，
+才会崩。用 `tempfile` 造一个 gbk 流也不等于真实场景。
+
+**正确做法**：用**管道**捕获并按 gbk 解码，或直接跑真实控制台：
+
+```python
+proc = subprocess.run(
+    [python, "-m", "db_connector_tool.cli", "list"],
+    capture_output=True,
+    env={**os.environ, "PYTHONUTF8": "0"},   # 关键：模拟中文版默认
+)
+print(proc.stdout.decode("gbk"))             # 按 gbk 看真实显示
+```
+
+`tests/test_console_encoding.py` 用 `io.TextIOWrapper(encoding="gbk")`
+模拟该场景，断言**中文保留、emoji 丢弃、不抛异常**。
+
+### 5.8 幂等性测试不要假设初始状态
+
+```python
+# ❌ 错：全量跑时可能已被别的测试包装过
+self.assertTrue(enable_safe_output())     # 第一次未必是"首次"
+```
+
+正确写法是先**复位到确定的初始状态**再断言：
+
+```python
+sys.stdout = io.StringIO()      # 确定起点：未包装
+self.assertTrue(enable_safe_output())
+self.assertFalse(enable_safe_output())   # 第二次应跳过
+```
+
 ---
+
 ## 6. 测试覆盖了哪些关键行为
 
 
@@ -210,10 +254,13 @@ if proc.is_alive():
 | `test_set_then_get_is_consistent` | `test_gbase8s.py` | GBase 隔离级别 set/get 不自洽 |
 | `test_timeout_does_not_leak_to_next_query` | `test_integration_full.py` | MySQL 的 SESSION 级超时未复位，**后续查询被莫名打断** |
 | `TestWatchdogSafety` | `test_query_timeout.py` | 在不安全方言上启动看门狗 → **进程挂死** |
+| `test_gbase8s_never_touches_driver` | `test_query_cancel.py` | 对 GBase 调 `jconn.abort()` → **进程挂死** |
+| `test_chinese_preserved` | `test_console_encoding.py` | GBK 降级时误删中文（只该丢 emoji） |
+| `test_cli_main_calls_enable_safe_output` | `test_console_encoding.py` | CLI 忘了启用编码保护 → `list`/`query`/`test` 在 GBK 控制台崩溃 |
+| `test_default_charset_is_utf8` | `test_sqlalchemy_driver.py` | SQL Server 的 charset 退回 cp936 → emoji/德文变音写不进 |
 
 ---
 
----
 ## 7. 已知测试局限
 
 

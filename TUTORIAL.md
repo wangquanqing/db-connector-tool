@@ -1155,6 +1155,21 @@ def secure_configuration():
    - 验证配置字段是否完整
    - 查看详细错误日志
 
+4. **Windows 控制台下中文/图标显示异常**
+   - **1.5.1 起已自动处理**，无需手动设置。CLI 会自动把打印不出的
+     emoji 降级为空白，中文保持正常。
+   - 如果你用的是 **1.5.0 或更早**，可能出现
+     `UnicodeEncodeError: 'gbk' codec can't encode character` 直接崩溃
+     （Windows 中文版控制台默认 GBK）。升级到 1.5.1+ 即可。
+   - 若仍想看完整 emoji，可临时设 `set PYTHONUTF8=1`（会影响该窗口所有程序），
+     或改用 Windows Terminal。
+
+5. **SQL Server 里中文/emoji 存不进去**
+   - **列必须是 `NVARCHAR` 而不是 `VARCHAR`**：`VARCHAR` 是非 Unicode 类型，
+     按服务器排序规则编码，中文可能丢失（实测存成 `??èy`）。
+   - 连接配置的 `charset` 保持默认 `utf8`（1.5.0 起已修正，早期是 `cp936`
+     导致 emoji / 德文变音直接抛 `UnicodeEncodeError`）。
+
 ### 调试技巧
 
 ```python

@@ -378,6 +378,10 @@ db-connector remove mysql-dev
 db-connector query mysql-dev "SELECT * FROM users" --output users.json
 ```
 
+> **Windows 控制台提示**：1.5.1 起会自动处理 GBK 控制台的字符编码问题
+> （emoji 自动降级、中文保持正常），无需手动设 `PYTHONUTF8`。
+> 早期版本可能出现 `UnicodeEncodeError: 'gbk' codec ...` 而崩溃。
+
 ## 📋 API 参考
 
 详细API文档和使用示例请查看 [TUTORIAL.md](TUTORIAL.md)，包含：
