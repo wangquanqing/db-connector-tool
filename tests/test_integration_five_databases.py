@@ -47,6 +47,13 @@ DBS = [d for d in SELECTED.split(",") if d] if SELECTED else ALL_DBS
 #: 所有测试表的统一前缀（便于识别与清理）
 PREFIX = "dct_it_"
 
+#: 本次**进程**的唯一后缀，避免并发跑测试时互删表
+#:
+#: 实测：两个测试进程同时跑会争抢同名表（``dct_it_main``），
+#: 导致「表不存在」这类偶发失败。加进程内唯一后缀即可隔离。
+RUN_ID = f"{os.getpid():x}"
+MAIN_TABLE = f"{PREFIX}main_{RUN_ID}"
+
 
 def _skip_reason() -> str:
     """统一的跳过原因"""
@@ -70,7 +77,7 @@ class TestFiveDatabases(RealConfigTestCase):
         """
         super().setUp()
         self.manager = DatabaseManager("db_connector_tool")
-        self.table = f"{PREFIX}main"
+        self.table = MAIN_TABLE
         self._available = {}
         for name in DBS:
             try:
@@ -83,7 +90,7 @@ class TestFiveDatabases(RealConfigTestCase):
         for name in DBS:
             if not self._available.get(name):
                 continue
-            for table in (self.table, f"{PREFIX}types", f"{PREFIX}concurrency"):
+            for table in (self.table, f"{PREFIX}types_{RUN_ID}", f"{PREFIX}concurrency_{RUN_ID}"):
                 try:
                     self.manager.execute_command(name, self._drop_sql(name, table))
                 except Exception:  # pylint: disable=broad-except
