@@ -1197,3 +1197,39 @@ class TestSQLAlchemyDriverAdvanced(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestSQLServerCharsetDefault(unittest.TestCase):
+    """SQL Server 的 charset 默认值必须是 utf8
+
+    回归守卫：早期默认是 ``cp936``(GBK)，导致 emoji / 德文变音等
+    非 GBK 字符**直接抛 UnicodeEncodeError**，而列本是 NVARCHAR(Unicode)，
+    完全可以安全存储。实测 ``测试😀`` / ``Grüße`` 在 cp936 下写入失败。
+    """
+
+    def test_default_charset_is_utf8(self) -> None:
+        """默认 charset 是 utf8，不是 cp936"""
+        from src.db_connector_tool.drivers.sqlalchemy_driver import SQLAlchemyDriver
+
+        defaults = SQLAlchemyDriver.DB_CONFIGS["sqlserver"]["defaults"]
+        self.assertEqual(
+            defaults.get("charset"), "utf8",
+            msg="SQL Server 的 charset 必须为 utf8，否则非 GBK 字符无法写入",
+        )
+
+    def test_tds_version_preserved(self) -> None:
+        """tds_version 保持原值（改动 charset 不应影响它）"""
+        from src.db_connector_tool.drivers.sqlalchemy_driver import SQLAlchemyDriver
+
+        defaults = SQLAlchemyDriver.DB_CONFIGS["sqlserver"]["defaults"]
+        self.assertEqual(defaults.get("tds_version"), "7.0")
+
+    def test_other_dialects_unchanged(self) -> None:
+        """其它方言的 charset 不受影响（防止误改）"""
+        from src.db_connector_tool.drivers.sqlalchemy_driver import SQLAlchemyDriver
+
+        configs = SQLAlchemyDriver.DB_CONFIGS
+        self.assertEqual(configs["mysql"]["defaults"].get("charset"), "utf8mb4")
+        self.assertEqual(
+            configs["postgresql"]["defaults"].get("client_encoding"), "utf8"
+        )

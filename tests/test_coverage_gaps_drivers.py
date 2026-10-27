@@ -462,3 +462,121 @@ class TestSqlAlchemyDriverBranches(IsolatedTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestPythonTypeInference(IsolatedTestCase):
+    """``_python_type_from_type_name`` 的映射规则
+
+    这条守的是「**不猜**」原则：``type_code`` 是数字类型号时，
+    同一个号可能对应多种类型（SQL Server 的 3 = INT/FLOAT/BIT），
+    必须返回 None 而不是瞎猜一个。
+    """
+
+    def test_known_type_names(self) -> None:
+        """常见类型名能正确映射"""
+        from src.db_connector_tool.drivers.result_fetch import (
+            _python_type_from_type_name,
+        )
+
+        cases = [
+            ("VARCHAR", "str"),
+            ("NVARCHAR", "str"),
+            ("TEXT", "str"),
+            ("CHAR", "str"),
+            ("INTEGER", "int"),
+            ("BIGINT", "int"),
+            ("SMALLINT", "int"),
+            ("DECIMAL", "Decimal"),
+            ("NUMERIC", "Decimal"),
+            ("MONEY", "Decimal"),
+            ("FLOAT", "float"),
+            ("DOUBLE", "float"),
+            ("REAL", "float"),
+            ("BOOLEAN", "bool"),
+            ("BIT", "bool"),
+            ("DATE", "date"),
+            ("TIME", "time"),
+            ("TIMESTAMP", "datetime"),
+            ("DATETIME", "datetime"),
+            ("BLOB", "bytes"),
+            ("BINARY", "bytes"),
+            ("INTERVAL", "timedelta"),
+        ]
+        for type_name, expect in cases:
+            with self.subTest(type_name=type_name):
+                self.assertEqual(
+                    _python_type_from_type_name(type_name), expect
+                )
+
+    def test_case_insensitive(self) -> None:
+        """大小写不敏感"""
+        from src.db_connector_tool.drivers.result_fetch import (
+            _python_type_from_type_name,
+        )
+
+        self.assertEqual(_python_type_from_type_name("varchar"), "str")
+        self.assertEqual(_python_type_from_type_name("Integer"), "int")
+
+    def test_length_suffix_stripped(self) -> None:
+        """带长度的类型名先去长度再映射"""
+        from src.db_connector_tool.drivers.result_fetch import (
+            _python_type_from_type_name,
+        )
+
+        self.assertEqual(_python_type_from_type_name("VARCHAR(50)"), "str")
+        self.assertEqual(_python_type_from_type_name("DECIMAL(19,2)"), "Decimal")
+
+    def test_numeric_type_codes_not_guessed(self) -> None:
+        """纯数字类型号必须返回 None（不猜）
+
+        实测 SQL Server 的 type_code=3 同时对应 INT / FLOAT / BIT，
+        无法反推，猜了就是给错信息。
+        """
+        from src.db_connector_tool.drivers.result_fetch import (
+            _python_type_from_type_name,
+        )
+
+        for code in ("3", "5", "8", "23", "0", "1700"):
+            with self.subTest(code=code):
+                self.assertIsNone(
+                    _python_type_from_type_name(code),
+                    msg=f"类型号 {code} 不该被推断出类型",
+                )
+
+    def test_none_and_empty(self) -> None:
+        """None / 空串返回 None"""
+        from src.db_connector_tool.drivers.result_fetch import (
+            _python_type_from_type_name,
+        )
+
+        self.assertIsNone(_python_type_from_type_name(None))
+        self.assertIsNone(_python_type_from_type_name(""))
+        self.assertIsNone(_python_type_from_type_name("   "))
+
+    def test_unknown_name(self) -> None:
+        """未知类型名返回 None"""
+        from src.db_connector_tool.drivers.result_fetch import (
+            _python_type_from_type_name,
+        )
+
+        self.assertIsNone(_python_type_from_type_name("NO_SUCH_TYPE_XYZ"))
+
+    def test_description_path_uses_type_name(self) -> None:
+        """``column_metadata_from_description`` 走类型名推断"""
+        from src.db_connector_tool.drivers.result_fetch import (
+            column_metadata_from_description,
+        )
+
+        class FakeCursor:
+            """模拟游标：第二列填真实类型名，第一列填数字类型号"""
+
+            description = [
+                ("a", "VARCHAR", None, None, None, None, None),
+                ("b", "23", None, None, None, None, None),
+                ("c", None, None, None, None, None, None),
+            ]
+
+        meta = column_metadata_from_description(FakeCursor())
+        self.assertEqual(meta[0]["python_type"], "str")
+        self.assertIsNone(meta[1]["python_type"])  # 数字号不猜
+        self.assertIsNone(meta[2]["python_type"])  # None 保持 None

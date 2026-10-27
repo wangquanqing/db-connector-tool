@@ -170,7 +170,11 @@ class SQLAlchemyDriver(ResultFetchMixin):
             "url_template": "mssql+pymssql://{username}:{password}@{host}:{port}/{database}",
             "required_params": ["host", "database", "username", "password"],
             "default_port": 1433,
-            "defaults": {"charset": "cp936", "tds_version": "7.0"},
+            # charset 必须是 utf8：pymssql 用它编码**发往服务器**的字符串。
+            # cp936(GBK) 无法表示 emoji、德文变音等字符，会直接抛
+            # UnicodeEncodeError —— 而列是 NVARCHAR（Unicode），本可安全存储。
+            # 实测：cp936 下 "测试😀" / "Grüße" 写入失败，utf8 下正常。
+            "defaults": {"charset": "utf8", "tds_version": "7.0"},
         },
         "sqlite": {
             "url_template": "sqlite:///{database}",

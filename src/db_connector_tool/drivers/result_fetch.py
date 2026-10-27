@@ -84,7 +84,7 @@ def column_metadata_from_description(cursor: Any) -> List[Dict[str, Any]]:
                 "name": str(description[0]),
                 "type_name": type_name,
                 "jdbc_type": None,
-                "python_type": None,
+                "python_type": _python_type_from_type_name(type_name),
                 "precision": description[4],
                 "scale": description[5],
                 "nullable": None if description[6] is None else bool(description[6]),
@@ -92,6 +92,109 @@ def column_metadata_from_description(cursor: Any) -> List[Dict[str, Any]]:
             }
         )
     return columns
+
+
+#: JDBC / SQL 类型名 → Python 类型名
+_JDBC_TYPE_TO_PYTHON = {
+    "CHAR": "str",
+    "VARCHAR": "str",
+    "LONGVARCHAR": "str",
+    "NCHAR": "str",
+    "NVARCHAR": "str",
+    "LONGNVARCHAR": "str",
+    "CLOB": "str",
+    "NCLOB": "str",
+    "TEXT": "str",
+    "LVARCHAR": "str",
+    "INTEGER": "int",
+    "INT": "int",
+    "SMALLINT": "int",
+    "TINYINT": "int",
+    "BIGINT": "int",
+    "INT8": "int",
+    "SERIAL": "int",
+    "SERIAL8": "int",
+    "BIGSERIAL": "int",
+    "DECIMAL": "Decimal",
+    "NUMERIC": "Decimal",
+    "NUMBER": "Decimal",
+    "MONEY": "Decimal",
+    "FLOAT": "float",
+    "REAL": "float",
+    "DOUBLE": "float",
+    "DOUBLEPRECISION": "float",
+    "BIT": "bool",
+    "BOOLEAN": "bool",
+    "DATE": "date",
+    "TIME": "time",
+    "TIMESTAMP": "datetime",
+    "DATETIME": "datetime",
+    "BLOB": "bytes",
+    "BINARY": "bytes",
+    "VARBINARY": "bytes",
+    "LONGVARBINARY": "bytes",
+    "BYTEA": "bytes",
+    "INTERVAL": "timedelta",
+}
+
+
+def _python_type_from_jdbc_name(name: str) -> Optional[str]:
+    """把 JDBC/SQL 类型名映射为 Python 类型名
+
+    先精确匹配，再去掉括号与空白后匹配（如 ``VARCHAR(50)`` → ``VARCHAR``）。
+
+    Args:
+        name: 类型名（大写）
+
+    Returns:
+        Optional[str]: Python 类型名；未知时 ``None``
+    """
+    cleaned = name.strip()
+    if cleaned in _JDBC_TYPE_TO_PYTHON:
+        return _JDBC_TYPE_TO_PYTHON[cleaned]
+    base = cleaned.split("(", maxsplit=1)[0].strip()
+    return _JDBC_TYPE_TO_PYTHON.get(base)
+
+
+def _python_type_from_type_name(type_name: Optional[str]) -> Optional[str]:
+    """由**类型名**映射 Python 类型（数字类型号一律不猜）
+
+    为什么不能用类型号：实测各驱动的 ``description[i][1]`` 多是**原生类型号**，
+    而且**同一个号对应多种类型**：
+
+    ==========  ===========  ==============================
+    驱动        类型号        实际类型
+    ==========  ===========  ==============================
+    SQL Server  3            INT / FLOAT / BIT
+    SQL Server  5            DECIMAL / BIGINT
+    SQL Server  1            VARCHAR / NVARCHAR / DATE
+    SQLite      None         int / str / float（全空）
+    ==========  ===========  ==============================
+
+    因此只对**真正的类型名**（``"VARCHAR"`` / ``"DECIMAL"``）做映射，
+    遇到纯数字直接返回 ``None`` —— 宁可留空，也不给错的信息。
+
+    Args:
+        type_name: 类型名
+
+    Returns:
+        Optional[str]: Python 类型名；未知或为数字类型号时 ``None``
+
+    Example:
+        >>> _python_type_from_type_name("VARCHAR")
+        'str'
+        >>> _python_type_from_type_name("23") is None
+        True
+    """
+    if not type_name:
+        return None
+    cleaned = str(type_name).strip().upper()
+    if not cleaned or cleaned.isdigit():
+        return None
+    if cleaned in _JDBC_TYPE_TO_PYTHON:
+        return _JDBC_TYPE_TO_PYTHON[cleaned]
+    base = cleaned.split("(", maxsplit=1)[0].strip()
+    return _JDBC_TYPE_TO_PYTHON.get(base)
 
 
 def enrich_metadata(
@@ -451,16 +554,17 @@ class ResultFetchMixin:
                     raw_rows = sql_result.all()
                     return QueryResult.from_rows(raw_rows, metadata)
             finally:
-                # 取消时连接可能停在事务中间，交给连接池回收
-                try:
+                # 取消时连接可能停在事务中间，交给连接池回收。
+                # close 本身失败无所谓（连接已作废），故静默。
+                try:  # pragma: no cover - 仅取消路径且 close 失败时
                     connection.close()
-                except Exception:  # pylint: disable=broad-except
+                except Exception:  # pylint: disable=broad-except  # pragma: no cover
                     pass
 
         def _on_cancel() -> Optional[str]:
             """中断回调：按方言调取消机制"""
             connection = holder.get("connection")
-            if connection is None:
+            if connection is None:  # pragma: no cover - 取消早于建连的竞态
                 return None
             return cancel_query(
                 connection, self.engine, holder.get("keepalive", ())

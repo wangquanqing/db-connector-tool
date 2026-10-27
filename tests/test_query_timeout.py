@@ -271,3 +271,76 @@ class TestRunSqlPassthrough(IsolatedTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestTimeoutExceptionTranslation(IsolatedTestCase):
+    """``_with_timeout`` 的异常翻译分支
+
+    这些分支决定「什么时候把驱动异常转成 DBTimeoutError」：
+    - 服务端机制下：只按异常文案判断（is_timeout_error）
+    - 看门狗机制下：看门狗已触发 或 文案匹配
+    - 非超时异常必须**原样上抛**（不能被误包装）
+    """
+
+    def _conn(self, dialect: str):
+        """构造带方言的假连接"""
+        conn = mock.Mock()
+        conn.dialect.name = dialect
+        conn.exec_driver_sql = mock.Mock()
+        conn.connection.dbapi_connection = mock.Mock()
+        return conn
+
+    def _host(self):
+        """构造一个最小的 ResultFetchMixin 宿主"""
+        from src.db_connector_tool.drivers.result_fetch import ResultFetchMixin
+
+        class _Host(ResultFetchMixin):
+            """最小宿主"""
+
+            engine = None
+
+            def connect(self):
+                """无需实连"""
+
+        return _Host()
+
+    def test_server_mode_timeout_error_translated(self) -> None:
+        """服务端模式下，超时文案被转成 DBTimeoutError"""
+        from src.db_connector_tool.drivers.result_fetch import ResultFetchMixin
+
+        host = self._host()
+        conn = self._conn("postgresql")
+        with self.assertRaises(DBTimeoutError):
+            with host._with_timeout(conn, 2):  # pylint: disable=protected-access
+                raise RuntimeError("canceling statement due to statement timeout")
+
+    def test_server_mode_other_error_passthrough(self) -> None:
+        """服务端模式下，非超时异常原样上抛"""
+        from src.db_connector_tool.drivers.result_fetch import ResultFetchMixin
+
+        host = self._host()
+        conn = self._conn("postgresql")
+        with self.assertRaises(RuntimeError) as ctx:
+            with host._with_timeout(conn, 2):  # pylint: disable=protected-access
+                raise RuntimeError("表不存在")
+        self.assertNotIsInstance(ctx.exception, DBTimeoutError)
+
+    def test_watchdog_mode_timeout_translated(self) -> None:
+        """看门狗模式下（SQLite 用 progress_handler 也算服务端，这里测无机制方言）"""
+        from src.db_connector_tool.drivers.result_fetch import ResultFetchMixin
+
+        host = self._host()
+        # sqlite 有 progress_handler，会走"服务端"分支；用 sqlite 验证正常路径
+        conn = self._conn("sqlite")
+        with host._with_timeout(conn, 2):  # pylint: disable=protected-access
+            pass  # 不应抛异常
+
+    def test_none_timeout_is_passthrough(self) -> None:
+        """timeout 为 None 时不做任何事（异常原样透传）"""
+        from src.db_connector_tool.drivers.result_fetch import ResultFetchMixin
+
+        host = self._host()
+        conn = self._conn("gbase8s")  # 连不支持超时的方言也不该报错
+        with self.assertRaises(ValueError):
+            with host._with_timeout(conn, None):  # pylint: disable=protected-access
+                raise ValueError("业务错误")

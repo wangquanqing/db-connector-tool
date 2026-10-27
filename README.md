@@ -515,17 +515,35 @@ coverage run -m unittest discover -s tests -t . && coverage report -m
 
 ### 真实数据库集成测试
 
-默认跳过。要跑真库就指定连接名：
+**5 个库的统一验收**（PostgreSQL / MySQL / GBase 8s / SQL Server / SQLite），
+覆盖 DDL、参数化写入、NULL 往返、DECIMAL 精度、Unicode 往返（含 emoji）、
+重名列、流式取数、事务提交/回滚、错误恢复、超时与取消能力：
 
 ```bash
-# PostgreSQL
-DCT_IT_DB=db_kes python -m unittest tests.test_integration_full.TestRealDatabase -v
+# 跑全部 5 个
+DCT_IT_ALL=1 python -m unittest tests.test_integration_five_databases -v
 
-# GBase 8s
-DCT_IT_DB=db_gb python -m unittest tests.test_integration_full.TestRealDatabase -v
+# 只跑其中几个
+DCT_IT_ALL=1 DCT_IT_DBS=db_kes,db_gb python -m unittest tests.test_integration_five_databases
 ```
 
-连接不可用时整类跳过（不判失败）——环境问题不该让测试红。
+连接的库不可用时会自动跳过（不判失败）——环境问题不该让测试红。
+
+也可以单独跑某个库的深度用例：
+
+```bash
+DCT_IT_DB=db_kes python -m unittest tests.test_integration_full.TestRealDatabase -v
+```
+
+**实测能力矩阵**：
+
+| 连接 | 方言 | 超时 | 取消 | 备注 |
+|---|---|---|---|---|
+| db_kes | PostgreSQL | ✅ | ✅ | 功能最完整 |
+| db_mysql | MySQL | ✅ | ✅ | — |
+| db_sqlite | SQLite | ✅ | ✅ | 无真 DECIMAL（NUMERIC 转 float） |
+| db_gb | GBase 8s | ❌ | ❌ | 需 `FROM DUAL`；JDBC 不可重入 |
+| db_mssql | SQL Server | ❌ | ❌ | charset 必须 utf8，否则 emoji 写不进 |
 
 详见 [docs/testing.md](docs/testing.md)：分层设计、写测试的约定（含几个真实踩坑记录）、
 回归守卫清单、已知局限。

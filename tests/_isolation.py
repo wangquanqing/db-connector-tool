@@ -98,3 +98,44 @@ class IsolatedTestCase(unittest.TestCase):
         close_file_handlers()
         self._temp_dir.cleanup()
         super().tearDown()
+
+
+class RealConfigTestCase(unittest.TestCase):
+    """**读取真实配置**、但不写入的测试基类
+
+    用于「真实数据库集成测试」：这类测试需要读到用户在
+    ``%APPDATA%/db_connector_tool`` 里保存的连接配置，因此**不能**像
+    :class:`IsolatedTestCase` 那样把配置目录重定向到临时目录。
+
+    安全措施（保证不污染用户数据）：
+
+    1. **只读**：测试只 ``list_connections`` / ``get_config`` / 执行 SQL，
+       不调用 ``add_config`` / ``remove_config``；
+    2. **建表带前缀**：所有 DDL 用 ``dct_it_`` 前缀，``tearDown`` 清理；
+    3. **异常兜底**：清理失败只记日志，不让用例失败；
+    4. 若真实配置不存在，整类跳过而不是报错。
+
+    与 :class:`IsolatedTestCase` 的分工：
+
+    ====================  ==========================  ==================
+    基类                  配置目录                    适用场景
+    ====================  ==========================  ==================
+    IsolatedTestCase      临时目录（隔离）            单元测试、需要造配置
+    RealConfigTestCase    **真实目录（只读）**        真实数据库集成测试
+    ====================  ==========================  ==================
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        """记录真实配置目录；不存在则跳过整类"""
+        super().setUpClass()
+        cls.real_config_dir = PathHelper.get_user_config_dir("db_connector_tool")
+        cls.has_real_config = (cls.real_config_dir / "connections.toml").exists()
+
+    def setUp(self) -> None:
+        super().setUp()
+        if not self.has_real_config:
+            self.skipTest(
+                f"未找到真实配置 {self.real_config_dir / 'connections.toml'}，"
+                f"跳过真实数据库集成测试"
+            )
