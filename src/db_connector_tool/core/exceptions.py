@@ -619,6 +619,48 @@ class FileSystemError(DBConnectorError):
             self.details["operation"] = self.operation
 
 
+class QueryCancelledError(QueryError):
+    """查询被取消 (Query Cancelled)
+
+    用户主动中断（Ctrl+C）并且取消**已生效**时抛出，或取消未能生效时
+    用于告知用户"查询仍在后台执行"。
+
+    设计为 :class:`QueryError` 的子类：它确实是一次「没跑完的查询」，
+    可被现有的 ``except QueryError`` 统一处理；同时类型足够具体，
+    便于上层区分「取消了」与「出错了」。
+
+    Attributes:
+        reason (str | None): 取消原因（``user`` / ``timeout`` / ``unsupported``）
+
+    Example:
+        >>> raise QueryCancelledError(
+        ...     "用户取消了查询",
+        ...     "CANCEL_001",
+        ...     reason="user",
+        ... )
+    """
+
+    def __init__(
+        self,
+        message: str,
+        error_code: str | None = None,
+        details: Dict[str, Any] | None = None,
+        **kwargs,
+    ) -> None:
+        """初始化取消异常
+
+        Args:
+            message: 异常描述信息
+            error_code: 错误代码
+            details: 详细的错误信息
+            **kwargs: 其他信息，如 ``reason``
+        """
+        super().__init__(message, error_code, details, **kwargs)
+        self.reason = kwargs.get("reason")
+        if self.reason:
+            self.details["reason"] = self.reason
+
+
 class DBTimeoutError(DBConnectorError):
     """超时异常 (DB Timeout Error)
 

@@ -34,6 +34,7 @@
 
 - **配置管理**: 基于 TOML 的配置文件，支持自动备份和版本控制
 - **查询超时**: 单条查询可设时间上限，超时自动中断并抛 `DBTimeoutError`
+- **Ctrl+C 取消**: 查询跑在工作线程，按 Ctrl+C 立即中断（PG/MySQL/SQLite）
 - **完整日志**: 多级别日志输出，支持文件轮转和格式化
 - **CLI工具**: 完整的命令行界面，支持交互式SQL Shell
 - **跨平台**: 支持 Windows、Linux、macOS，路径自动适配
@@ -293,6 +294,47 @@ db-connector file db_kes ./big_script.sql --timeout 60
 
 > **MySQL 的已知限制**：`max_execution_time` 不覆盖 `SLEEP()` 一类函数
 > （MySQL 文档明示），这类语句无法被超时打断。
+
+### Ctrl+C 即时取消查询
+
+CLI 的 `query` / `file` 命令**默认支持**按 Ctrl+C 立即中断查询：
+
+```bash
+db-connector query db_kes "SELECT * FROM huge_table"
+# 运行中按 Ctrl+C → 立刻停止，退出码 130
+```
+
+Python API 用 `execute_query_result_cancellable`：
+
+```python
+from db_connector_tool import DatabaseManager, QueryCancelledError
+
+db = DatabaseManager("my_app")
+try:
+    result = db.execute_query_result_cancellable(
+        "db_kes", "SELECT * FROM huge_table"
+    )
+except QueryCancelledError:
+    print("已取消")
+```
+
+| 方言 | 取消机制 | 实测耗时 |
+|---|---|---|
+| PostgreSQL | `dbapi.cancel()` | **1.51s** |
+| MySQL / MariaDB | 另开连接 `KILL <id>` | **1.58s** |
+| SQLite | `dbapi.interrupt()` | **1.50s** |
+| GBase 8s | — | ❌ 明确报错（JDBC 不可重入） |
+| SQL Server | — | ❌ 明确报错（KILL 被拒/close 挂死） |
+
+加 `--no-cancel` 可回到「等查询跑完」的传统行为。
+
+> **为什么要把查询放到工作线程**：Python 的信号处理器只在字节码边界执行。
+> 驱动在 C 扩展里阻塞且不释放 GIL 时，信号会被推迟到查询返回之后 ——
+> 那时再取消已毫无意义。实测 SQLite 主线程执行时 handler 要到 **8.30s**
+> 才跑，而工作线程模式只要 **1.90s**。
+
+> **不支持取消的方言会如实告知**，而不是假装成功：GBase 8s 的 JDBC 调用
+> 不可重入（中断会让进程挂死），SQL Server 的 `KILL` 被服务端拒绝（错误 6115）。
 
 ## 🔧 命令行工具
 

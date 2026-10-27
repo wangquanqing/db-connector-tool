@@ -739,6 +739,96 @@ SQL Server 可在连接配置里设统一上限：
 - 超时后连接状态：服务端机制下连接可继续用（`SET LOCAL` 自动失效、
   会话级设置会被复位）；看门狗机制下连接已作废，会从池中重建。
 
+### Ctrl+C 即时取消查询
+
+超时是「到点自动停」，取消是「用户想停就停」。两者互补。
+
+```python
+from db_connector_tool import DatabaseManager, QueryCancelledError
+
+db = DatabaseManager("my_app")
+try:
+    result = db.execute_query_result_cancellable(
+        "db_kes", "SELECT * FROM huge_table"
+    )
+except QueryCancelledError:
+    print("用户取消了查询")
+```
+
+命令行默认就支持，按 Ctrl+C 立即中断（退出码 130）：
+
+```bash
+db-connector query db_kes "SELECT * FROM huge_table"
+# 运行中按 Ctrl+C
+# ⏹️  查询已被用户取消
+```
+
+不想启用可加 `--no-cancel`。
+
+#### 各方言的取消机制
+
+| 方言 | 机制 | 实测耗时 | 连接可复用 |
+|---|---|---|---|
+| PostgreSQL | `dbapi.cancel()` | 1.51s | ✅ |
+| MySQL / MariaDB | 另开连接 `KILL <id>` | 1.58s | ✅ |
+| SQLite | `dbapi.interrupt()` | 1.50s | ✅ |
+| GBase 8s | — | ❌ 立即报错 | — |
+| SQL Server | — | ❌ 立即报错 | — |
+
+#### 为什么必须把查询放到工作线程
+
+这是实现里最关键、也最容易踩错的一点。
+
+Python 的信号处理器只在**字节码边界**执行。当驱动在 C 扩展里阻塞时：
+
+- 若该扩展**释放 GIL**（psycopg 会），信号能及时送达；
+- 若**不释放 GIL**（pymysql / pymssql / sqlite3 大多如此），信号会被
+  推迟到查询返回之后 —— 此时再取消已经毫无意义。
+
+实测（1.5s 时发 SIGINT，看 handler 何时执行）：
+
+| 方言 | 主线程直接执行 | 工作线程执行 |
+|---|---|---|
+| PostgreSQL | 1.51s ✅ | 1.90s ✅ |
+| SQLite | **8.30s** ❌ | 1.90s ✅ |
+
+所以本实现一律把查询放到工作线程，主线程只做**短间隔轮询**
+（`stop.wait(0.1)`），保证每次都能返回解释器处理信号。
+
+```python
+from db_connector_tool.drivers.query_cancel import (
+    run_cancellable, cancel_query, supports_cancel,
+)
+
+supports_cancel("postgresql")   # True
+supports_cancel("gbase8s")      # False
+
+# 手动用：查询放 worker，主线程可被打断
+value, cancelled = run_cancellable(
+    lambda: do_query(),
+    lambda: cancel_query(connection, engine),
+)
+```
+
+#### 为什么 GBase 8s / SQL Server 不能取消
+
+**这是驱动的硬限制，实测确认，不是没实现**：
+
+- **GBase 8s**：JDBC 调用不可重入。从另一线程调 `jconn.abort()` 会让
+  **整个进程挂死**（连 `thread.join()` 都返回不了）。
+- **SQL Server**：`pymssql` 没有 `cancel()`；另开连接执行 `KILL <spid>`
+  被服务端拒绝（错误 6115：KILL command cannot be used inside user transactions）；
+  调 `close()` 同样会挂死。
+
+两者都会抛 `QueryCancelledError` 并说明「查询会在后台继续跑完」，
+**不会假装成功**。
+
+#### 取消后的连接状态
+
+- 取消成功时，连接可能停在事务中间，因此该连接会被关闭并归还连接池，
+  下次查询自动重建；
+- 实测 PostgreSQL / MySQL / SQLite 取消后连接仍可正常复用。
+
 ### SQL 切分器（方言感知）
 
 

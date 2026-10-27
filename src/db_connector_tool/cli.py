@@ -57,6 +57,14 @@ _TIMEOUT_HELP = (
     "GBase 8s 与 SQL Server 不支持查询级超时，指定时会明确报错。"
 )
 
+#: ``--no-cancel`` 的帮助文案
+_NO_CANCEL_HELP = (
+    "禁用 Ctrl+C 即时取消（默认启用）。"
+    "启用时查询跑在工作线程，按 Ctrl+C 会立即中断"
+    "（PostgreSQL / MySQL / MariaDB / SQLite 支持）；"
+    "禁用则回到「等查询自己跑完」的传统行为。"
+)
+
 
 def create_argument_parser(cli_instance: "DBConnectorCLI") -> argparse.ArgumentParser:
     """创建命令行参数解析器
@@ -127,6 +135,9 @@ def create_argument_parser(cli_instance: "DBConnectorCLI") -> argparse.ArgumentP
     query_parser.add_argument(
         "-t", "--timeout", type=float, help=_TIMEOUT_HELP
     )
+    query_parser.add_argument(
+        "--no-cancel", action="store_true", help=_NO_CANCEL_HELP
+    )
     query_parser.set_defaults(func=cli_instance.execute_query)
 
     command_parser = subparsers.add_parser("command", help="执行增删改操作")
@@ -146,6 +157,9 @@ def create_argument_parser(cli_instance: "DBConnectorCLI") -> argparse.ArgumentP
     )
     file_parser.add_argument(
         "-t", "--timeout", type=float, help=_TIMEOUT_HELP
+    )
+    file_parser.add_argument(
+        "--no-cancel", action="store_true", help=_NO_CANCEL_HELP
     )
     file_parser.set_defaults(func=cli_instance.execute_file)
 

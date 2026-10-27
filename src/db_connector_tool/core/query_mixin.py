@@ -29,7 +29,7 @@ import time
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 from ..utils.logging_utils import get_logger
-from .exceptions import DatabaseError
+from .exceptions import DatabaseError, QueryCancelledError
 from .result import QueryChunk, QueryResult
 
 logger = get_logger(__name__)
@@ -154,6 +154,69 @@ class QueryMixin:
             lambda driver: driver.execute_query_result(query, params, timeout=timeout),
         )
         result.elapsed = response_time
+        return result
+
+    def execute_query_result_cancellable(
+        self,
+        connection_name: str,
+        query: str,
+        params: Dict[str, Any] | None = None,
+        timeout: Optional[float] = None,
+    ) -> QueryResult:
+        """执行查询，运行期间可按 Ctrl+C **即时取消**
+
+        与 :meth:`execute_query_result` 的区别：查询跑在工作线程里，主线程
+        保持可被信号唤醒。这一点是必须的 —— 实测主线程直接执行时，
+        SQLite 的信号要到查询结束（8.30s）才被处理，而工作线程模式下
+        1.90s 就能响应。
+
+        支持的方言与机制见
+        :mod:`~db_connector_tool.drivers.query_cancel`：
+
+        - PostgreSQL / SQLite：原生 cancel / interrupt
+        - MySQL / MariaDB：另开连接 ``KILL``
+        - GBase 8s / SQL Server：**不支持**，会抛
+          :class:`~db_connector_tool.core.exceptions.QueryCancelledError` 说明原因
+
+        Args:
+            connection_name: 连接名称
+            query: SQL查询语句
+            params: 查询参数字典，可选
+            timeout: 超时秒数；``None``/``<=0`` 表示不限制
+
+        Returns:
+            QueryResult: 列元数据 + 按位置的行数据 + 耗时
+
+        Raises:
+            DatabaseError: 当查询执行失败时
+            ConfigError: 当连接配置不存在时
+            QueryCancelledError: 取消未生效（该方言不支持）时
+
+        Example:
+            >>> result = db_manager.execute_query_result_cancellable(
+            ...     "db_kes", "SELECT * FROM huge_table"
+            ... )
+            >>> # 运行期间按 Ctrl+C 会立即中断
+        """
+        driver = self.get_connection(connection_name)
+        start_time = time.time()
+        try:
+            result = driver.execute_query_result_cancellable(
+                query, params, timeout=timeout
+            )
+        except QueryCancelledError:
+            # 取消是「预期内的主动行为」，不算连接错误
+            logger.info("查询已被取消 %s", connection_name)
+            self.pool_manager.update_query_metadata(
+                connection_name, time.time() - start_time
+            )
+            raise
+        except (OSError, DatabaseError) as error:
+            self.pool_manager.record_connection_error(connection_name, error)
+            logger.error("查询执行失败 %s: %s", connection_name, error)
+            raise DatabaseError(f"查询执行失败: {str(error)}") from error
+        result.elapsed = time.time() - start_time
+        self.pool_manager.update_query_metadata(connection_name, result.elapsed)
         return result
 
     def execute_query_with_metadata(

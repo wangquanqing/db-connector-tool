@@ -24,6 +24,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 from .__about__ import __version__
 from .core.connections import DatabaseManager
 from .core.exceptions import (
+    QueryCancelledError,
     QueryError,
     DBTimeoutError,
     ConfigError,
@@ -397,16 +398,28 @@ class DBConnectorCLI(ResultRenderMixin):
         db_manager = self._ensure_db_manager()
         try:
             # 用保真接口：行按位置存放，重名列（SELECT * JOIN）不会互相覆盖
-            result = db_manager.execute_query_result(
-                args.connection,
-                args.sql_content,
-                timeout=getattr(args, "timeout", None),
-            )
+            # 默认走可取消路径：查询跑在工作线程，Ctrl+C 能立即中断
+            if getattr(args, "no_cancel", False):
+                result = db_manager.execute_query_result(
+                    args.connection,
+                    args.sql_content,
+                    timeout=getattr(args, "timeout", None),
+                )
+            else:
+                result = db_manager.execute_query_result_cancellable(
+                    args.connection,
+                    args.sql_content,
+                    timeout=getattr(args, "timeout", None),
+                )
             if args.output:
                 self._save_output(result, args.output)
             else:
                 self._show_results(result)
             print(f"✅ 总计: {len(result)} 行 ({result.elapsed:.3f} 秒)")
+        except QueryCancelledError as error:
+            logger.info("查询已取消: %s", error)
+            print(f"⏹️  {error.message}")
+            sys.exit(130)  # 130 = 被 SIGINT 终止的惯例退出码
         except DBTimeoutError as error:
             logger.warning("查询超时: %s", error)
             print(f"⏱️  {error.message}")

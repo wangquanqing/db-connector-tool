@@ -48,9 +48,11 @@ class TestCliCoreShowResultsBranch(IsolatedTestCase):
         """query 不带 -o 时直接渲染表格"""
         cli = DBConnectorCLI()
         cli.db_manager = mock.Mock()
-        cli.db_manager.execute_query_result.return_value = QueryResult.from_rows(
+        result = QueryResult.from_rows(
             [(1, "x")], [{"name": "id"}, {"name": "n"}]
         )
+        cli.db_manager.execute_query_result.return_value = result
+        cli.db_manager.execute_query_result_cancellable.return_value = result
         parser = create_argument_parser(cli)
         args = parser.parse_args(["query", "db", "SELECT 1"])
         buffer = io.StringIO()

@@ -422,6 +422,7 @@ class TestSqlFileExecution(CLITestCase):
     def test_run_single_sql_routes_by_statement_type(self) -> None:
         """SELECT 走查询，其余走命令"""
         self.cli.db_manager.execute_query_result.return_value = make_result([{"c": 1}])
+        self.cli.db_manager.execute_query_result_cancellable.return_value = make_result([{"c": 1}])
         self.cli.db_manager.execute_command.return_value = (2, 0.01)
 
         ok, output = self.capture(
@@ -450,6 +451,7 @@ class TestSqlFileExecution(CLITestCase):
         path = self.temp_path / "script.sql"
         path.write_text("SELECT 1;\nSELECT 2;\n", encoding="utf-8")
         self.cli.db_manager.execute_query_result.return_value = make_result([])
+        self.cli.db_manager.execute_query_result_cancellable.return_value = make_result([])
         args = self.parse(["file", "db", str(path), "-c"])
 
         _, output = self.capture(self.cli.execute_file, args)
@@ -461,6 +463,7 @@ class TestSqlFileExecution(CLITestCase):
         path = self.temp_path / "script.sql"
         path.write_text("SELECT 1;\nSELECT 2;\n", encoding="utf-8")
         self.cli.db_manager.execute_query_result.side_effect = ConfigError("boom")
+        self.cli.db_manager.execute_query_result_cancellable.side_effect = ConfigError("boom")
         args = self.parse(["file", "db", str(path)])
 
         with self.assertRaises(SystemExit) as context:
@@ -573,7 +576,10 @@ class TestCommandHandlers(CLITestCase):
 
     def test_execute_query_with_output_file(self) -> None:
         """query 子命令把结果写入文件"""
-        self.cli.db_manager.execute_query_result.return_value = make_result([{"id": 1}])
+        result = make_result([{"id": 1}])
+        self.cli.db_manager.execute_query_result.return_value = result
+        self.cli.db_manager.execute_query_result_cancellable.return_value = result
+        self.cli.db_manager.execute_query_result_cancellable.return_value = result
         out_path = self.temp_path / "rows.csv"
         args = self.parse(["query", "db", "SELECT 1", "-o", str(out_path)])
         _, output = self.capture(self.cli.execute_query, args)
@@ -593,6 +599,7 @@ class TestCommandHandlers(CLITestCase):
         outputs = []
         with mock.patch("builtins.input", side_effect=["help", "SELECT 1", "exit"]):
             self.cli.db_manager.execute_query_result.return_value = make_result([])
+            self.cli.db_manager.execute_query_result_cancellable.return_value = make_result([])
             _, output = self.capture(
                 self.cli.interactive_shell, self.parse(["shell", "db"])
             )
@@ -649,6 +656,7 @@ class TestCommandHandlerFailures(CLITestCase):
     def test_execute_query_failure(self) -> None:
         """query 执行失败时友好退出"""
         self.cli.db_manager.execute_query_result.side_effect = DatabaseError("boom")
+        self.cli.db_manager.execute_query_result_cancellable.side_effect = DatabaseError("boom")
         self._assert_exit_1(self.cli.execute_query, ["query", "db", "SELECT 1"])
 
     def test_execute_command_failure(self) -> None:
@@ -659,6 +667,7 @@ class TestCommandHandlerFailures(CLITestCase):
     def test_save_output_oserror_is_friendly(self) -> None:
         """导出目录不存在时应给出中文提示而非裸 traceback"""
         self.cli.db_manager.execute_query_result.return_value = make_result([{"id": 1}])
+        self.cli.db_manager.execute_query_result_cancellable.return_value = make_result([{"id": 1}])
         bad_path = str(self.temp_path / "no_such_dir" / "out.csv")
 
         output = self._assert_exit_1(

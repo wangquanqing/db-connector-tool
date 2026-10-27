@@ -756,3 +756,76 @@ class TestRealDatabase(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestQueryCancellationIntegration(IsolatedTestCase):
+    """查询取消的集成验证（不依赖真实 Ctrl+C）
+
+    真实的信号投递会打断 ``Thread.start()`` 内部等待，在单进程测试里
+    不稳定。这里验证的是**取消机制本身**：直接调 ``cancel_query``，
+    确认它能打断正在跑的查询且连接可继续用。
+    """
+
+    def _sqlite_driver(self):
+        """构造一个 SQLite 驱动"""
+        from src.db_connector_tool.drivers.sqlalchemy_driver import SQLAlchemyDriver
+
+        return SQLAlchemyDriver({"type": "sqlite", "database": ":memory:"})
+
+    def test_sqlite_interrupt_stops_running_query(self) -> None:
+        """SQLite 的 interrupt() 能打断正在执行的查询
+
+        用 DBAPI 层直接验证（不经 SQLAlchemy 连接池，避免线程与池的
+        交互干扰判定）：拿到原始 sqlite3 连接，另起线程跑长查询，
+        主线程调 interrupt()。
+        """
+        import sqlite3
+        import threading
+        import time as time_mod
+
+        raw = sqlite3.connect(":memory:", check_same_thread=False)
+        long_sql = (
+            "WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL "
+            "SELECT x+1 FROM c WHERE x < 50000000) SELECT count(*) FROM c"
+        )
+        state = {"done": False, "outcome": None}
+
+        def work() -> None:
+            """跑长查询"""
+            try:
+                raw.execute(long_sql).fetchall()
+                state["outcome"] = "completed"
+            except Exception as exc:  # pylint: disable=broad-except
+                state["outcome"] = type(exc).__name__
+            finally:
+                state["done"] = True
+
+        thread = threading.Thread(target=work, daemon=True)
+        thread.start()
+        time_mod.sleep(0.4)  # 让它真的开始算
+
+        start = time_mod.time()
+        raw.interrupt()  # SQLite 的标准打断方式
+        thread.join(timeout=10)
+        elapsed = time_mod.time() - start
+
+        raw.close()
+        self.assertTrue(state["done"], msg="interrupt 后查询未结束")
+        self.assertNotEqual(state["outcome"], "completed", msg="查询竟然跑完了")
+        self.assertLess(elapsed, 6, msg=f"interrupt 生效太慢: {elapsed:.1f}s")
+
+    def test_cancellable_entry_returns_same_result(self) -> None:
+        """可取消入口在正常路径下与普通入口结果一致"""
+        driver = self._sqlite_driver()
+        normal = driver.execute_query_result("SELECT 1 AS a, 2 AS b")
+        cancellable = driver.execute_query_result_cancellable("SELECT 1 AS a, 2 AS b")
+        self.assertEqual(cancellable.rows, normal.rows)
+        self.assertEqual(cancellable.column_names(), normal.column_names())
+
+    def test_unsupported_dialect_reports_clearly(self) -> None:
+        """GBase / SQL Server 的取消能力查询必须为 False"""
+        from src.db_connector_tool.drivers.query_cancel import supports_cancel
+
+        self.assertFalse(supports_cancel("gbase8s"))
+        self.assertFalse(supports_cancel("sqlserver"))
+        self.assertTrue(supports_cancel("postgresql"))
