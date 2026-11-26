@@ -37,7 +37,7 @@ from ..core.result import (
     row_values,
 )
 from ..utils.logging_utils import get_logger
-from .query_cancel import cancel_query, run_cancellable
+from .query_cancel import cancel_query, run_cancellable, supports_cancel
 from .timeout_control import (
     apply_server_timeout,
     is_timeout_error,
@@ -541,6 +541,31 @@ class ResultFetchMixin:
         self._ensure_engine()
         self._validate_sql_query(query)
         execute = self._query_context(query, parameters)
+
+        # 关键分支：不支持取消的方言**必须走主线程**。
+        #
+        # 原因：GBase 8s 的 JDBC 连接一旦在**工作线程**中创建，即使后续
+        # ``close()`` 也正确执行，整个 Python 进程在退出时会永久阻塞
+        # （JPype 的 JVM 与创建它的线程绑定，atexit 阶段等不到线程结束）。
+        # 实测：主线程 2.96s 正常退出；工作线程 → 挂死 >30s，连
+        # ``jpype.shutdownJVM()`` 都会阻塞。
+        #
+        # 这些方言本来也不支持取消（见 query_cancel.UNCANCELLABLE_DIALECTS），
+        # 为它们起工作线程只有害无益。
+        dialect_name = str(
+            getattr(getattr(self.engine, "dialect", None), "name", "") or ""
+        ).lower()
+        if not supports_cancel(dialect_name):
+            logger.debug(
+                "%s 不支持取消且不能在工作线程执行，改用主线程直连", dialect_name
+            )
+            with self.engine.connect() as connection:
+                with self._with_timeout(connection, timeout, "query"):
+                    sql_result = execute(connection)
+                    metadata = self._read_column_metadata(sql_result.cursor)
+                    raw_rows = sql_result.all()
+                    return QueryResult.from_rows(raw_rows, metadata)
+
         holder: Dict[str, Any] = {}
 
         def _work() -> QueryResult:

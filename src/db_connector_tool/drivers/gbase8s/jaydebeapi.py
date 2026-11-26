@@ -22,7 +22,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from ...utils.logging_utils import get_logger
 from ...utils.path_utils import PathHelper
 from . import converters, jar_downloader
-from .base import GBase8sDialect, normalize_sqlmode
+from .base import GBase8sDialect, is_transaction_unsupported, normalize_sqlmode
 
 logger = get_logger(__name__)
 
@@ -229,6 +229,65 @@ def _install_native_access_flag() -> bool:
     return True
 
 
+def disable_autocommit(dbapi_connection: Any) -> bool:
+    """尝试关闭 JDBC 自动提交；服务器不支持时**降级为自动提交**
+
+    GBase 8s 的部分服务器版本不支持显式事务（实测 12.10 新版），
+    对 ``setAutoCommit(False)`` / ``commit()`` / ``rollback()`` 统一抛
+    ``java.sql.SQLException: 不支持事务``。
+
+    这类服务器上**不能**把失败当作致命错误 —— 否则连接一建立就失败，
+    整个数据库不可用。正确做法是保持自动提交继续工作：
+    单条写语句立即生效，对「执行 SQL」的主用途没有影响。
+
+    Args:
+        dbapi_connection: jaydebeapi 连接（需带 ``jconn``）
+
+    Returns:
+        bool: ``True`` 表示成功关闭了自动提交（支持事务模式）；
+        ``False`` 表示服务器不支持，已降级为自动提交
+
+    Example:
+        >>> disable_autocommit(dbapi_connection)   # doctest: +SKIP
+        True
+    """
+    jconn = getattr(dbapi_connection, "jconn", None)
+    if jconn is None:
+        logger.debug("连接无 jconn 属性，跳过自动提交设置")
+        return False
+    try:
+        jconn.setAutoCommit(False)
+        logger.debug("已关闭 JDBC 自动提交（事务模式）")
+        return True
+    except Exception as error:  # pylint: disable=broad-except
+        # 典型文案：java.sql.SQLException: 不支持事务
+        if is_transaction_unsupported(error):
+            logger.warning(
+                "该 GBase 服务器不支持显式事务（%s），将保持自动提交模式运行；"
+                "单条写语句不受影响，但多语句事务不可用",
+                str(error).splitlines()[0][:80],
+            )
+            # 确保仍处于自动提交（有些驱动在失败后状态不确定）
+            _force_autocommit_on(jconn)
+            return False
+        # 其它异常同样不应阻断连接：事务模式失败不是「连不上」的理由
+        logger.warning("关闭自动提交失败（%s），保持自动提交模式", error)
+        _force_autocommit_on(jconn)
+        return False
+
+
+# 判定「该库不支持事务」的实现在 base 模块（`is_transaction_unsupported`），
+# 这里直接复用，避免两处判断逻辑漂移。
+
+
+def _force_autocommit_on(jconn: Any) -> None:
+    """尽力把连接置回自动提交（失败静默）"""
+    try:
+        jconn.setAutoCommit(True)
+    except Exception as error:  # pylint: disable=broad-except
+        logger.debug("恢复自动提交失败（可忽略）: %s", error)
+
+
 def find_jdbc_jar(explicit: Optional[str] = None) -> Optional[str]:
     """定位 GBase 8s 的 JDBC 驱动 jar
 
@@ -376,17 +435,27 @@ class GBase8sDialect_jaydebeapi(GBase8sDialect):  # NOSONAR
         return [f"{key}={value}" for key, value in properties.items()]
 
     def on_connect(self) -> Any:
-        """连接建立后的收尾：安装取值转换器 + 关闭 JDBC 自动提交
+        """连接建立后的收尾：安装取值转换器 + 尝试关闭 JDBC 自动提交
 
         此处是安装归一化转换器的最佳时机——JVM 已启动（``java.sql.Types``
         可用），且连接刚建立。JayDeBeApi 的 ``_converters`` 是共享字典，
         原地更新后本连接与后续连接都会生效（见
         :func:`converters.install_converters`）。
+
+        .. note::
+            关闭自动提交**不是必需的**：部分 GBase 服务器版本（实测
+            12.10 新版）根本不支持显式事务，``setAutoCommit(False)``、
+            ``commit()``、``rollback()`` 统一抛
+            ``java.sql.SQLException: 不支持事务``。
+
+            此时**必须容忍**并保持自动提交模式继续工作 —— 否则连接一建立
+            就失败，整个数据库不可用。单条写语句在自动提交下立即生效，
+            对「执行 SQL」这个主用途没有影响；只是多语句事务不再可用。
         """
 
         def connect(dbapi_connection: Any) -> None:
             self._install_value_converters()
-            dbapi_connection.jconn.setAutoCommit(False)
+            disable_autocommit(dbapi_connection)
 
         return connect
 
@@ -437,16 +506,52 @@ class GBase8sDialect_jaydebeapi(GBase8sDialect):  # NOSONAR
             return True
         return bool(getattr(connection, "_closed", False))
 
+    def do_commit(self, dbapi_connection: Any) -> None:
+        """提交事务；服务器不支持事务时静默跳过
+
+        背景：GBase 的部分数据库是**不记日志（No Logging）**模式，
+        这类库根本不存在事务概念 —— ``commit()`` / ``rollback()`` /
+        ``setAutoCommit(False)`` 统一抛 ``java.sql.SQLException: 不支持事务``。
+
+        而写操作在自动提交模式下**已经立即生效**，无需 commit。
+        因此这里遇到「不支持事务」必须静默放过，否则
+        ``CREATE TABLE`` / ``INSERT`` 这类最基础的操作全部失败，
+        数据库变得完全不可用。
+
+        .. note::
+            其它 commit 异常仍然正常抛出（不掩盖真实问题）。
+        """
+        if getattr(dbapi_connection, "_closed", False):
+            return
+        try:
+            dbapi_connection.commit()
+        except Exception as error:  # pylint: disable=broad-except
+            if is_transaction_unsupported(error):
+                logger.debug("该库不支持事务，跳过 commit（写操作已自动提交）")
+                return
+            raise
+
     def do_rollback(self, dbapi_connection: Any) -> None:
-        """回滚事务；连接已关闭时直接返回（JayDeBeApi 关闭后回滚会抛异常）"""
+        """回滚事务；连接已关闭或服务器不支持事务时跳过
+
+        - 连接已关闭：JayDeBeApi 关闭后回滚会抛异常，直接返回；
+        - **不记日志的库**：无事务可回，静默跳过（否则每次连接清理都报错）。
+
+        Args:
+            dbapi_connection: jaydebeapi 连接
+        """
         if getattr(dbapi_connection, "_closed", False):
             return
         try:
             dbapi_connection.rollback()
-        except self.dbapi.Error:  # type: ignore[union-attr]  # pragma: no cover
-            # 关闭阶段回滚失败属预期（连接可能已失效），静默忽略。
-            # 需要构造 dbapi.Error 实例才能触发，故标注。
-            pass
+        except Exception as error:  # pylint: disable=broad-except
+            if is_transaction_unsupported(error):
+                logger.debug("该库不支持事务，跳过 rollback")
+                return
+            # 关闭阶段回滚失败属预期（连接可能已失效），静默忽略
+            if isinstance(error, self.dbapi.Error):  # type: ignore[union-attr]
+                return
+            raise
 
 
 # 供方言注册机制识别

@@ -83,6 +83,48 @@ ISOLATION_LEVELS: Dict[str, str] = {
     "SERIALIZABLE": "SERIALIZABLE",
 }
 
+#: 判定「该库不支持事务」的文案特征
+#:
+#: GBase 的**不记日志（No Logging）**数据库没有事务概念，对
+#: ``setAutoCommit(False)`` / ``commit()`` / ``rollback()`` /
+#: ``setTransactionIsolation()`` 统一抛这类消息。
+_TRANSACTION_UNSUPPORTED_MARKERS = (
+    "不支持事务",
+    "不记日志",
+    "transaction not supported",
+    "transactions are not supported",
+    "not support transaction",
+)
+
+
+def is_transaction_unsupported(error: BaseException) -> bool:
+    """判断异常是否表示「该库不支持事务」
+
+    Args:
+        error: 捕获到的异常
+
+    Returns:
+        bool: 是不支持事务返回 ``True``
+
+    Example:
+        >>> is_transaction_unsupported(RuntimeError("java.sql.SQLException: 不支持事务"))
+        True
+        >>> is_transaction_unsupported(RuntimeError("语法错误"))
+        False
+    """
+    text_of_error = str(error).lower()
+    return any(
+        marker in text_of_error for marker in _TRANSACTION_UNSUPPORTED_MARKERS
+    )
+
+
+def _force_autocommit(dbapi_connection: Any) -> None:
+    """尽力把连接置回自动提交（失败静默）"""
+    try:
+        dbapi_connection.jconn.setAutoCommit(True)
+    except Exception as error:  # pylint: disable=broad-except
+        logger.debug("恢复自动提交失败（可忽略）: %s", error)
+
 
 def normalize_sqlmode(value: Optional[str]) -> str:
     """校验并规范化 sqlmode 取值
@@ -830,11 +872,23 @@ class GBase8sDialect(  # type: ignore[override]
         if normalized == "AUTOCOMMIT":
             dbapi_connection.jconn.setAutoCommit(True)
             return
-        dbapi_connection.jconn.setAutoCommit(False)
-        jdbc_constant = JDBC_ISOLATION_CONSTANTS.get(normalized)
-        if jdbc_constant is not None:
-            dbapi_connection.jconn.setTransactionIsolation(jdbc_constant)
-            return
+        # 不支持事务的库（不记日志 No Logging）：没有隔离级别可设，
+        # 保持自动提交即可，不视为错误（否则连接池每次建连都会失败）。
+        try:
+            dbapi_connection.jconn.setAutoCommit(False)
+            jdbc_constant = JDBC_ISOLATION_CONSTANTS.get(normalized)
+            if jdbc_constant is not None:
+                dbapi_connection.jconn.setTransactionIsolation(jdbc_constant)
+                return
+        except Exception as error:  # pylint: disable=broad-except
+            if is_transaction_unsupported(error):
+                logger.debug(
+                    "该库不支持事务/隔离级别（%s），保持自动提交",
+                    str(error).splitlines()[0][:60],
+                )
+                _force_autocommit(dbapi_connection)
+                return
+            raise
         # 极少数未映射到 JDBC 常量的级别：退回 SQL（SERIALIZABLE 已覆盖，
         # 此处仅为防御性兜底，保持行为明确而非静默忽略）
         statement = f"SET ISOLATION TO {ISOLATION_LEVELS[normalized]}"
